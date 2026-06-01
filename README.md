@@ -13,6 +13,7 @@ Digital AGI-oriented Local Stateful Agent Core for Orange Pi 5. This project doe
 - Read-only ToolExecutor and system snapshot
 - WorkspaceExecutor bounded to `/home/ubuntu/agent_workspace`
 - ProjectSpec and workspace artifact tracking
+- Runtime self-map loop for host/service/git/config-presence awareness
 - systemd unit templates
 
 ## Basic Commands
@@ -28,6 +29,8 @@ agentctl policy-check "apt-get install nginx"
 agentctl eval run policy
 agentctl audit
 agentctl metrics
+agentctl self-map refresh
+agentctl self-map show
 agentctl workspace init
 agentctl workspace report --title "Daily workspace status"
 agentctl autonomy show
@@ -55,6 +58,17 @@ agentctl autonomy set full_device_lab
 agentctl action run "printf lab-ok"
 agentctl action history
 agentctl autonomy set safe
+```
+
+## Runtime Self-Map
+
+`self-map` is a safe runtime body map. It records where Core is running, recent git state, service/timer state, autonomy profile, schema/eval summary, and config presence booleans. It does not read or store `.env` values, tokens, private keys, or passwords.
+
+The normal tick loop refreshes it on cooldown, so Discord summaries and chat rendering can use recent verified runtime context without re-running heavy checks on every message.
+
+```bash
+agentctl self-map refresh
+agentctl self-map show
 ```
 
 ## Codex Runtime Tuning

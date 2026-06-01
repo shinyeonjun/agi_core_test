@@ -17,6 +17,7 @@ from agent.core.learner import list_reflections, list_skills, upsert_skill, upda
 from agent.core.metrics import collect_metrics
 from agent.core.pipeline import run_talk
 from agent.core.policy import ActionProposal, PolicyEngine
+from agent.core.self_map import latest_self_map, refresh_self_map, self_map_brief
 from agent.core.state import load_state, save_state
 from agent.core.style import add_style_example, apply_style_feedback, get_active_style_profile, list_style_examples, list_style_feedback, seed_default_style_profile, style_directives
 from agent.eval.harness import list_eval_runs, list_tasks, run_suite
@@ -323,6 +324,24 @@ def cmd_metrics(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_self_map(args: argparse.Namespace) -> int:
+    if args.self_map_command == "refresh":
+        result = refresh_self_map()
+        if args.full:
+            print_json(result)
+        else:
+            print_json({key: result[key] for key in ["id", "changed", "fingerprint", "summary"]})
+        return 0
+    if args.self_map_command == "show":
+        item = latest_self_map()
+        if not item:
+            print_json({"available": False, "reason": "no_self_map_yet"})
+            return 0
+        print_json(item if args.full else self_map_brief())
+        return 0
+    raise ValueError(f"unknown self-map command: {args.self_map_command}")
+
+
 def cmd_autonomy(args: argparse.Namespace) -> int:
     if args.autonomy_command == "show":
         print_json(get_autonomy_state())
@@ -522,6 +541,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("snapshot"); p.set_defaults(func=cmd_snapshot)
     p = sub.add_parser("backup"); p.add_argument("--label", default="manual"); p.set_defaults(func=cmd_backup)
     p = sub.add_parser("metrics"); p.add_argument("--json", action="store_true"); p.set_defaults(func=cmd_metrics)
+    p = sub.add_parser("self-map"); self_map_sub = p.add_subparsers(dest="self_map_command", required=True)
+    p_self_map_refresh = self_map_sub.add_parser("refresh"); p_self_map_refresh.add_argument("--full", action="store_true"); p_self_map_refresh.set_defaults(func=cmd_self_map)
+    p_self_map_show = self_map_sub.add_parser("show"); p_self_map_show.add_argument("--full", action="store_true"); p_self_map_show.set_defaults(func=cmd_self_map)
     p = sub.add_parser("notify"); notify_sub = p.add_subparsers(dest="notify_command", required=True)
     p_notify_summary = notify_sub.add_parser("test-summary"); p_notify_summary.add_argument("--dry-run", action="store_true"); p_notify_summary.set_defaults(func=cmd_notify)
     p_notify_update = notify_sub.add_parser("test-update"); p_notify_update.add_argument("--dry-run", action="store_true"); p_notify_update.set_defaults(func=cmd_notify)

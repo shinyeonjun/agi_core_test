@@ -19,7 +19,7 @@ from agent.renderer.validator import validate_codex_output
 _ALLOWED_DECISION_KEYS = {
     "version", "kind", "created_at", "user_input", "selected_goal", "selected_goal_id",
     "drive_scores", "policy_summary", "core_judgment", "confidence", "decision_confidence",
-    "risk_level", "must_include", "must_not_include", "renderer_hint", "renderer",
+    "risk_level", "metrics", "runtime_self_map", "must_include", "must_not_include", "renderer_hint", "renderer",
     "language_interpretation", "style_profile", "style_directives", "style_feedback",
     "user_directed_goal", "user_goal_created",
 }

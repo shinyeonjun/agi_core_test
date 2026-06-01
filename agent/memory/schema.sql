@@ -256,6 +256,17 @@ CREATE TABLE IF NOT EXISTS system_snapshots (
     raw_json TEXT
 );
 
+CREATE TABLE IF NOT EXISTS self_maps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    changed INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_self_maps_created ON self_maps(created_at);
+CREATE INDEX IF NOT EXISTS idx_self_maps_fingerprint ON self_maps(fingerprint);
+
 CREATE TABLE IF NOT EXISTS renderer_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts TEXT NOT NULL,
@@ -411,4 +422,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR REPLACE INTO schema_meta (key, value)
-VALUES ('schema_version', '0.8.0-alpha');
+VALUES ('schema_version', '0.8.1-alpha');

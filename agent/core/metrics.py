@@ -76,6 +76,7 @@ def collect_metrics() -> dict[str, Any]:
             "action_runs_count": _count(conn, "SELECT COUNT(*) AS count FROM action_runs"),
             "action_proposals_count": _count(conn, "SELECT COUNT(*) AS count FROM action_proposals"),
             "repeated_action_suppressed_count": _count(conn, "SELECT COUNT(*) AS count FROM action_proposals WHERE reason = 'duplicate_recent_action'"),
+            "self_map_count": _count(conn, "SELECT COUNT(*) AS count FROM self_maps"),
             "action_success_rate_24h": action_success_rate,
             "action_timeout_count_24h": action_timeout_count,
             "action_blocked_count_24h": action_blocked_count,

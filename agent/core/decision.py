@@ -8,7 +8,9 @@ from agent.config.defaults import now_kst
 from agent.core.drives import compute_drives
 from agent.core.goals import create_goal
 from agent.core.learner import retrieve_skills
+from agent.core.metrics import collect_metrics
 from agent.core.policy import PolicyEngine
+from agent.core.self_map import self_map_brief
 from agent.core.style import apply_style_feedback, get_active_style_profile, style_directives
 from agent.core.user_goals import maybe_create_user_goal
 from agent.language.engine import interpret_user_message
@@ -24,6 +26,8 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
     renderer_name = os.getenv("AGENT_CHAT_RENDERER", "codex").strip().lower() or "codex"
     answer_goal_id = create_goal("Answer user input", user_message, goal_type="answer_user", status="done", priority=0.95, risk_level="low", metadata={"renderer": renderer_name, "source_event_id": source_event_id}, dedupe=False)
     drives = compute_drives()
+    metrics = collect_metrics()
+    runtime_self_map = self_map_brief()
     policy = PolicyEngine().classify_decision(user_message, action_type="user_message")
     skills = retrieve_skills(user_message, tags=["talk", "core"], limit=3)
     selected_goal = user_goal or {"id": answer_goal_id, "title": "Answer user input", "goal_type": "answer_user"}
@@ -48,6 +52,8 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
         "selected_memories": memories,
         "relevant_skills": skills,
         "drive_scores": drives,
+        "metrics": metrics,
+        "runtime_self_map": runtime_self_map,
         "policy_summary": {"risk_level": policy.risk_level, "requires_approval": policy.requires_approval, "denied": policy.denied, "reason": policy.reason, "matched_rules": policy.matched_rules},
         "core_judgment": "Core stored the input as an event and used memory, skill, goal, and state to build a verifiable response.",
         "confidence": 0.82,

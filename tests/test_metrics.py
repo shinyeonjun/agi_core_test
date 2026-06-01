@@ -24,6 +24,7 @@ METRIC_KEYS = {
     "action_runs_count",
     "action_proposals_count",
     "repeated_action_suppressed_count",
+    "self_map_count",
     "action_success_rate_24h",
     "action_timeout_count_24h",
     "action_blocked_count_24h",

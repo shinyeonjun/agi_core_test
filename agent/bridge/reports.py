@@ -13,16 +13,21 @@ from agent.core.goals import list_goals
 from agent.core.goal_generator import list_goal_candidates, meaningful_open_goals
 from agent.core.learner import list_reflections
 from agent.core.metrics import collect_metrics
+from agent.core.self_map import self_map_brief
 from agent.lab.proposals import list_action_proposals, proposal_status_counts
 from agent.tools.action_log import get_action_run, list_action_runs
 
 
 def build_daily_summary() -> str:
     metrics = collect_metrics()
+    self_map = self_map_brief()
     approvals = ApprovalStore().list(status=None, limit=20)
     actions = list_action_runs(20)
     goals = list_goals(limit=10)
-    return format_daily_summary(metrics, approvals, actions, goals)
+    content = format_daily_summary(metrics, approvals, actions, goals)
+    if self_map:
+        content += "\n\n**\ubab8 \uc0c1\ud0dc**\n" + _line("\ucd5c\uadfc \ud655\uc778", self_map.get("summary"))
+    return content
 
 
 def _line(prefix: str, value: object) -> str:
@@ -175,6 +180,7 @@ def build_observation_dashboard() -> str:
     events = list_events(limit=16)
     reflections = list_reflections(limit=5)
     approvals = ApprovalStore().list_pending()
+    self_map = self_map_brief()
     last_action = actions[0] if actions else None
     interesting_events = _interesting_events(events)
     last_event = interesting_events[0] if interesting_events else (events[0] if events else None)
@@ -189,6 +195,13 @@ def build_observation_dashboard() -> str:
         _line("\uc2b9\uc778 \ub300\uae30", f"{len(approvals)}\uac74"),
         _line("\ucd5c\uadfc action", f"#{last_action.get('id')} {_action_label(last_action)} - {_ko_status(last_action.get('status'))} / {_ko_summary(last_action.get('result_summary'))}" if last_action else "\uc5c6\uc74c"),
         _line("\ucd5c\uadfc event", f"#{last_event.get('id')} {_ko_event(last_event)}" if last_event else "\uc5c6\uc74c"),
+    ]
+    if self_map:
+        services = self_map.get("services") or {}
+        active_count = len([state for state in services.values() if state == "active"])
+        lines.append(_line("\ubab8 \uc0c1\ud0dc", self_map.get("summary")))
+        lines.append(_line("\uc0c1\uc8fc \ub8e8\ud504", f"{active_count}\uac1c active / self-map #{self_map.get('id')}"))
+    lines.extend([
         "",
         "**24\uc2dc\uac04 \uc9c0\ud45c**",
         _line("tick", f"{metrics.get('tick_count_24h')}\ud68c"),
@@ -198,7 +211,7 @@ def build_observation_dashboard() -> str:
         _line("critical \uc815\ucc45 \uac10\uc9c0", f"{metrics.get('policy_critical_count_24h')}\uac74"),
         "",
         "**\ucd5c\uadfc action**",
-    ]
+    ])
     if actions:
         for action in actions[:4]:
             lines.append(f"- #{action.get('id')} {_action_label(action)}: {_ko_status(action.get('status'))} / {_ko_summary(action.get('result_summary'))}")

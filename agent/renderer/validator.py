@@ -17,7 +17,8 @@ INTERNAL_FIELD_PATTERNS = (
     re.compile(r"\bsource_event_id\b", re.IGNORECASE),
     re.compile(r"\bmust_include\b", re.IGNORECASE),
     re.compile(r"\bmust_not_include\b", re.IGNORECASE),
-    re.compile(r"`(?:selected_goal_id|user_goal_created|policy_summary|language_interpretation|renderer)`", re.IGNORECASE),
+    re.compile(r"\bruntime_self_map\b", re.IGNORECASE),
+    re.compile(r"`(?:selected_goal_id|user_goal_created|policy_summary|language_interpretation|runtime_self_map|renderer)`", re.IGNORECASE),
 )
 
 
