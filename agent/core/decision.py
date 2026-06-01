@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import os
+
 from agent.config.defaults import now_kst
 from agent.core.drives import compute_drives
 from agent.core.goals import create_goal
@@ -19,7 +21,8 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
     style_feedback = apply_style_feedback(user_message, interpretation=language_interpretation)
     style_profile = get_active_style_profile()
     user_goal = maybe_create_user_goal(user_message, source_event_id=source_event_id, interpretation=language_interpretation)
-    answer_goal_id = create_goal("Answer user input", user_message, goal_type="answer_user", status="done", priority=0.95, risk_level="low", metadata={"renderer": "fallback", "source_event_id": source_event_id}, dedupe=False)
+    renderer_name = os.getenv("AGENT_CHAT_RENDERER", "codex").strip().lower() or "codex"
+    answer_goal_id = create_goal("Answer user input", user_message, goal_type="answer_user", status="done", priority=0.95, risk_level="low", metadata={"renderer": renderer_name, "source_event_id": source_event_id}, dedupe=False)
     drives = compute_drives()
     policy = PolicyEngine().classify_decision(user_message, action_type="user_message")
     skills = retrieve_skills(user_message, tags=["talk", "core"], limit=3)
@@ -50,8 +53,8 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
         "confidence": 0.82,
         "decision_confidence": 0.82,
         "risk_level": policy.risk_level,
-        "renderer": "fallback",
-        "must_include": ["v0.8", "Core", "event", "goal"],
+        "renderer": renderer_name,
+        "must_include": [],
         "must_not_include": ["auto sudo execution", "consciousness emerged", "OS change without approval", "AGI achieved"],
         "renderer_hint": {"language": "ko", "style": "calm, precise"},
     }

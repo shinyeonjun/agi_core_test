@@ -1,6 +1,8 @@
 import json
+from types import SimpleNamespace
 
-from agent.renderer.codex_renderer import sanitize_decision_for_renderer
+from agent.renderer.codex_renderer import render_with_codex, sanitize_decision_for_renderer
+from agent.renderer.engine import render_response
 from agent.renderer.fallback_renderer import render
 from agent.renderer.validator import validate_codex_output, validate_output
 
@@ -54,3 +56,45 @@ def test_codex_renderer_sanitizes_sensitive_decision_fields():
     assert "PRIVATE KEY" not in payload
     assert ".env" not in payload
     assert "token=abc123" not in payload
+
+
+def test_render_response_uses_codex_strategy(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENT_CHAT_RENDERER", "codex")
+    monkeypatch.setenv("AGENT_CORE_DB_PATH", str(tmp_path / "agent.db"))
+    monkeypatch.setenv("AGENT_CORE_STATE_PATH", str(tmp_path / "state.json"))
+
+    def fake_render(decision):
+        return f"codex reply for {decision['user_input']}"
+
+    monkeypatch.setattr("agent.renderer.engine.render_with_codex", fake_render)
+
+    assert render_response({"user_input": "hello"}) == "codex reply for hello"
+
+
+def test_codex_renderer_uses_output_last_message(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENT_CORE_DB_PATH", str(tmp_path / "agent.db"))
+    monkeypatch.setenv("AGENT_CORE_STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setenv("AGENT_CORE_HOME", str(tmp_path))
+
+    def fake_run(args, **kwargs):
+        assert "--output-last-message" in args
+        assert "--ephemeral" in args
+        assert "--sandbox" in args
+        assert kwargs["stdin"] is not None
+        output_path = args[args.index("--output-last-message") + 1]
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write("응, 자연어 답변으로 처리했어.")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("agent.renderer.codex_renderer.subprocess.run", fake_run)
+
+    text = render_with_codex({
+        "version": "0.8",
+        "user_input": "ㅎㅇ",
+        "selected_goal": {"id": 1, "title": "Answer user input"},
+        "policy_summary": {"risk_level": "low", "requires_approval": False},
+        "must_include": [],
+        "must_not_include": ["AGI achieved"],
+    })
+
+    assert "자연어 답변" in text

@@ -1,6 +1,7 @@
 from agent.bridge.auth import DiscordAuthConfig, classify_context
 from agent.bridge.formatter import split_for_discord, strip_bot_mention
 from agent.bridge.router import DiscordEvent, _approval_summary, _goal_summary, _memory_summary, route_discord_event
+from agent.bridge.formatter import format_chat_reply
 
 
 def config() -> DiscordAuthConfig:
@@ -95,3 +96,18 @@ def test_route_chat_hides_fallback_renderer():
     assert "fallback renderer" not in output
     assert "goal:" not in output
     assert "\uc751" in output
+
+
+def test_format_chat_reply_prefers_core_renderer_text():
+    output = format_chat_reply(
+        "그 너 코어 어떻게 이루어져있어?",
+        {
+            "text": "Core는 language, memory, goal, policy, renderer, scheduler로 나뉘어 있어.",
+            "decision": {
+                "policy_summary": {"risk_level": "low", "requires_approval": False, "denied": False},
+                "language_interpretation": {"intent": "chat", "target": "architecture"},
+            },
+        },
+    )
+
+    assert "language, memory" in output

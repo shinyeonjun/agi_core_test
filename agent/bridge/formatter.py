@@ -272,6 +272,24 @@ def _asks_for_help(text: str) -> bool:
     return any(token in text.lower() for token in ["\ub3c4\uc6c0", "\uba85\ub839", "help", "\ubb50 \ud560", "\uc0ac\uc6a9\ubc95", "\uae30\ub2a5"])
 
 
+def _core_chat_text(core_result: dict[str, Any]) -> str | None:
+    text = compact_text(core_result.get("text"), "").strip()
+    if not text:
+        return None
+    lowered = text.lower()
+    internal_markers = (
+        "fallback renderer response",
+        "core saved the input as an event",
+        "- goal:",
+        "- renderer:",
+        "relevant memories:",
+        "relevant skills:",
+    )
+    if any(marker in lowered for marker in internal_markers):
+        return None
+    return text
+
+
 def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
     decision = core_result.get("decision") or {}
     policy = decision.get("policy_summary") or {}
@@ -312,6 +330,9 @@ def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
             f"\uc774\uc720: {reason}",
             "\ud544\uc694\ud558\uba74 #\uc2b9\uc778 \ucc44\ub110\uc5d0\uc11c \uc2b9\uc778 \ud56d\ubaa9\uc744 \ud655\uc778\ud574\uc918.",
         ])
+    rendered = _core_chat_text(core_result)
+    if rendered:
+        return rendered
     if intent == "feedback":
         if sentiment == "positive":
             return "좋아. 그 방향이 맞다는 피드백으로 기록해둘게."

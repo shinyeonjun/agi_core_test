@@ -15,20 +15,10 @@ dependencies = [
 agentctl = "agent.cli.agentctl:main"
 
 [tool.setuptools]
-packages = [
-  "agent",
-  "agent.bridge",
-  "agent.cli",
-  "agent.config",
-  "agent.core",
-  "agent.eval",
-  "agent.memory",
-  "agent.ops",
-  "agent.renderer",
-  "agent.scheduler",
-  "agent.tools",
-]
 include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["agent*"]
 
 [tool.setuptools.package-data]
 "agent.memory" = ["schema.sql"]
