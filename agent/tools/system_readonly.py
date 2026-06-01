@@ -49,10 +49,23 @@ def run_readonly(name: str) -> dict[str, Any]:
     if name not in READ_ONLY_COMMANDS:
         raise ValueError(f"not allowed read-only command: {name}")
     spec = READ_ONLY_COMMANDS[name]
-    completed = subprocess.run(spec.argv, cwd=project_root(), text=True, capture_output=True, timeout=spec.timeout_seconds, check=False)
-    stdout = redact_output(completed.stdout)
-    stderr = redact_output(completed.stderr)
-    result = {"name": name, "argv": spec.argv, "returncode": completed.returncode, "stdout": stdout, "stderr": stderr, "risk_level": spec.risk_level, "requires_approval": spec.requires_approval}
+    try:
+        completed = subprocess.run(spec.argv, cwd=project_root(), text=True, capture_output=True, timeout=spec.timeout_seconds, check=False)
+        stdout = redact_output(completed.stdout)
+        stderr = redact_output(completed.stderr)
+        returncode = completed.returncode
+        error = None
+    except FileNotFoundError as exc:
+        stdout = ""
+        stderr = redact_output(str(exc))
+        returncode = 127
+        error = "command_not_found"
+    except subprocess.TimeoutExpired as exc:
+        stdout = redact_output(exc.stdout or "") if isinstance(exc.stdout, str) else ""
+        stderr = redact_output(exc.stderr or "") if isinstance(exc.stderr, str) else ""
+        returncode = 124
+        error = "timeout"
+    result = {"name": name, "argv": spec.argv, "returncode": returncode, "stdout": stdout, "stderr": stderr, "risk_level": spec.risk_level, "requires_approval": spec.requires_approval, "error": error}
     init_db()
     with connect() as conn:
         conn.execute(
@@ -60,7 +73,7 @@ def run_readonly(name: str) -> dict[str, Any]:
             INSERT INTO tool_runs (ts, tool_name, action, risk_level, approved, success, result_summary, raw_output, metadata_json)
             VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
             """,
-            (now_kst(), "system_readonly", name, spec.risk_level, 1 if completed.returncode == 0 else 0, f"rc={completed.returncode}", stdout, json.dumps({"stderr": stderr}, ensure_ascii=False)),
+            (now_kst(), "system_readonly", name, spec.risk_level, 1 if returncode == 0 else 0, f"rc={returncode}", stdout, json.dumps({"stderr": stderr, "error": error}, ensure_ascii=False)),
         )
         conn.commit()
     return result

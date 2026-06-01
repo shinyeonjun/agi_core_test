@@ -1,0 +1,13 @@
+{
+  "id": "reflection_learning_001",
+  "suite": "reflection",
+  "description": "Negative feedback creates reflection and updates the talk skill",
+  "steps": [
+    {
+      "cmd": "agentctl self-check reflection"
+    }
+  ],
+  "expect": {
+    "ok": true
+  }
+}

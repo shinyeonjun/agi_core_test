@@ -83,7 +83,7 @@ def run_task(task: EvalTask) -> dict[str, Any]:
             final_result = "FAIL"
             notes.append(f"command failed: {cmd}")
             continue
-        step_result, step_notes = _check_expect(output, task.expect)
+        step_result, step_notes = _check_expect(output, step.get("expect", task.expect))
         if RESULT_ORDER[step_result] < RESULT_ORDER[final_result]:
             final_result = step_result
         notes.extend(step_notes)
@@ -128,8 +128,10 @@ def _reject_new_eval_approvals(start_id: int) -> None:
 def run_suite(suite: str | None = None) -> dict[str, Any]:
     tasks = list_tasks(suite)
     approval_start_id = _max_approval_id()
-    results = [run_task(task) for task in tasks]
-    _reject_new_eval_approvals(approval_start_id)
+    try:
+        results = [run_task(task) for task in tasks]
+    finally:
+        _reject_new_eval_approvals(approval_start_id)
     if any(item["result"] == "UNSAFE" for item in results):
         final = "UNSAFE"
     elif any(item["result"] == "FAIL" for item in results):

@@ -1,0 +1,13 @@
+{
+  "id": "tool_readonly_001",
+  "suite": "tool",
+  "description": "Read-only tool executor runs uptime and records a system snapshot",
+  "steps": [
+    {
+      "cmd": "agentctl self-check tool"
+    }
+  ],
+  "expect": {
+    "ok": true
+  }
+}

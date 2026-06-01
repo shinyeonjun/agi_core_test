@@ -9,7 +9,7 @@ from agent.core.approvals import ApprovalStore
 from agent.core.database import get_schema_version, init_db
 from agent.core.events import list_events, log_event
 from agent.core.goals import list_goals, mark_goal_done
-from agent.core.learner import list_reflections, list_skills, upsert_skill
+from agent.core.learner import list_reflections, list_skills, upsert_skill, update_after_turn
 from agent.core.pipeline import run_talk
 from agent.core.policy import ActionProposal, PolicyEngine
 from agent.core.state import load_state, save_state
@@ -201,6 +201,48 @@ def cmd_audit(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_self_check(args: argparse.Namespace) -> int:
+    if args.area == "bridge":
+        from agent.bridge.auth import DiscordAuthConfig, classify_context
+        from agent.bridge.formatter import split_for_discord, strip_bot_mention
+        config = DiscordAuthConfig(allowed_user_ids={"1"}, allowed_channel_ids={"10"}, user_cooldown_seconds=0)
+        result = {
+            "allowed_dm": classify_context(user_id="1", channel_id="dm", is_dm=True, was_mention=False, author_is_bot=False, config=config) == "conversation",
+            "denied_user": classify_context(user_id="2", channel_id="10", is_dm=False, was_mention=False, author_is_bot=False, config=config) == "denied",
+            "allowed_channel": classify_context(user_id="1", channel_id="10", is_dm=False, was_mention=False, author_is_bot=False, config=config) == "conversation",
+            "mention_strip": strip_bot_mention("<@123> hello") == "hello",
+            "chunking_ok": all(len(chunk) <= 1800 for chunk in split_for_discord("a" * 4000, 1800)),
+        }
+        result["ok"] = all(result.values())
+        print_json(result)
+        return 0 if result["ok"] else 1
+    if args.area == "memory":
+        memory_id = add_memory("digital agi korean memory", "Core remembers \ub514\uc9c0\ud138 AGI context.", memory_type="project_context", tags=["digital_agi", "core"], importance=0.93)
+        results = search_memories("\ub514\uc9c0\ud138 AGI", limit=5)
+        result = {"ok": any(row["id"] == memory_id for row in results), "memory_id": memory_id, "result_count": len(results)}
+        print_json(result)
+        return 0 if result["ok"] else 1
+    if args.area == "reflection":
+        before = len(list_reflections(1000))
+        learner = update_after_turn("\uc544\ub2c8 \ub2e4\uc2dc \ud574\uc918", None, None, {"selected_goal_id": None})
+        after = len(list_reflections(1000))
+        skills = list_skills(100)
+        result = {
+            "ok": learner["feedback"] == "negative" and after > before and any(skill["name"] == "core_talk_pipeline" for skill in skills),
+            "feedback": learner["feedback"],
+            "reflection_created": after > before,
+        }
+        print_json(result)
+        return 0 if result["ok"] else 1
+    if args.area == "tool":
+        uptime = run_readonly("uptime")
+        snapshot = system_snapshot()
+        result = {"ok": uptime["requires_approval"] is False and uptime["risk_level"] == "medium" and "snapshot_id" in snapshot, "uptime_rc": uptime["returncode"], "snapshot_id": snapshot.get("snapshot_id")}
+        print_json(result)
+        return 0 if result["ok"] else 1
+    raise ValueError(f"unknown self-check area: {args.area}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agentctl")
     parser.add_argument("--version", action="version", version=f"agent-core {__version__}")
@@ -243,6 +285,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("snapshot"); p.set_defaults(func=cmd_snapshot)
     p = sub.add_parser("backup"); p.add_argument("--label", default="manual"); p.set_defaults(func=cmd_backup)
     p = sub.add_parser("audit"); p.set_defaults(func=cmd_audit)
+    p = sub.add_parser("self-check"); p.add_argument("area", choices=["bridge", "memory", "reflection", "tool"]); p.set_defaults(func=cmd_self_check)
 
     return parser
 

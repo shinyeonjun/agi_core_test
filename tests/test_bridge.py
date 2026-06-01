@@ -45,3 +45,9 @@ def test_route_command_state_returns_chunks():
 def test_bot_message_ignored():
     event = DiscordEvent(None, "10", "1", "m2", False, False, "hello", author_is_bot=True)
     assert route_discord_event(event, config()) == []
+
+
+
+def test_self_check_bridge_cli_shape():
+    from agent.cli.agentctl import main
+    assert main(["self-check", "bridge"]) == 0

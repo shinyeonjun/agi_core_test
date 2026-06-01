@@ -37,7 +37,7 @@ def add_memory(
 
 def _query_terms(query: str) -> list[str]:
     terms = []
-    for term in re.findall(r"[\w?-?]+", query.lower()):
+    for term in re.findall(r"[0-9A-Za-z_\uac00-\ud7a3]+", query.lower()):
         if len(term) >= 2 and term not in terms:
             terms.append(term)
     return terms[:8]

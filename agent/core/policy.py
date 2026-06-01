@@ -64,11 +64,11 @@ def _rx(pattern: str) -> re.Pattern[str]:
 
 class PolicyEngine:
     deny_rules: tuple[PolicyRule, ...] = (
-        PolicyRule("root_delete", _rx(r"(?:^|[;&|\s])rm\s+-[rfRf-]*\s*/(?:\s|$)"), "critical", True, "root_delete_denied"),
+        PolicyRule("root_delete", _rx(r"(?:^|[;&|\s])rm\s+(?:--\s+)?-[^\s]*[rR][^\s]*[fF][^\s]*(?:\s+--)?\s+/(?:\*|\.{1,2}(?:/)?|\s|$)"), "critical", True, "root_delete_denied"),
         PolicyRule("ssh_dir", _rx(r"(?:~|/home/[^\s;&|]+|/root)/\.ssh(?:/|\s|$)"), "critical", True, "ssh_key_access_denied"),
         PolicyRule("private_key", _rx(r"\b(id_rsa|id_ed25519|authorized_keys)\b"), "critical", True, "ssh_key_access_denied"),
         PolicyRule("env_file", _rx(r"(?:^|[\s;&|/])\.env(?:\s|$)"), "critical", True, "env_access_denied"),
-        PolicyRule("secret_text", _rx(r"\b(secret|api[_-]?key|authorization:\s*bearer|token=|token:)"), "critical", True, "secret_access_denied"),
+        PolicyRule("secret_text", _rx(r"\b(secret|api[_-]?key|authorization:\s*bearer|token=|token:|token\.(?:txt|json|env|key)|secret\.(?:txt|json|env|key))"), "critical", True, "secret_access_denied"),
         PolicyRule("external_secret_send", _rx(r"\b(external secret|send secret|upload .*secret)\b"), "critical", True, "external_secret_send_denied"),
     )
     approval_rules: tuple[PolicyRule, ...] = (

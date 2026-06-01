@@ -111,3 +111,24 @@ def test_policy_decision_contract():
     assert decision.normalized_text == "apt-get install nginx"
     assert decision.reason == "approval_required"
     assert "apt_write" in decision.matched_rules
+
+
+def test_policy_root_glob_delete_denied():
+    proposal = PolicyEngine().classify_text("rm -rf /*")
+    assert proposal.risk_level == "critical"
+    assert proposal.requires_approval is True
+    assert proposal.denied_reason == "root_delete_denied"
+
+
+def test_policy_root_delete_with_double_dash_denied():
+    proposal = PolicyEngine().classify_text("rm -rf -- /")
+    assert proposal.risk_level == "critical"
+    assert proposal.requires_approval is True
+    assert proposal.denied_reason == "root_delete_denied"
+
+
+def test_policy_token_file_denied():
+    proposal = PolicyEngine().classify_text("cat token.txt")
+    assert proposal.risk_level == "critical"
+    assert proposal.requires_approval is True
+    assert proposal.denied_reason == "secret_access_denied"

@@ -21,3 +21,22 @@ def test_readonly_tool_allowlist():
 
 def test_redact_output_blocks_private_key():
     assert redact_output("-----BEGIN OPENSSH PRIVATE KEY-----") == "<unsafe output blocked>"
+
+
+def test_expanded_eval_suites_exist():
+    assert list_tasks("memory")
+    assert list_tasks("discord")
+    assert list_tasks("reflection")
+    assert list_tasks("tool")
+
+
+def test_readonly_tool_missing_binary_is_recorded(monkeypatch):
+    from agent.tools import system_readonly
+    original = system_readonly.READ_ONLY_COMMANDS["uptime"]
+    system_readonly.READ_ONLY_COMMANDS["uptime"] = original.__class__("uptime", ["/definitely/missing/command"])
+    try:
+        result = system_readonly.run_readonly("uptime")
+    finally:
+        system_readonly.READ_ONLY_COMMANDS["uptime"] = original
+    assert result["returncode"] == 127
+    assert result["error"] == "command_not_found"
