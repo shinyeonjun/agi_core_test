@@ -20,7 +20,7 @@ from agent.core.policy import ActionProposal, PolicyEngine
 from agent.core.state import load_state, save_state
 from agent.core.style import add_style_example, apply_style_feedback, get_active_style_profile, list_style_examples, list_style_feedback, seed_default_style_profile, style_directives
 from agent.eval.harness import list_eval_runs, list_tasks, run_suite
-from agent.language.engine import get_language_engine, interpret_user_message, list_interpretation_logs
+from agent.language.engine import get_language_engine, interpret_user_message, language_cache_stats, list_interpretation_logs
 from agent.memory.store import add_memory, list_memories, rebuild_memory_fts, search_memories
 from agent.ops.backup import create_backup
 from agent.scheduler.tick import run_tick
@@ -247,6 +247,9 @@ def cmd_language(args: argparse.Namespace) -> int:
     if args.language_command == "engine":
         engine = get_language_engine()
         print_json({"engine": getattr(engine, "name", "unknown")})
+        return 0
+    if args.language_command == "cache-stats":
+        print_json(language_cache_stats())
         return 0
     raise ValueError(f"unknown language command: {args.language_command}")
 
@@ -506,6 +509,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_language_interpret = language_sub.add_parser("interpret"); p_language_interpret.add_argument("text"); p_language_interpret.set_defaults(func=cmd_language)
     p_language_logs = language_sub.add_parser("logs"); p_language_logs.add_argument("--limit", type=int, default=20); p_language_logs.set_defaults(func=cmd_language)
     p_language_engine = language_sub.add_parser("engine"); p_language_engine.set_defaults(func=cmd_language)
+    p_language_cache = language_sub.add_parser("cache-stats"); p_language_cache.set_defaults(func=cmd_language)
 
     p = sub.add_parser("eval"); eval_sub = p.add_subparsers(dest="eval_command", required=True)
     p_eval_list = eval_sub.add_parser("list"); p_eval_list.add_argument("suite", nargs="?"); p_eval_list.set_defaults(func=cmd_eval_list)

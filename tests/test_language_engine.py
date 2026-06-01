@@ -9,6 +9,7 @@ from agent.core.database import init_db
 from agent.core.policy import PolicyEngine
 from agent.language.codex_engine import CodexLanguageEngine
 from agent.language.engine import interpret_user_message, list_interpretation_logs
+from agent.language.schemas import normalize_interpretation
 
 
 def setup_isolated(monkeypatch, tmp_path):
@@ -39,6 +40,19 @@ def test_language_engine_interprets_style_feedback(monkeypatch, tmp_path):
     assert result["sentiment"] == "negative"
     assert result["execution"]["requires_action"] is False
     assert result["style_update"]["tone"] == "natural_blunt"
+
+
+def test_schema_normalizes_known_chat_target_from_unknown_intent():
+    result = normalize_interpretation({
+        "intent": "unknown",
+        "sentiment": "neutral",
+        "target": "architecture",
+        "confidence": 0.8,
+        "execution": {"requires_action": False},
+    })
+
+    assert result.intent == "chat"
+    assert result.target == "architecture"
 
 
 def test_language_engine_interprets_brainstorm_and_task(monkeypatch, tmp_path):
@@ -90,6 +104,45 @@ def test_codex_extracts_json_from_fenced_output(monkeypatch, tmp_path):
     assert result.intent == "chat"
     assert result.target == "architecture"
     assert result.engine == "codex"
+
+
+def test_codex_interpretation_is_cached(capsys, monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    monkeypatch.setenv("AGENT_LANGUAGE_ENGINE", "codex")
+    calls = {"count": 0}
+
+    def fake_run(args, **kwargs):
+        calls["count"] += 1
+        assert "--output-schema" in args
+        assert kwargs["stdin"] is not None
+        output_path = args[args.index("--output-last-message") + 1]
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps({
+                "intent": "chat",
+                "sentiment": "neutral",
+                "target": "architecture",
+                "confidence": 0.91,
+                "style_update": {},
+                "memory_instruction": False,
+                "execution": {"requires_action": False},
+                "idea": {},
+                "safety_notes": [],
+            }))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("agent.language.codex_engine.subprocess.run", fake_run)
+
+    first = interpret_user_message("그 너 코어 어떻게 이루어져있어?")
+    second = interpret_user_message("그 너 코어 어떻게 이루어져있어?")
+
+    assert first["engine"] == "codex"
+    assert second["engine"] == "codex_cache"
+    assert second["cache_hit"] is True
+    assert calls["count"] == 1
+    assert main(["language", "cache-stats"]) == 0
+    stats = json.loads(capsys.readouterr().out)
+    assert stats["entries"] == 1
+    assert stats["hits"] == 1
 
 
 def test_language_cli_logs_interpretation(capsys, monkeypatch, tmp_path):

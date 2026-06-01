@@ -50,7 +50,9 @@ class Interpretation:
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): item for key, item in value.items() if item is not None and item != [] and item != {}}
 
 
 def _as_bool(value: Any) -> bool:
@@ -74,6 +76,9 @@ def normalize_interpretation(value: dict[str, Any] | Interpretation, *, engine: 
     intent = str(data.get("intent") or "unknown")
     if intent not in ALLOWED_INTENTS:
         intent = "unknown"
+    target_text = str(data.get("target") or "")
+    if intent == "unknown" and target_text in {"architecture", "capabilities", "status", "help", "greeting", "question"}:
+        intent = "chat"
     sentiment = str(data.get("sentiment") or "unknown")
     if sentiment not in ALLOWED_SENTIMENTS:
         sentiment = "unknown"
@@ -87,7 +92,7 @@ def normalize_interpretation(value: dict[str, Any] | Interpretation, *, engine: 
     return Interpretation(
         intent=intent,
         sentiment=sentiment,
-        target=str(data["target"])[:160] if data.get("target") is not None else None,
+        target=target_text[:160] if data.get("target") is not None else None,
         confidence=confidence,
         style_update=_as_dict(data.get("style_update")),
         memory_instruction=_as_bool(data.get("memory_instruction")),

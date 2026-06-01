@@ -11,25 +11,75 @@ from uuid import uuid4
 from agent.language.fallback_rule import FallbackRuleLanguageEngine
 from agent.language.schemas import Interpretation, normalize_interpretation
 
-LANGUAGE_INTERPRETER_PROMPT = """You are the language interpretation layer for Agent Core.
-Return JSON only. Do not execute actions. Do not request tools. Do not modify files.
-Core will make final policy, approval, goal, memory, and execution decisions.
+LANGUAGE_INTERPRETER_PROMPT = """Classify the user message for Agent Core. Return JSON only.
+Core, not you, decides policy, approval, goals, memory, and execution.
+Never execute actions or request tools.
 
-Allowed intents:
-chat, feedback, style_feedback, brainstorm, task_request, report_request, project_request,
-approval, control, memory_instruction, unknown.
-
-Required JSON fields:
-intent, sentiment, target, confidence, style_update, memory_instruction, execution, idea, safety_notes.
-
-Rules:
-- execution.requires_action may describe a request, but never approve execution.
-- policy, risk, approval, and full_device_lab decisions belong to Core.
-- Use target=architecture for questions about Core structure, composition, or how it is built.
-- Use target=capabilities for questions about what Core can do, limitations, or current ability.
-- Use target=status/help/greeting/question when those are the best fit.
-- If uncertain, use intent=unknown and low confidence.
+Targets: architecture, capabilities, status, help, greeting, question, response_style, idea, last_turn, task_note, project_spec, report.
+Use architecture for Core structure questions. Use capabilities for what Core can do or cannot do.
+Set execution.requires_action=true only when the user is asking Core to do work later.
 """
+
+LANGUAGE_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "intent",
+        "sentiment",
+        "target",
+        "confidence",
+        "style_update",
+        "memory_instruction",
+        "execution",
+        "idea",
+        "safety_notes",
+    ],
+    "properties": {
+        "intent": {"type": "string", "enum": ["chat", "feedback", "style_feedback", "brainstorm", "task_request", "report_request", "project_request", "approval", "control", "memory_instruction", "unknown"]},
+        "sentiment": {"type": "string", "enum": ["positive", "negative", "neutral", "mixed", "unknown"]},
+        "target": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "style_update": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["feedback_type", "positive_signal", "tone", "structure", "detail_level", "emoji", "avoid", "prefer"],
+            "properties": {
+                "feedback_type": {"type": ["string", "null"]},
+                "positive_signal": {"type": ["boolean", "null"]},
+                "tone": {"type": ["string", "null"]},
+                "structure": {"type": ["string", "null"]},
+                "detail_level": {"type": ["string", "null"]},
+                "emoji": {"type": ["boolean", "null"]},
+                "avoid": {"type": ["array", "null"], "items": {"type": "string"}},
+                "prefer": {"type": ["array", "null"], "items": {"type": "string"}},
+            },
+        },
+        "memory_instruction": {"type": "boolean"},
+        "execution": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["requires_action", "suggested_queue_type", "risk_hint", "description", "request"],
+            "properties": {
+                "requires_action": {"type": "boolean"},
+                "suggested_queue_type": {"type": ["string", "null"]},
+                "risk_hint": {"type": ["string", "null"]},
+                "description": {"type": ["string", "null"]},
+                "request": {"type": ["string", "null"]},
+            },
+        },
+        "idea": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["summary", "domain", "suggested_next_step"],
+            "properties": {
+                "summary": {"type": ["string", "null"]},
+                "domain": {"type": ["array", "null"], "items": {"type": "string"}},
+                "suggested_next_step": {"type": ["string", "null"]},
+            },
+        },
+        "safety_notes": {"type": "array", "items": {"type": "string"}},
+    },
+}
 
 
 class CodexLanguageEngine:
@@ -62,19 +112,18 @@ class CodexLanguageEngine:
         return parsed if isinstance(parsed, dict) else None
 
     def interpret_user_message(self, text: str, context: dict[str, Any] | None = None) -> Interpretation:
+        compact_context = {key: value for key, value in (context or {}).items() if key in {"surface", "purpose", "channel_role"}}
         prompt = "\n".join([
             LANGUAGE_INTERPRETER_PROMPT,
-            "",
-            "Context JSON:",
-            json.dumps(context or {}, ensure_ascii=False),
-            "",
-            "User message:",
-            text,
+            f"Context: {json.dumps(compact_context, ensure_ascii=False)}",
+            f"User: {text[:1000]}",
         ])
         try:
             output_path = Path(tempfile.gettempdir()) / f"agent_core_language_{os.getpid()}_{uuid4().hex}.json"
+            schema_path = Path(tempfile.gettempdir()) / f"agent_core_language_schema_{os.getpid()}_{uuid4().hex}.json"
             if output_path.exists():
                 output_path.unlink()
+            schema_path.write_text(json.dumps(LANGUAGE_OUTPUT_SCHEMA, ensure_ascii=False), encoding="utf-8")
             completed = subprocess.run(
                 [
                     "codex",
@@ -83,6 +132,8 @@ class CodexLanguageEngine:
                     "read-only",
                     "--ephemeral",
                     "--skip-git-repo-check",
+                    "--output-schema",
+                    str(schema_path),
                     "--output-last-message",
                     str(output_path),
                     prompt,
@@ -94,12 +145,18 @@ class CodexLanguageEngine:
                 check=False,
             )
         except Exception as exc:
+            if "output_path" in locals() and output_path.exists():
+                output_path.unlink()
+            if "schema_path" in locals() and schema_path.exists():
+                schema_path.unlink()
             fallback = self.fallback.interpret_user_message(text, context or {})
             return normalize_interpretation(fallback, engine=self.fallback.name, fallback_reason=f"codex_error:{type(exc).__name__}")
 
         stdout = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else (completed.stdout or "").strip()
         if output_path.exists():
             output_path.unlink()
+        if "schema_path" in locals() and schema_path.exists():
+            schema_path.unlink()
         if completed.returncode != 0 or not stdout:
             fallback = self.fallback.interpret_user_message(text, context or {})
             return normalize_interpretation(fallback, engine=self.fallback.name, fallback_reason="codex_empty_or_failed")

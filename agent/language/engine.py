@@ -7,6 +7,7 @@ from typing import Any
 
 from agent.config.defaults import now_kst
 from agent.core.database import connect, init_db
+from agent.language.cache import cache_stats, get_cached_interpretation, store_cached_interpretation
 from agent.language.codex_engine import CodexLanguageEngine
 from agent.language.fallback_rule import FallbackRuleLanguageEngine
 from agent.language.schemas import Interpretation, normalize_interpretation
@@ -84,6 +85,10 @@ def list_interpretation_logs(limit: int = 20) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def language_cache_stats() -> dict[str, Any]:
+    return cache_stats()
+
+
 def get_language_engine() -> Any:
     mode = os.getenv("AGENT_LANGUAGE_ENGINE", "codex").strip().lower()
     fallback = FallbackRuleLanguageEngine()
@@ -96,8 +101,17 @@ def interpret_user_message(text: str, context: dict[str, Any] | None = None, *, 
     engine = get_language_engine()
     accepted = True
     fallback_reason = None
+    cache_hit = False
     try:
-        result = engine.interpret_user_message(text, context or {})
+        if getattr(engine, "name", "") == "codex":
+            result = get_cached_interpretation(text, engine="codex")
+            cache_hit = result is not None
+        else:
+            result = None
+        if result is None:
+            result = engine.interpret_user_message(text, context or {})
+            if getattr(engine, "name", "") == "codex":
+                store_cached_interpretation(text, normalize_interpretation(result, engine="codex"), engine="codex")
         result = normalize_interpretation(result, engine=getattr(engine, "name", "unknown"))
     except Exception as exc:
         fallback_reason = f"engine_error:{type(exc).__name__}"
@@ -122,4 +136,5 @@ def interpret_user_message(text: str, context: dict[str, Any] | None = None, *, 
         log_id = None
     data = result.to_dict()
     data["log_id"] = log_id
+    data["cache_hit"] = cache_hit
     return data

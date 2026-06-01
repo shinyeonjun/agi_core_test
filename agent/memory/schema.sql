@@ -201,6 +201,19 @@ CREATE TABLE IF NOT EXISTS interpretation_logs (
 CREATE INDEX IF NOT EXISTS idx_interpretation_logs_created ON interpretation_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_interpretation_logs_engine ON interpretation_logs(engine);
 
+CREATE TABLE IF NOT EXISTS language_interpretation_cache (
+    cache_key TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    engine TEXT NOT NULL,
+    normalized_input TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    hit_count INTEGER DEFAULT 0,
+    last_used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_language_cache_engine ON language_interpretation_cache(engine);
+CREATE INDEX IF NOT EXISTS idx_language_cache_updated ON language_interpretation_cache(updated_at);
+
 CREATE TABLE IF NOT EXISTS eval_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
