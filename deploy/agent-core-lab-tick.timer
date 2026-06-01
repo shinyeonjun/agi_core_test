@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Local Stateful Agent Core lab tick periodically
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=30min
+AccuracySec=1min
+Persistent=true
+Unit=agent-core-lab-tick.service
+
+[Install]
+WantedBy=timers.target

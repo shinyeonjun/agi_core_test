@@ -142,6 +142,32 @@ def run_lab_tick() -> dict[str, Any]:
     return result
 
 
+def run_lab_tick_if_enabled(*, notify: bool = False) -> dict[str, Any]:
+    profile = current_profile()
+    if profile != "full_device_lab":
+        result = {
+            "status": "skipped",
+            "executed": False,
+            "reason": "profile_not_full_device_lab",
+            "profile": profile,
+            "proposal_id": None,
+            "action_id": None,
+        }
+        log_event("lab", "lab_tick_timer_skipped", result["reason"], result, 0.45)
+        return result
+
+    result = run_lab_tick()
+    if notify and result.get("action_id"):
+        try:
+            from agent.bridge.reports import notify_action
+
+            result["notification"] = notify_action(int(result["action_id"]))
+        except Exception as exc:  # pragma: no cover - defensive timer boundary
+            result["notification"] = {"ok": False, "error": type(exc).__name__}
+            log_event("discord", "action_update_notify_failed", type(exc).__name__, result["notification"], 0.55)
+    return result
+
+
 def lab_report(limit: int = 10) -> dict[str, Any]:
     actions = list_action_runs(limit)
     proposals = list_action_proposals(limit)

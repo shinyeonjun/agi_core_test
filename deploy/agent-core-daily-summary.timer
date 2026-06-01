@@ -1,0 +1,12 @@
+[Unit]
+Description=Send Local Stateful Agent Core daily summary
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+AccuracySec=1min
+RandomizedDelaySec=5min
+Persistent=true
+Unit=agent-core-daily-summary.service
+
+[Install]
+WantedBy=timers.target

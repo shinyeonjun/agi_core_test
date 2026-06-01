@@ -1,11 +1,15 @@
+from datetime import datetime, timedelta
 import json
 
+import pytest
+
 from agent.cli.agentctl import main
-from agent.core.autonomy import arm_catastrophic_destruction, set_autonomy_profile
+from agent.core.autonomy import arm_catastrophic_destruction, disarm_catastrophic_destruction, set_autonomy_profile
 from agent.core.database import init_db
 from agent.core.policy import PolicyEngine
+from agent.core.state import load_state, save_state
 from agent.lab.codex_bridge import write_codex_lab_context
-from agent.lab.planner import lab_report, run_lab_tick
+from agent.lab.planner import lab_report, run_lab_tick, run_lab_tick_if_enabled
 from agent.lab.proposals import list_action_proposals
 from agent.tools.action_log import list_action_runs
 
@@ -27,6 +31,18 @@ def test_safe_profile_lab_tick_records_proposal_without_execution(monkeypatch, t
     proposals = list_action_proposals(5)
     assert proposals
     assert proposals[0]["status"] == "proposed"
+    assert list_action_runs(5) == []
+
+
+def test_safe_profile_timer_lab_tick_skips_without_proposal_spam(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("safe")
+    result = run_lab_tick_if_enabled()
+    assert result["executed"] is False
+    assert result["status"] == "skipped"
+    assert result["reason"] == "profile_not_full_device_lab"
+    assert result["proposal_id"] is None
+    assert list_action_proposals(5) == []
     assert list_action_runs(5) == []
 
 
@@ -52,6 +68,29 @@ def test_root_delete_blocked_unless_destruction_armed(monkeypatch, tmp_path):
     allowed = PolicyEngine(profile="full_device_lab").classify_text("rm -rf /")
     assert allowed.denied_reason is None
     assert allowed.requires_approval is False
+    assert "full_device_lab_catastrophic_destruction_armed" in allowed.payload["matched_rules"]
+
+    disarm_catastrophic_destruction()
+    disarmed = PolicyEngine(profile="full_device_lab").classify_text("rm -rf /")
+    assert disarmed.denied_reason == "root_delete_denied"
+
+
+def test_catastrophic_destruction_arm_requires_full_device_lab(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("safe")
+    with pytest.raises(ValueError, match="requires full_device_lab"):
+        arm_catastrophic_destruction(ttl_seconds=30)
+
+
+def test_catastrophic_destruction_arm_expires(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    arm_catastrophic_destruction(ttl_seconds=30)
+    state = load_state()
+    state["catastrophic_local_destruction_armed_until"] = (datetime.now().astimezone() - timedelta(seconds=1)).isoformat(timespec="seconds")
+    save_state(state)
+    expired = PolicyEngine(profile="full_device_lab").classify_text("rm -rf /")
+    assert expired.denied_reason == "root_delete_denied"
 
 
 def test_full_device_lab_still_denies_external_harm_paths(monkeypatch, tmp_path):
@@ -101,3 +140,16 @@ def test_lab_cli_tick_and_proposals(monkeypatch, tmp_path, capsys):
     assert main(["lab", "proposals", "--limit", "1"]) == 0
     proposals = json.loads(capsys.readouterr().out)
     assert proposals[0]["status"] == "proposed"
+
+
+def test_lab_cli_tick_if_enabled_skips_cleanly(monkeypatch, tmp_path, capsys):
+    setup_isolated(monkeypatch, tmp_path)
+    assert main(["autonomy", "set", "safe"]) == 0
+    capsys.readouterr()
+    assert main(["lab", "tick-if-enabled"]) == 0
+    tick = json.loads(capsys.readouterr().out)
+    assert tick["executed"] is False
+    assert tick["proposal_id"] is None
+    assert main(["lab", "proposals", "--limit", "1"]) == 0
+    proposals = json.loads(capsys.readouterr().out)
+    assert proposals == []

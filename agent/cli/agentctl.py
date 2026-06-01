@@ -24,7 +24,7 @@ from agent.scheduler.tick import run_tick
 from agent.tools.system_readonly import READ_ONLY_COMMANDS, run_readonly, system_snapshot
 from agent.tools.full_device import get_action_run, list_action_runs, run_action
 from agent.lab.codex_bridge import write_codex_lab_context
-from agent.lab.planner import lab_report, run_lab_tick
+from agent.lab.planner import lab_report, run_lab_tick, run_lab_tick_if_enabled
 from agent.lab.proposals import list_action_proposals
 from agent.workspace.executor import create_project_spec, create_status_report, ensure_workspace, write_text_artifact
 from agent.workspace.store import list_project_specs, list_workspace_artifacts
@@ -261,6 +261,9 @@ def cmd_lab(args: argparse.Namespace) -> int:
     if args.lab_command == "tick":
         print_json(run_lab_tick())
         return 0
+    if args.lab_command == "tick-if-enabled":
+        print_json(run_lab_tick_if_enabled(notify=bool(getattr(args, "notify", False))))
+        return 0
     if args.lab_command == "proposals":
         print_json(list_action_proposals(args.limit, args.status))
         return 0
@@ -419,6 +422,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_action_show = action_sub.add_parser("show"); p_action_show.add_argument("action_id", type=int); p_action_show.set_defaults(func=cmd_action)
     p = sub.add_parser("lab"); lab_sub = p.add_subparsers(dest="lab_command", required=True)
     p_lab_tick = lab_sub.add_parser("tick"); p_lab_tick.set_defaults(func=cmd_lab)
+    p_lab_tick_enabled = lab_sub.add_parser("tick-if-enabled"); p_lab_tick_enabled.add_argument("--notify", action="store_true"); p_lab_tick_enabled.set_defaults(func=cmd_lab)
     p_lab_proposals = lab_sub.add_parser("proposals"); p_lab_proposals.add_argument("--limit", type=int, default=20); p_lab_proposals.add_argument("--status"); p_lab_proposals.set_defaults(func=cmd_lab)
     p_lab_report = lab_sub.add_parser("report"); p_lab_report.add_argument("--limit", type=int, default=10); p_lab_report.set_defaults(func=cmd_lab)
     p_lab_codex = lab_sub.add_parser("codex-plan"); p_lab_codex.add_argument("--limit", type=int, default=10); p_lab_codex.set_defaults(func=cmd_lab)
