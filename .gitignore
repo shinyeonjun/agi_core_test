@@ -1,0 +1,17 @@
+venv/
+__pycache__/
+*.pyc
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+data/agent.db*
+logs/*.log
+renderer_workspace/input.json
+renderer_workspace/output.md
+
+data/state.json
+data/backups/
