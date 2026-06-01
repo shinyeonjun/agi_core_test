@@ -10,6 +10,7 @@ from agent.core.autonomy import get_autonomy_state
 from agent.core.cooldown import is_ready, mark
 from agent.core.events import list_events
 from agent.core.goals import list_goals
+from agent.core.goal_generator import list_goal_candidates, meaningful_open_goals
 from agent.core.learner import list_reflections
 from agent.core.metrics import collect_metrics
 from agent.lab.proposals import list_action_proposals, proposal_status_counts
@@ -36,6 +37,9 @@ def _ko_status(value: object) -> str:
         "running": "\uc9c4\ud589 \uc911",
         "proposed": "\uc81c\uc548\ub428",
         "executed": "\uc2e4\ud589\ub428",
+        "rejected": "\ud0c8\ub77d",
+        "dry_run": "\ubbf8\ub9ac\ubcf4\uae30",
+        "candidate": "\ud6c4\ubcf4",
         "safe": "\uc548\uc804 \ubaa8\ub4dc",
         "full_device_lab": "\uc7a5\ube44 \uc2e4\ud5d8 \ubaa8\ub4dc",
         "workspace": "\uc791\uc5c5\uacf5\uac04 \ubaa8\ub4dc",
@@ -166,7 +170,8 @@ def build_observation_dashboard() -> str:
     actions = list_action_runs(10)
     proposals = list_action_proposals(8)
     proposal_counts = proposal_status_counts()
-    goals = list_goals(limit=10)
+    goal_candidates = list_goal_candidates(limit=5)
+    goals = meaningful_open_goals(limit=10)
     events = list_events(limit=16)
     reflections = list_reflections(limit=5)
     approvals = ApprovalStore().list_pending()
@@ -200,6 +205,13 @@ def build_observation_dashboard() -> str:
     else:
         lines.append("- \uc544\uc9c1 \uae30\ub85d\ub41c action\uc774 \uc5c6\uc5b4.")
 
+    lines.extend(["", "**\ubaa9\ud45c \ud6c4\ubcf4**"])
+    if goal_candidates:
+        for candidate in goal_candidates[:3]:
+            lines.append(f"- #{candidate.get('id')} {compact_text(candidate.get('title'))}: {_ko_status(candidate.get('status'))} / score {compact_text(candidate.get('score'))}")
+    else:
+        lines.append("- \uc544\uc9c1 \uc0c8 \ubaa9\ud45c \ud6c4\ubcf4\uac00 \uc5c6\uc5b4.")
+
     lines.extend(["", "**\uc81c\uc548 \ud050**"])
     if proposals:
         count_text = ", ".join(f"{_ko_status(status)} {count}" for status, count in sorted(proposal_counts.items())) or "\uc5c6\uc74c"
@@ -217,7 +229,7 @@ def build_observation_dashboard() -> str:
         lines.append("- \uc544\uc9c1 \uc0c8 \ud68c\uace0\uac00 \uc5c6\uc5b4.")
 
     lines.extend(["", "**\ub2e4\uc74c\uc5d0 \ubcfc \uac83**"])
-    open_goals = [goal for goal in goals if goal.get("status") in {"active", "proposed", "blocked", "waiting_approval"} and not _is_noise_goal(goal)]
+    open_goals = goals
     if approvals:
         lines.append(f"- \uc2b9\uc778 \ub300\uae30 {len(approvals)}\uac74\ubd80\ud130 \ud655\uc778\ud574\uc918.")
     if open_goals:

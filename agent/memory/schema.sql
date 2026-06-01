@@ -307,10 +307,46 @@ CREATE INDEX IF NOT EXISTS idx_action_proposals_goal ON action_proposals(goal_id
 CREATE INDEX IF NOT EXISTS idx_action_proposals_profile ON action_proposals(profile);
 CREATE INDEX IF NOT EXISTS idx_action_proposals_status ON action_proposals(status);
 
+CREATE TABLE IF NOT EXISTS root_objectives (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    objective_type TEXT NOT NULL UNIQUE,
+    priority REAL DEFAULT 0.5,
+    enabled INTEGER DEFAULT 1,
+    cooldown_seconds INTEGER DEFAULT 21600,
+    last_used_at TEXT,
+    metadata_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_root_objectives_enabled ON root_objectives(enabled);
+CREATE INDEX IF NOT EXISTS idx_root_objectives_type ON root_objectives(objective_type);
+
+CREATE TABLE IF NOT EXISTS generated_goal_candidates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    root_objective_id INTEGER,
+    title TEXT NOT NULL,
+    description TEXT,
+    goal_type TEXT NOT NULL,
+    novelty_score REAL DEFAULT 0.0,
+    utility_score REAL DEFAULT 0.0,
+    risk_level TEXT DEFAULT 'low',
+    score REAL DEFAULT 0.0,
+    status TEXT NOT NULL,
+    rejection_reason TEXT,
+    generated_goal_id INTEGER,
+    metadata_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_generated_goal_candidates_created ON generated_goal_candidates(created_at);
+CREATE INDEX IF NOT EXISTS idx_generated_goal_candidates_status ON generated_goal_candidates(status);
+CREATE INDEX IF NOT EXISTS idx_generated_goal_candidates_goal ON generated_goal_candidates(generated_goal_id);
+
 CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR REPLACE INTO schema_meta (key, value)
-VALUES ('schema_version', '0.7.0-alpha');
+VALUES ('schema_version', '0.8.0-alpha');

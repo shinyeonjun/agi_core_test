@@ -18,7 +18,7 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
     skills = retrieve_skills(user_message, tags=["talk", "core"], limit=3)
     selected_goal = {"id": goal_id, "title": "Answer user input", "goal_type": "answer_user"}
     return {
-        "version": "0.7",
+        "version": "0.8",
         "kind": "talk_response",
         "created_at": now_kst(),
         "user_input": user_message,
@@ -36,7 +36,7 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
         "decision_confidence": 0.82,
         "risk_level": policy.risk_level,
         "renderer": "fallback",
-        "must_include": ["v0.7", "Core", "event", "goal"],
+        "must_include": ["v0.8", "Core", "event", "goal"],
         "must_not_include": ["auto sudo execution", "consciousness emerged", "OS change without approval", "AGI achieved"],
         "renderer_hint": {"language": "ko", "style": "calm, precise"},
     }

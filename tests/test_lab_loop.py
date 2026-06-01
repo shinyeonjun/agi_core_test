@@ -7,6 +7,7 @@ from agent.cli.agentctl import main
 from agent.core.autonomy import arm_catastrophic_destruction, disarm_catastrophic_destruction, set_autonomy_profile
 from agent.core.database import init_db
 from agent.core.policy import PolicyEngine
+from agent.core.goal_generator import list_goal_candidates
 from agent.core.state import load_state, save_state
 from agent.lab.codex_bridge import write_codex_lab_context
 from agent.lab.planner import lab_report, run_lab_tick, run_lab_tick_if_enabled
@@ -34,16 +35,19 @@ def test_safe_profile_lab_tick_records_proposal_without_execution(monkeypatch, t
     assert list_action_runs(5) == []
 
 
-def test_safe_profile_timer_lab_tick_skips_without_proposal_spam(monkeypatch, tmp_path):
+def test_safe_profile_timer_lab_tick_can_generate_goal_without_action(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     set_autonomy_profile("safe")
     result = run_lab_tick_if_enabled()
     assert result["executed"] is False
-    assert result["status"] == "skipped"
-    assert result["reason"] == "profile_not_full_device_lab"
+    assert result["status"] == "goal_generated"
+    assert result["reason"] == "generated_goal_created"
+    assert result["generated_goal_id"] is not None
     assert result["proposal_id"] is None
+    assert result["action_id"] is None
     assert list_action_proposals(5) == []
     assert list_action_runs(5) == []
+    assert list_goal_candidates(5)
 
 
 def test_full_device_lab_tick_executes_at_most_one_action(monkeypatch, tmp_path):
@@ -142,14 +146,25 @@ def test_lab_cli_tick_and_proposals(monkeypatch, tmp_path, capsys):
     assert proposals[0]["status"] == "proposed"
 
 
-def test_lab_cli_tick_if_enabled_skips_cleanly(monkeypatch, tmp_path, capsys):
+def test_lab_cli_tick_if_enabled_generates_goal_cleanly(monkeypatch, tmp_path, capsys):
     setup_isolated(monkeypatch, tmp_path)
     assert main(["autonomy", "set", "safe"]) == 0
     capsys.readouterr()
     assert main(["lab", "tick-if-enabled"]) == 0
     tick = json.loads(capsys.readouterr().out)
     assert tick["executed"] is False
+    assert tick["generated_goal_id"] is not None
     assert tick["proposal_id"] is None
     assert main(["lab", "proposals", "--limit", "1"]) == 0
     proposals = json.loads(capsys.readouterr().out)
     assert proposals == []
+
+
+def test_full_device_lab_tick_if_enabled_does_not_execute_generated_goal_same_tick(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    result = run_lab_tick_if_enabled()
+    assert result["status"] == "goal_generated"
+    assert result["executed"] is False
+    assert result["action_id"] is None
+    assert list_action_runs(5) == []

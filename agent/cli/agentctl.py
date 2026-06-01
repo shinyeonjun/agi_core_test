@@ -12,6 +12,7 @@ from agent.core.approvals import ApprovalStore
 from agent.core.database import get_schema_version, init_db
 from agent.core.events import list_events, log_event
 from agent.core.goals import list_goals, mark_goal_done
+from agent.core.goal_generator import add_root_objective, generate_goal_candidates, list_goal_candidates, list_root_objectives, seed_default_objectives, set_objective_enabled
 from agent.core.learner import list_reflections, list_skills, upsert_skill, update_after_turn
 from agent.core.metrics import collect_metrics
 from agent.core.pipeline import run_talk
@@ -73,6 +74,38 @@ def cmd_goal_done(args: argparse.Namespace) -> int:
     ok = mark_goal_done(args.goal_id)
     print("goal marked done" if ok else "goal not found")
     return 0 if ok else 1
+
+
+def cmd_goal_generate(args: argparse.Namespace) -> int:
+    print_json(generate_goal_candidates(dry_run=bool(args.dry_run)))
+    return 0
+
+
+def cmd_goal_candidates(args: argparse.Namespace) -> int:
+    print_json(list_goal_candidates(limit=args.limit, status=args.status))
+    return 0
+
+
+def cmd_objective(args: argparse.Namespace) -> int:
+    if args.objective_command == "seed":
+        print_json(seed_default_objectives())
+        return 0
+    if args.objective_command == "list":
+        print_json(list_root_objectives(include_disabled=bool(args.all), limit=args.limit))
+        return 0
+    if args.objective_command == "add":
+        objective_id = add_root_objective(args.title, args.description, args.type, args.priority, args.cooldown_seconds)
+        print_json({"id": objective_id})
+        return 0
+    if args.objective_command == "enable":
+        ok = set_objective_enabled(args.objective_id, True)
+        print("enabled" if ok else "not found")
+        return 0 if ok else 1
+    if args.objective_command == "disable":
+        ok = set_objective_enabled(args.objective_id, False)
+        print("disabled" if ok else "not found")
+        return 0 if ok else 1
+    raise ValueError(f"unknown objective command: {args.objective_command}")
 
 
 def cmd_memories(args: argparse.Namespace) -> int:
@@ -380,6 +413,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("goal"); goal_sub = p.add_subparsers(dest="goal_command", required=True)
     p_done = goal_sub.add_parser("done"); p_done.add_argument("goal_id", type=int); p_done.set_defaults(func=cmd_goal_done)
+    p_goal_generate = goal_sub.add_parser("generate"); p_goal_generate.add_argument("--dry-run", action="store_true"); p_goal_generate.set_defaults(func=cmd_goal_generate)
+    p_goal_candidates = goal_sub.add_parser("candidates"); p_goal_candidates.add_argument("--limit", type=int, default=20); p_goal_candidates.add_argument("--status"); p_goal_candidates.set_defaults(func=cmd_goal_candidates)
+
+    p = sub.add_parser("objective"); objective_sub = p.add_subparsers(dest="objective_command", required=True)
+    p_objective_seed = objective_sub.add_parser("seed"); p_objective_seed.set_defaults(func=cmd_objective)
+    p_objective_list = objective_sub.add_parser("list"); p_objective_list.add_argument("--all", action="store_true"); p_objective_list.add_argument("--limit", type=int, default=50); p_objective_list.set_defaults(func=cmd_objective)
+    p_objective_add = objective_sub.add_parser("add"); p_objective_add.add_argument("title"); p_objective_add.add_argument("description"); p_objective_add.add_argument("--type", required=True); p_objective_add.add_argument("--priority", type=float, default=0.5); p_objective_add.add_argument("--cooldown-seconds", type=int, default=21600); p_objective_add.set_defaults(func=cmd_objective)
+    p_objective_enable = objective_sub.add_parser("enable"); p_objective_enable.add_argument("objective_id", type=int); p_objective_enable.set_defaults(func=cmd_objective)
+    p_objective_disable = objective_sub.add_parser("disable"); p_objective_disable.add_argument("objective_id", type=int); p_objective_disable.set_defaults(func=cmd_objective)
 
     p = sub.add_parser("memories"); p.add_argument("--limit", type=int, default=20); p.set_defaults(func=cmd_memories)
     p = sub.add_parser("memory"); memory_sub = p.add_subparsers(dest="memory_command", required=True)

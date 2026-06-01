@@ -7,6 +7,7 @@ from agent.core.autonomy import current_profile
 from agent.core.drives import compute_drives
 from agent.core.events import log_event
 from agent.core.goals import list_goals
+from agent.core.goal_generator import generate_goal_candidates, meaningful_open_goals
 from agent.core.learner import create_reflection
 from agent.core.metrics import collect_metrics
 from agent.core.policy import PolicyEngine
@@ -144,6 +145,21 @@ def run_lab_tick() -> dict[str, Any]:
 
 def run_lab_tick_if_enabled(*, notify: bool = False) -> dict[str, Any]:
     profile = current_profile()
+    if not meaningful_open_goals():
+        generation = generate_goal_candidates(dry_run=False)
+        if generation.get("created_goal_id"):
+            result = {
+                "status": "goal_generated",
+                "executed": False,
+                "reason": "generated_goal_created",
+                "profile": profile,
+                "generated_goal_id": generation.get("created_goal_id"),
+                "candidate_id": (generation.get("candidates") or [{}])[0].get("id"),
+                "proposal_id": None,
+                "action_id": None,
+            }
+            log_event("lab", "lab_tick_goal_generated", result["reason"], result, 0.7)
+            return result
     if profile != "full_device_lab":
         result = {
             "status": "skipped",

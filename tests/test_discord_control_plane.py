@@ -161,6 +161,7 @@ def test_activity_summary_reports_current_work(monkeypatch, tmp_path):
     assert "\ud55c\ub208\uc5d0" in text
     assert "24\uc2dc\uac04 \uc9c0\ud45c" in text
     assert "\ucd5c\uadfc action" in text
+    assert "\ubaa9\ud45c \ud6c4\ubcf4" in text
     assert "\uc81c\uc548 \ud050" in text
     assert "\ub2e4\uc74c\uc5d0 \ubcfc \uac83" in text
     assert "proposed_payload_json" not in text
