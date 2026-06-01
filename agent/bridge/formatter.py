@@ -139,7 +139,8 @@ def _looks_like_greeting(text: str) -> bool:
 
 
 def _asks_for_status(text: str) -> bool:
-    return any(token in text for token in ["\uc0c1\ud0dc", "\ubb50 \ud558\uace0", "\ubb50\ud574", "\uc0b4\uc544", "\uc815\uc0c1", "\uccb4\ud06c", "\ud655\uc778"])
+    normalized = text.replace(" ", "")
+    return any(token in text for token in ["\uc0c1\ud0dc", "\ubb50 \ud558\uace0", "\ubb50 \ud558\ub294", "\ubb50\ud574", "\uc0b4\uc544", "\uc815\uc0c1", "\uccb4\ud06c", "\ud655\uc778"]) or any(token in normalized for token in ["\ubb50\ud558\uace0", "\ubb50\ud558\ub294", "\ubb50\ud574", "\ud558\uace0\uc788", "\ud558\ub294\uc911"])
 
 
 def _asks_for_help(text: str) -> bool:
@@ -170,9 +171,9 @@ def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
         profile = metrics.get("current_autonomy_profile") or decision.get("autonomy_profile") or "safe"
         eval_result = metrics.get("last_eval_result") or "unknown"
         return "\n".join([
-            "\uc751, \uc815\uc0c1\uc801\uc73c\ub85c \ub4e3\uace0 \uc788\uc5b4.",
-            f"\ud604\uc7ac \ud504\ub85c\ud544\uc740 `{profile}`\uc774\uace0, \ucd5c\uadfc \ud3c9\uac00 \uc0c1\ud0dc\ub294 `{eval_result}`\uc57c.",
-            "\ub354 \uc790\uc138\ud788 \ubcf4\ub824\uba74 `!state`\ub97c \uc4f0\uba74 \ub3fc.",
+            "\uc9c0\uae08\uc740 Discord\uc5d0\uc11c \ub300\ud654\ub97c \ub4e3\uace0, \uc624\ub80c\uc9c0\ud30c\uc774\uc5d0\uc11c \uc790\ub3d9 tick\uacfc \uc694\uc57d \ub8e8\ud504\ub97c \uc720\uc9c0\ud558\ub294 \uc911\uc774\uc57c.",
+            f"\ud504\ub85c\ud544\uc740 `{profile}`\uc774\uace0, \ucd5c\uadfc \ud3c9\uac00\ub294 `{eval_result}`\ub85c \ubcf4\uc5ec.",
+            "\uc790\uc138\ud55c \ub0b4\ubd80 \uc0c1\ud0dc\ub294 `!state`\ub85c \ubcfc \uc218 \uc788\uc5b4.",
         ])
     if text.endswith("?") or text.endswith("\uff1f"):
         return "\uc9c8\ubb38\uc73c\ub85c \uc774\ud574\ud588\uc5b4. \uc774\uc5b4\uc11c \ub354 \uad6c\uccb4\uc801\uc73c\ub85c \ub9d0\ud574\uc8fc\uba74 \uadf8 \uae30\uc900\uc73c\ub85c \ub3c4\uc640\uc904\uac8c."

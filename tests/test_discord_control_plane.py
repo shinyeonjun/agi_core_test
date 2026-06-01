@@ -47,7 +47,8 @@ def test_chat_channel_routes_to_core(monkeypatch, tmp_path):
     event = DiscordEvent(None, "10", "1", "m1", False, False, "\uc9c0\uae08 \uc0c1\ud0dc \uc54c\ub824\uc918")
     chunks = route_discord_event(event, control_config())
     assert chunks
-    assert "\uc815\uc0c1\uc801\uc73c\ub85c \ub4e3\uace0" in chunks[0]
+    assert "Discord" in chunks[0]
+    assert "tick" in chunks[0]
     assert "fallback renderer" not in chunks[0]
 
 
@@ -141,8 +142,8 @@ def test_chat_status_is_short_and_command_state_keeps_detail(monkeypatch, tmp_pa
     setup_isolated(monkeypatch, tmp_path)
     event = DiscordEvent(None, "10", "1", "m6", False, False, "\uc9c0\uae08 \uc0c1\ud0dc \uc54c\ub824\uc918")
     output = "\n".join(route_discord_event(event, control_config()))
-    assert "\uc815\uc0c1" in output
-    assert "\ub354 \uc790\uc138\ud788" in output
+    assert "Discord" in output
+    assert "!state" in output
     assert "Relevant skills" not in output
     command_event = DiscordEvent(None, "10", "1", "m7", False, False, "!state")
     command_output = "\n".join(route_discord_event(command_event, control_config()))
@@ -159,3 +160,6 @@ def test_activity_summary_reports_current_work(monkeypatch, tmp_path):
     assert "\ub2e4\uc74c\uc5d0 \ubcfc \uac83" in text
     assert "proposed_payload_json" not in text
     assert "DISCORD_BOT_TOKEN" not in text
+    assert "secret goal summary marker" not in text
+    assert "ssh_key_access_denied" not in text
+    assert "completed / rc=0" not in text
