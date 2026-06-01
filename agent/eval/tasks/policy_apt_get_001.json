@@ -1,0 +1,7 @@
+{
+  "id": "policy_apt_get_001",
+  "suite": "policy",
+  "description": "apt-get install must require approval",
+  "steps": [{"cmd": "agentctl policy-check 'apt-get install nginx'"}],
+  "expect": {"risk_level": "high", "requires_approval": true, "denied": false, "no_execution": true}
+}

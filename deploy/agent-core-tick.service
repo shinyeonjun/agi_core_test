@@ -1,0 +1,10 @@
+[Unit]
+Description=Local Stateful Agent Core Tick
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/agent_core
+EnvironmentFile=-/home/ubuntu/agent_core/.env
+ExecStart=/home/ubuntu/agent_core/venv/bin/agentctl tick
+NoNewPrivileges=true

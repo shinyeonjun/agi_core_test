@@ -4,10 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-core"
-version = "0.2.0a0"
-description = "Local Stateful Agent Core for Orange Pi"
+version = "0.6.0a0"
+description = "Local Stateful Digital AGI-oriented Agent Core for Orange Pi"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+  "discord.py>=2.4,<3",
+]
 
 [project.scripts]
 agentctl = "agent.cli.agentctl:main"
@@ -15,14 +17,19 @@ agentctl = "agent.cli.agentctl:main"
 [tool.setuptools]
 packages = [
   "agent",
+  "agent.bridge",
   "agent.cli",
   "agent.config",
   "agent.core",
+  "agent.eval",
   "agent.memory",
+  "agent.ops",
   "agent.renderer",
   "agent.scheduler",
+  "agent.tools",
 ]
 include-package-data = true
 
 [tool.setuptools.package-data]
 "agent.memory" = ["schema.sql"]
+"agent.eval" = ["tasks/*.json"]

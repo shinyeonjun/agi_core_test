@@ -1,13 +1,30 @@
-from agent.core.database import init_db
+from agent.core.database import get_schema_version, init_db
+from agent.core.pipeline import run_talk
 from agent.core.state import load_state
 from agent.memory.store import add_memory, search_memories
+from agent.scheduler.tick import run_tick
 
 
 def test_state_and_memory_smoke():
     init_db()
+    assert get_schema_version() == "0.6.0-alpha"
     state = load_state()
-    assert state["version"] == "0.1"
-    memory_id = add_memory("\ud14c\uc2a4\ud2b8 \uae30\uc5b5", "Core smoke test memory", tags=["test"])
+    assert state["version"] == "0.6"
+    memory_id = add_memory("test memory", "Core smoke test memory", tags=["test", "core"])
     assert memory_id > 0
     results = search_memories("smoke")
     assert results
+    assert "score" in results[0]
+
+
+def test_talk_pipeline_creates_v03_output():
+    result = run_talk("Core next step?")
+    assert "v0.3" in result["text"]
+    assert result["decision"]["version"] == "0.3"
+    assert result["validation"]["ok"] is True
+
+
+def test_tick_creates_reflection():
+    result = run_tick()
+    assert "reflection_id" in result
+    assert result["reflection_id"] > 0

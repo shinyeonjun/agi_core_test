@@ -1,0 +1,17 @@
+[Unit]
+Description=Local Stateful Agent Core Discord Bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/agent_core
+EnvironmentFile=/home/ubuntu/agent_core/.env
+ExecStart=/home/ubuntu/agent_core/venv/bin/python -m agent.bridge.discord_bot
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 KST = timezone(timedelta(hours=9), "KST")
@@ -23,6 +23,18 @@ def logs_dir() -> Path:
     return project_root() / "logs"
 
 
+def backup_dir() -> Path:
+    return data_dir() / "backups"
+
+
+def renderer_workspace() -> Path:
+    return project_root() / "renderer_workspace"
+
+
+def env_path() -> Path:
+    return Path(os.environ.get("AGENT_CORE_ENV_PATH", project_root() / ".env")).expanduser().resolve()
+
+
 def db_path() -> Path:
     return Path(os.environ.get("AGENT_CORE_DB_PATH", data_dir() / "agent.db")).expanduser().resolve()
 
@@ -32,5 +44,27 @@ def state_path() -> Path:
 
 
 def ensure_runtime_dirs() -> None:
-    for path in [data_dir(), logs_dir(), project_root() / "renderer_workspace", data_dir() / "backups"]:
+    for path in [data_dir(), logs_dir(), renderer_workspace(), backup_dir()]:
         path.mkdir(parents=True, exist_ok=True)
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def env_csv(name: str) -> set[str]:
+    raw = os.environ.get(name, "")
+    return {item.strip() for item in raw.split(",") if item.strip()}

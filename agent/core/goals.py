@@ -2,12 +2,31 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 from typing import Any
 
 from agent.config.defaults import KST, now_kst
 from agent.core.database import connect, init_db
 
 OPEN_STATUSES = ("proposed", "active", "waiting_approval", "blocked")
+
+
+def similar(a: str, b: str) -> float:
+    return SequenceMatcher(None, a.strip().lower(), b.strip().lower()).ratio()
+
+
+def find_duplicate_goal(title: str, goal_type: str, threshold: float = 0.85) -> dict[str, Any] | None:
+    init_db()
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM goals WHERE goal_type = ? AND status IN ('proposed', 'active', 'waiting_approval', 'blocked')",
+            (goal_type,),
+        ).fetchall()
+    for row in rows:
+        item = dict(row)
+        if similar(str(item["title"]), title) >= threshold:
+            return item
+    return None
 
 
 def create_goal(
@@ -22,18 +41,11 @@ def create_goal(
     dedupe: bool = True,
 ) -> int:
     init_db()
+    if dedupe:
+        duplicate = find_duplicate_goal(title, goal_type)
+        if duplicate:
+            return int(duplicate["id"])
     with connect() as conn:
-        if dedupe:
-            existing = conn.execute(
-                """
-                SELECT id FROM goals
-                WHERE title = ? AND goal_type = ? AND status IN ('proposed', 'active', 'waiting_approval', 'blocked')
-                ORDER BY id DESC LIMIT 1
-                """,
-                (title, goal_type),
-            ).fetchone()
-            if existing:
-                return int(existing["id"])
         ts = now_kst()
         cur = conn.execute(
             """
@@ -43,16 +55,8 @@ def create_goal(
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                ts,
-                ts,
-                title,
-                description,
-                goal_type,
-                status,
-                priority,
-                risk_level,
-                1 if requires_approval else 0,
-                json.dumps(metadata or {}, ensure_ascii=False),
+                ts, ts, title, description, goal_type, status, priority, risk_level,
+                1 if requires_approval else 0, json.dumps(metadata or {}, ensure_ascii=False),
             ),
         )
         conn.commit()
@@ -62,13 +66,11 @@ def create_goal(
 def list_goals(limit: int = 20, include_archived: bool = False) -> list[dict[str, Any]]:
     init_db()
     query = "SELECT * FROM goals"
-    params: tuple[Any, ...] = ()
     if not include_archived:
         query += " WHERE status != 'archived'"
     query += " ORDER BY status = 'active' DESC, priority DESC, id DESC LIMIT ?"
-    params = (limit,)
     with connect() as conn:
-        rows = conn.execute(query, params).fetchall()
+        rows = conn.execute(query, (limit,)).fetchall()
     return [dict(row) for row in rows]
 
 
@@ -85,15 +87,15 @@ def has_recent_goal(goal_type: str, title: str, within_minutes: int = 60) -> boo
     init_db()
     cutoff = (datetime.now(KST) - timedelta(minutes=within_minutes)).isoformat(timespec="seconds")
     with connect() as conn:
-        row = conn.execute(
+        rows = conn.execute(
             """
-            SELECT id FROM goals
-            WHERE goal_type = ? AND title = ? AND created_at >= ?
-            ORDER BY id DESC LIMIT 1
+            SELECT id, title FROM goals
+            WHERE goal_type = ? AND created_at >= ?
+            ORDER BY id DESC
             """,
-            (goal_type, title, cutoff),
-        ).fetchone()
-    return row is not None
+            (goal_type, cutoff),
+        ).fetchall()
+    return any(similar(row["title"], title) >= 0.85 for row in rows)
 
 
 def mark_goal_done(goal_id: int) -> bool:

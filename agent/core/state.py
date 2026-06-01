@@ -9,9 +9,9 @@ from typing import Any
 from agent.config.defaults import ensure_runtime_dirs, now_kst, state_path
 
 DEFAULT_STATE: dict[str, Any] = {
-    "version": "0.1",
+    "version": "0.6",
     "mode": "idle",
-    "current_focus": "agent_core_v0_1",
+    "current_focus": "agent_core_v0_6",
     "last_user_interaction_at": None,
     "last_idle_tick_at": None,
     "autonomous_level": 2,
@@ -62,7 +62,17 @@ def load_state() -> dict[str, Any]:
         state["degraded_reason"] = f"state_json_corrupted:{broken.name}"
         save_state(state)
         return state
-    return _merge_defaults(state, DEFAULT_STATE)
+    merged = _merge_defaults(state, DEFAULT_STATE)
+    changed = False
+    if merged.get("version") == "0.1":
+        merged["version"] = "0.6"
+        changed = True
+    if merged.get("current_focus") == "agent_core_v0_1":
+        merged["current_focus"] = "agent_core_v0_6"
+        changed = True
+    if changed:
+        save_state(merged)
+    return merged
 
 
 def save_state(state: dict[str, Any]) -> None:

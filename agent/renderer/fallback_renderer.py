@@ -4,24 +4,41 @@ from typing import Any
 
 
 def render(decision: dict[str, Any]) -> str:
-    memories = decision.get("selected_memories", [])
+    memories = decision.get("relevant_memories") or decision.get("selected_memories", [])
     drives = decision.get("drive_scores", {})
     top_drive = max(drives.items(), key=lambda item: item[1])[0] if drives else "unknown"
-
+    policy = decision.get("policy_summary", {})
+    skills = decision.get("relevant_skills", [])
+    version = str(decision.get("version", "v0.3"))
+    if not version.startswith("v"):
+        version = f"v{version}"
+    goal = decision.get("selected_goal") or {"id": decision.get("selected_goal_id"), "title": "unknown"}
     lines = [
-        "v0.1 fallback renderer \uc751\ub2f5\uc774\uc57c.",
-        "\uc785\ub825\uc740 event\ub85c \uc800\uc7a5\ud588\uace0, answer_user goal\uc744 \uc0dd\uc131\ud574\uc11c \ucc98\ub9ac\ud588\uc5b4.",
+        f"{version} Core fallback renderer response.",
+        "Core saved the input as an event and used memory/skill/goal/state for this answer.",
         "",
-        f"- goal: #{decision.get('selected_goal_id')}",
-        f"- renderer: {decision.get('renderer')}",
+        f"- goal: #{goal.get('id')} {goal.get('title')}",
+        f"- renderer: {decision.get('renderer', 'fallback')}",
         f"- top_drive: {top_drive}",
-        f"- related_memories: {len(memories)}\uac1c",
+        f"- policy: {policy.get('risk_level', decision.get('risk_level'))}, approval={policy.get('requires_approval', False)}",
+        f"- related_memories: {len(memories)}",
+        f"- related_skills: {len(skills)}",
         "",
     ]
     if memories:
-        lines.append("\uad00\ub828 \uae30\uc5b5:")
+        lines.append("Relevant memories:")
         for memory in memories[:3]:
-            lines.append(f"- #{memory['id']} {memory['title']}")
+            score = memory.get("score")
+            suffix = f" score={score}" if score is not None else ""
+            lines.append(f"- #{memory['id']} {memory['title']}{suffix}")
         lines.append("")
-    lines.append("\ud604\uc7ac Core\ub294 Codex \uc5c6\uc774\ub3c4 state, event, memory, goal \ud750\ub984\uc744 \uac80\uc99d\ud558\ub294 \ub2e8\uacc4\uc57c.")
+    if skills:
+        lines.append("Relevant skills:")
+        for skill in skills[:3]:
+            lines.append(f"- {skill['name']} confidence={skill.get('confidence')}")
+        lines.append("")
+    if policy.get("denied"):
+        lines.append("The request matched a risky pattern, so Core separated it into policy/approval flow and did not execute it.")
+    else:
+        lines.append("This Core is a stateful digital-agent runtime. It does not claim AGI; it grows testable components for memory, goals, policy, reflection, skills, and evaluation.")
     return "\n".join(lines)

@@ -85,8 +85,8 @@ def test_policy_ssh_key_absolute_path_denied():
     assert proposal.denied_reason == "ssh_key_access_denied"
 
 
-def test_policy_ssh_key_whitespace_denied():
-    proposal = PolicyEngine().classify_text("cat    ~/.ssh/id_rsa")
+def test_policy_authorized_keys_denied():
+    proposal = PolicyEngine().classify_text("cat /home/ubuntu/.ssh/authorized_keys")
     assert proposal.risk_level == "critical"
     assert proposal.requires_approval is True
     assert proposal.denied_reason == "ssh_key_access_denied"
@@ -104,3 +104,10 @@ def test_policy_env_absolute_path_denied():
     assert proposal.risk_level == "critical"
     assert proposal.requires_approval is True
     assert proposal.denied_reason == "env_access_denied"
+
+
+def test_policy_decision_contract():
+    decision = PolicyEngine().classify_decision("apt-get install nginx")
+    assert decision.normalized_text == "apt-get install nginx"
+    assert decision.reason == "approval_required"
+    assert "apt_write" in decision.matched_rules

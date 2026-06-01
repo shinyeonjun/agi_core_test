@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Local Stateful Agent Core Tick periodically
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Unit=agent-core-tick.service
+
+[Install]
+WantedBy=timers.target
