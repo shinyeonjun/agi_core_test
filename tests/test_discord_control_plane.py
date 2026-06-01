@@ -47,7 +47,8 @@ def test_chat_channel_routes_to_core(monkeypatch, tmp_path):
     event = DiscordEvent(None, "10", "1", "m1", False, False, "\uc9c0\uae08 \uc0c1\ud0dc \uc54c\ub824\uc918")
     chunks = route_discord_event(event, control_config())
     assert chunks
-    assert "Core" in chunks[0] or "core" in chunks[0].lower()
+    assert "\uc815\uc0c1\uc801\uc73c\ub85c \ub4e3\uace0" in chunks[0]
+    assert "fallback renderer" not in chunks[0]
 
 
 def test_approval_channel_blocks_normal_chat(monkeypatch, tmp_path):
@@ -119,3 +120,27 @@ def test_daily_summary_is_human_readable(monkeypatch, tmp_path):
     assert "**Core \uc694\uc57d**" in text
     assert "{" not in text
     assert "proposed_payload_json" not in text
+
+
+
+def test_chat_channel_hides_internal_debug_output(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    event = DiscordEvent(None, "10", "1", "m5", False, False, "\u314e\u3147")
+    output = "\n".join(route_discord_event(event, control_config()))
+    assert "\uc751" in output
+    assert "fallback renderer" not in output
+    assert "related_memories" not in output
+    assert "selected_goal" not in output
+    assert "Relevant memories" not in output
+
+
+def test_chat_status_is_short_and_command_state_keeps_detail(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    event = DiscordEvent(None, "10", "1", "m6", False, False, "\uc9c0\uae08 \uc0c1\ud0dc \uc54c\ub824\uc918")
+    output = "\n".join(route_discord_event(event, control_config()))
+    assert "\uc815\uc0c1" in output
+    assert "\ub354 \uc790\uc138\ud788" in output
+    assert "Relevant skills" not in output
+    command_event = DiscordEvent(None, "10", "1", "m7", False, False, "!state")
+    command_output = "\n".join(route_discord_event(command_event, control_config()))
+    assert "Core \uc0c1\ud0dc" in command_output

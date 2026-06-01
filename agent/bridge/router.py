@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from agent.bridge.auth import DiscordAuthConfig, classify_context
-from agent.bridge.formatter import format_approval_card, redact_discord_content, split_for_discord, strip_bot_mention
+from agent.bridge.formatter import format_approval_card, format_chat_reply, redact_discord_content, split_for_discord, strip_bot_mention
 from agent.core.approvals import ApprovalStore
 from agent.core.cooldown import is_ready, mark
 from agent.core.database import connect, init_db
@@ -156,4 +156,6 @@ def route_discord_event(event: DiscordEvent, config: DiscordAuthConfig) -> list[
     if role == "approval":
         return ["\uc2b9\uc778 \ucc44\ub110\uc5d0\uc11c\ub294 \uc77c\ubc18 \ub300\ud654\ub97c \ucc98\ub9ac\ud558\uc9c0 \uc54a\uc544. `!approvals`\ub85c \ub300\uae30 \ubaa9\ub85d\uc744 \ud655\uc778\ud574\uc918."]
     result = run_talk(text, source="discord", source_event_id=core_event_id, metadata={"message_id": event.message_id, "channel_role": role})
-    return split_for_discord(result["text"], config.max_response_chars)
+    reply = format_chat_reply(text, result)
+    log_event("discord", "discord_chat_reply", reply, {"message_id": event.message_id, "channel_role": role}, 0.55)
+    return split_for_discord(reply, config.max_response_chars)

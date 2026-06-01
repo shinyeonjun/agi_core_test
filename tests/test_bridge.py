@@ -86,3 +86,12 @@ def test_command_goal_summary_hides_description_and_metadata():
     assert "metadata_json" not in output
     assert "DISCORD_BOT_TOKEN" not in output
     assert "abc123" not in output
+
+
+
+def test_route_chat_hides_fallback_renderer():
+    event = DiscordEvent(None, "10", "1", "m3", False, False, "\u314e\u3147")
+    output = "\n".join(route_discord_event(event, config()))
+    assert "fallback renderer" not in output
+    assert "goal:" not in output
+    assert "\uc751" in output

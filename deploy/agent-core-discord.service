@@ -9,8 +9,9 @@ User=ubuntu
 WorkingDirectory=/home/ubuntu/agent_core
 EnvironmentFile=/home/ubuntu/agent_core/.env
 ExecStart=/home/ubuntu/agent_core/venv/bin/python -m agent.bridge.discord_bot
-Restart=on-failure
-RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=10
 NoNewPrivileges=true
 
 [Install]

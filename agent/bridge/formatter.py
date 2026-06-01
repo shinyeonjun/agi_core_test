@@ -131,3 +131,51 @@ def format_update_event(title: str, detail: str, fields: dict[str, Any] | None =
     for key, value in (fields or {}).items():
         lines.append(f"- {key}: {compact_text(value)}")
     return "\n".join(lines)
+
+
+def _looks_like_greeting(text: str) -> bool:
+    lowered = text.strip().lower()
+    return lowered in {"hi", "hello", "hey", "\u314e\u3147", "\ud558\uc774", "\uc548\ub155", "\uc548\ub155\ud558\uc138\uc694", "\ud5ec\ub85c", "\u3147\u3147"} or lowered.startswith(("\u314e\u3147", "\uc548\ub155"))
+
+
+def _asks_for_status(text: str) -> bool:
+    return any(token in text for token in ["\uc0c1\ud0dc", "\ubb50 \ud558\uace0", "\ubb50\ud574", "\uc0b4\uc544", "\uc815\uc0c1", "\uccb4\ud06c", "\ud655\uc778"])
+
+
+def _asks_for_help(text: str) -> bool:
+    return any(token in text.lower() for token in ["\ub3c4\uc6c0", "\uba85\ub839", "help", "\ubb50 \ud560", "\uc0ac\uc6a9\ubc95", "\uae30\ub2a5"])
+
+
+def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
+    decision = core_result.get("decision") or {}
+    policy = decision.get("policy_summary") or {}
+    text = redact_discord_content(user_text).strip()
+    if policy.get("denied"):
+        reason = compact_text(policy.get("reason") or policy.get("denied_reason") or "\uc815\ucc45 \ucc28\ub2e8")
+        return "\n".join([
+            "\uadf8 \uc694\uccad\uc740 \uc704\ud5d8\ud560 \uc218 \uc788\uc5b4\uc11c \uc2e4\ud589\ud558\uc9c0 \uc54a\uc558\uc5b4.",
+            f"\uc774\uc720: {reason}",
+            "\ud544\uc694\ud558\uba74 #\uc2b9\uc778 \ucc44\ub110\uc5d0\uc11c \uc2b9\uc778 \ud56d\ubaa9\uc744 \ud655\uc778\ud574\uc918.",
+        ])
+    if _looks_like_greeting(text):
+        return "\uc751, \uc5ec\uae30 \uc788\uc5b4. \ud3b8\ud558\uac8c \ub9d0\ud574\uc918."
+    if _asks_for_help(text):
+        return "\n".join([
+            "\uc5ec\uae30\ub294 \ub300\ud654 \ucc44\ub110\uc774\uc57c. \uadf8\ub0e5 \uc790\uc5f0\uc5b4\ub85c \ub9d0\ud558\uba74 \ub3fc.",
+            "\uc2b9\uc778\uc774 \ud544\uc694\ud55c \uc791\uc5c5\uc740 #\uc2b9\uc778, \ubcf4\uace0\uc11c\ub294 #\uc694\uc57d, \uc2e4\uc2dc\uac04 \ub85c\uadf8\ub294 #\uc5c5\ub370\uc774\ud2b8\ub85c \uac08 \uac70\uc57c.",
+            "\uc790\uc138\ud55c \ub0b4\ubd80 \uc0c1\ud0dc\uac00 \ud544\uc694\ud560 \ub54c\ub9cc `!state`, `!goals`, `!approvals`\ub97c \uc368\uc918.",
+        ])
+    if _asks_for_status(text):
+        metrics = decision.get("metrics") or {}
+        profile = metrics.get("current_autonomy_profile") or decision.get("autonomy_profile") or "safe"
+        eval_result = metrics.get("last_eval_result") or "unknown"
+        return "\n".join([
+            "\uc751, \uc815\uc0c1\uc801\uc73c\ub85c \ub4e3\uace0 \uc788\uc5b4.",
+            f"\ud604\uc7ac \ud504\ub85c\ud544\uc740 `{profile}`\uc774\uace0, \ucd5c\uadfc \ud3c9\uac00 \uc0c1\ud0dc\ub294 `{eval_result}`\uc57c.",
+            "\ub354 \uc790\uc138\ud788 \ubcf4\ub824\uba74 `!state`\ub97c \uc4f0\uba74 \ub3fc.",
+        ])
+    if text.endswith("?") or text.endswith("\uff1f"):
+        return "\uc9c8\ubb38\uc73c\ub85c \uc774\ud574\ud588\uc5b4. \uc774\uc5b4\uc11c \ub354 \uad6c\uccb4\uc801\uc73c\ub85c \ub9d0\ud574\uc8fc\uba74 \uadf8 \uae30\uc900\uc73c\ub85c \ub3c4\uc640\uc904\uac8c."
+    if len(text) <= 20:
+        return "\uc751, \ub4e4\uc5c8\uc5b4. \ub2e4\uc74c\uc5d0 \ubb58 \ud558\uba74 \ub420\uc9c0 \ubc14\ub85c \ub9d0\ud574\uc918."
+    return "\uc88b\uc544, \uc774\ud574\ud588\uc5b4. \uc774 \ub300\ud654 \ucc44\ub110\uc5d0\uc11c\ub294 \uc791\uc5c5 \ubc29\ud5a5\uc744 \uc790\uc5f0\uc5b4\ub85c \ubc1b\uc544\uc11c Core\uc5d0 \ubc18\uc601\ud560\uac8c."
