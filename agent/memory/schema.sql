@@ -187,6 +187,20 @@ CREATE TABLE IF NOT EXISTS style_examples (
 );
 CREATE INDEX IF NOT EXISTS idx_style_examples_label ON style_examples(label);
 
+CREATE TABLE IF NOT EXISTS interpretation_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    source_event_id INTEGER,
+    engine TEXT NOT NULL,
+    input_text TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    confidence REAL DEFAULT 0.0,
+    accepted INTEGER DEFAULT 0,
+    fallback_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_interpretation_logs_created ON interpretation_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_interpretation_logs_engine ON interpretation_logs(engine);
+
 CREATE TABLE IF NOT EXISTS eval_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,

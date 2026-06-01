@@ -7,19 +7,16 @@ from agent.config.defaults import now_kst
 from agent.core.database import connect, init_db
 from agent.core.events import log_event
 from agent.core.goals import create_goal
+from agent.language.engine import interpret_user_message
+from agent.language.fallback_rule import detect_feedback_rule
 from agent.memory.store import add_memory
 
-POSITIVE_KEYWORDS = ("\uc88b\ub2e4", "\ub9de\uc544", "\u3147\u3147", "\uacc4\uc18d", "\uc774 \ubc29\ud5a5", "\uc624\ucf00\uc774", "\uad7f", "\uc88b\uc544")
-NEGATIVE_KEYWORDS = ("\uc544\ub2c8", "\uadf8\uac8c \uc544\ub2c8\ub77c", "\ud2c0\ub9bc", "\ub108\ubb34 \uc7a5\ud669", "\ub2e4\uc2dc", "\uc774\uc0c1\ud55c\ub370", "\ubcc4\ub85c")
 
-
-def detect_feedback(user_text: str) -> str:
-    lowered = user_text.lower()
-    if any(keyword in lowered for keyword in NEGATIVE_KEYWORDS):
-        return "negative"
-    if any(keyword in lowered for keyword in POSITIVE_KEYWORDS):
-        return "positive"
-    return "neutral"
+def detect_feedback(user_text: str, *, interpretation: dict[str, Any] | None = None) -> str:
+    interpretation = interpretation or interpret_user_message(user_text, {"purpose": "feedback_detection"}, log=False)
+    if interpretation.get("intent") in {"feedback", "style_feedback"} and interpretation.get("sentiment") in {"positive", "negative"}:
+        return str(interpretation["sentiment"])
+    return detect_feedback_rule(user_text)
 
 
 def create_reflection(summary: str, source_event_id: int | None = None, goal_id: int | None = None, learned: dict[str, Any] | None = None, followup_goal: dict[str, Any] | None = None, confidence: float = 0.7) -> int:
@@ -122,7 +119,7 @@ def update_preference_ema(key: str, observed_value: float, alpha: float = 0.1) -
 
 
 def update_after_turn(user_text: str, source_event_id: int | None, goal_id: int | None, decision: dict[str, Any]) -> dict[str, Any]:
-    feedback = detect_feedback(user_text)
+    feedback = detect_feedback(user_text, interpretation=decision.get("language_interpretation"))
     skill = update_skill_feedback("core_talk_pipeline", feedback)
     learned = {"feedback": feedback, "skill": skill.get("name"), "confidence": skill.get("confidence")}
     if feedback == "positive":

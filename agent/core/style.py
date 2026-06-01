@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 from agent.config.defaults import now_kst
 from agent.core.database import connect, init_db
 from agent.core.events import log_event
+from agent.language.engine import interpret_user_message
+from agent.language.fallback_rule import detect_style_feedback_rule
 
 DEFAULT_STYLE_PROFILE: dict[str, Any] = {
     "language": "ko",
@@ -19,17 +20,6 @@ DEFAULT_STYLE_PROFILE: dict[str, Any] = {
     "prefer": ["direct Korean", "short paragraphs", "technical clarity", "explicit uncertainty"],
     "safety_boundary": "style_only_not_policy",
 }
-
-STYLE_FEEDBACK_PATTERNS: tuple[tuple[str, re.Pattern[str], dict[str, Any]], ...] = (
-    ("positive_style", re.compile(r"(말투|느낌|톤).*(좋|맞|계속|기억)|이런\s*식으로\s*계속", re.IGNORECASE), {"positive_signal": True}),
-    ("too_ai_like", re.compile(r"(너무|좀).*(ai|챗봇|기계|정중|딱딱)|ai\s*같", re.IGNORECASE), {"avoid": ["AI-like praise", "overly polite filler"], "tone": "natural_blunt"}),
-    ("shorter", re.compile(r"(짧게|간단히|줄여|너무\s*길)", re.IGNORECASE), {"detail_level": "shorter"}),
-    ("more_detail", re.compile(r"(자세히|디테일|구체적|왜인지)", re.IGNORECASE), {"detail_level": "more_detail"}),
-    ("colder", re.compile(r"(냉정|직설|팩트|비판)", re.IGNORECASE), {"tone": "calm_blunt", "structure": "findings_first"}),
-    ("softer", re.compile(r"(부드럽|친절|덜\s*세게)", re.IGNORECASE), {"tone": "warm_direct"}),
-    ("no_emoji", re.compile(r"(이모지|emoji).*(쓰지|빼|싫)", re.IGNORECASE), {"emoji": False}),
-)
-
 
 def seed_default_style_profile() -> dict[str, Any]:
     init_db()
@@ -82,18 +72,21 @@ def style_directives(style: dict[str, Any] | None = None) -> list[str]:
     return directives
 
 
-def detect_style_feedback(text: str) -> dict[str, Any] | None:
-    cleaned = text.strip()
-    if not cleaned:
-        return None
-    for feedback_type, pattern, extracted in STYLE_FEEDBACK_PATTERNS:
-        if pattern.search(cleaned):
-            return {"feedback_type": feedback_type, "extracted_preference": dict(extracted)}
-    return None
+def detect_style_feedback(text: str, *, interpretation: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    if interpretation is None:
+        interpretation = interpret_user_message(text, {"purpose": "style_feedback_detection"}, log=False)
+    if interpretation.get("intent") == "style_feedback":
+        style_update = dict(interpretation.get("style_update") or {})
+        feedback_type = str(style_update.pop("feedback_type", "") or interpretation.get("target") or "style_feedback")
+        return {
+            "feedback_type": feedback_type,
+            "extracted_preference": style_update,
+        }
+    return detect_style_feedback_rule(text)
 
 
-def apply_style_feedback(text: str, *, target_response_id: int | None = None) -> dict[str, Any] | None:
-    detected = detect_style_feedback(text)
+def apply_style_feedback(text: str, *, target_response_id: int | None = None, interpretation: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    detected = detect_style_feedback(text, interpretation=interpretation)
     if not detected:
         return None
     active = get_active_style_profile()

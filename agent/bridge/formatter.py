@@ -277,6 +277,10 @@ def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
     policy = decision.get("policy_summary") or {}
     user_goal = decision.get("user_directed_goal") or {}
     style_feedback = decision.get("style_feedback") or {}
+    interpretation = decision.get("language_interpretation") or {}
+    intent = interpretation.get("intent")
+    target = interpretation.get("target")
+    sentiment = interpretation.get("sentiment")
     text = redact_discord_content(user_text).strip()
     if style_feedback:
         feedback_type = compact_text(style_feedback.get("feedback_type"))
@@ -308,15 +312,22 @@ def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
             f"\uc774\uc720: {reason}",
             "\ud544\uc694\ud558\uba74 #\uc2b9\uc778 \ucc44\ub110\uc5d0\uc11c \uc2b9\uc778 \ud56d\ubaa9\uc744 \ud655\uc778\ud574\uc918.",
         ])
-    if _looks_like_greeting(text):
+    if intent == "feedback":
+        if sentiment == "positive":
+            return "좋아. 그 방향이 맞다는 피드백으로 기록해둘게."
+        if sentiment == "negative":
+            return "알겠어. 방금 피드백은 회고에 남기고 다음 응답에서 조정할게."
+    if intent == "brainstorm":
+        return "아이디어 검토로 이해했어. 지금은 바로 실행하지 않고, 장점/걸리는 점/다음 실험 단위로 나눠서 볼게."
+    if target == "greeting" or _looks_like_greeting(text):
         return "\uc751, \uc5ec\uae30 \uc788\uc5b4. \ud3b8\ud558\uac8c \ub9d0\ud574\uc918."
-    if _asks_for_help(text):
+    if target == "help" or _asks_for_help(text):
         return "\n".join([
             "\uc5ec\uae30\ub294 \ub300\ud654 \ucc44\ub110\uc774\uc57c. \uadf8\ub0e5 \uc790\uc5f0\uc5b4\ub85c \ub9d0\ud558\uba74 \ub3fc.",
             "\uc2b9\uc778\uc774 \ud544\uc694\ud55c \uc791\uc5c5\uc740 #\uc2b9\uc778, \ubcf4\uace0\uc11c\ub294 #\uc694\uc57d, \uc2e4\uc2dc\uac04 \ub85c\uadf8\ub294 #\uc5c5\ub370\uc774\ud2b8\ub85c \uac08 \uac70\uc57c.",
             "\uc790\uc138\ud55c \ub0b4\ubd80 \uc0c1\ud0dc\uac00 \ud544\uc694\ud560 \ub54c\ub9cc `!state`, `!goals`, `!approvals`\ub97c \uc368\uc918.",
         ])
-    if _asks_for_status(text):
+    if target == "status" or _asks_for_status(text):
         metrics = decision.get("metrics") or {}
         profile = metrics.get("current_autonomy_profile") or decision.get("autonomy_profile") or "safe"
         eval_result = metrics.get("last_eval_result") or "unknown"
@@ -325,7 +336,7 @@ def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
             f"\ud504\ub85c\ud544\uc740 `{profile}`\uc774\uace0, \ucd5c\uadfc \ud3c9\uac00\ub294 `{eval_result}`\ub85c \ubcf4\uc5ec.",
             "\uc790\uc138\ud55c \ub0b4\ubd80 \uc0c1\ud0dc\ub294 `!state`\ub85c \ubcfc \uc218 \uc788\uc5b4.",
         ])
-    if text.endswith("?") or text.endswith("\uff1f"):
+    if target == "question" or text.endswith("?") or text.endswith("\uff1f"):
         return "\uc9c8\ubb38\uc73c\ub85c \uc774\ud574\ud588\uc5b4. \uc774\uc5b4\uc11c \ub354 \uad6c\uccb4\uc801\uc73c\ub85c \ub9d0\ud574\uc8fc\uba74 \uadf8 \uae30\uc900\uc73c\ub85c \ub3c4\uc640\uc904\uac8c."
     if len(text) <= 20:
         return "\uc751, \ub4e4\uc5c8\uc5b4. \ub2e4\uc74c\uc5d0 \ubb58 \ud558\uba74 \ub420\uc9c0 \ubc14\ub85c \ub9d0\ud574\uc918."
