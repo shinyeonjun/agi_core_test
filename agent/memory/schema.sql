@@ -242,10 +242,35 @@ CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
   VALUES (new.id, new.title, new.content, COALESCE(new.tags_json, ''));
 END;
 
+
+CREATE TABLE IF NOT EXISTS workspace_artifacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    artifact_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    relative_path TEXT NOT NULL,
+    bytes INTEGER DEFAULT 0,
+    metadata_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_artifacts_created ON workspace_artifacts(created_at);
+CREATE INDEX IF NOT EXISTS idx_workspace_artifacts_type ON workspace_artifacts(artifact_type);
+
+CREATE TABLE IF NOT EXISTS project_specs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    title TEXT NOT NULL,
+    objective TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    artifact_id INTEGER,
+    spec_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_project_specs_status ON project_specs(status);
+
 CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR REPLACE INTO schema_meta (key, value)
-VALUES ('schema_version', '0.6.0-alpha');
+VALUES ('schema_version', '0.7.0-alpha');

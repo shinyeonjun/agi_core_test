@@ -4,13 +4,15 @@ Digital AGI-oriented Local Stateful Agent Core for Orange Pi 5. This project doe
 
 ## Current Scope
 
-- v0.6-alpha Discord conversational bridge
+- v0.7-alpha Discord conversational bridge
 - Goal deduplication and cooldown
 - Reflection plus skill learner
 - SQLite FTS5 memory search with LIKE fallback
 - Evaluation harness
 - CodexRenderer sanitized isolation boundary with fallback
 - Read-only ToolExecutor and system snapshot
+- WorkspaceExecutor bounded to `/home/ubuntu/agent_workspace`
+- ProjectSpec and workspace artifact tracking
 - systemd unit templates
 
 ## Basic Commands
@@ -25,6 +27,9 @@ agentctl tick
 agentctl policy-check "apt-get install nginx"
 agentctl eval run policy
 agentctl audit
+agentctl metrics
+agentctl workspace init
+agentctl workspace report --title "Daily workspace status"
 ```
 
 ## Discord

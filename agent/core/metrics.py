@@ -45,4 +45,5 @@ def collect_metrics() -> dict[str, Any]:
             "policy_critical_count_24h": _count(conn, "SELECT COUNT(*) AS count FROM policy_decisions WHERE risk_level = 'critical' AND created_at >= datetime('now', '-1 day')"),
             "discord_messages_24h": _count(conn, "SELECT COUNT(*) AS count FROM discord_events WHERE created_at >= datetime('now', '-1 day')"),
             "tick_count_24h": _count(conn, "SELECT COUNT(*) AS count FROM events WHERE event_type = 'idle_tick' AND ts >= datetime('now', '-1 day')"),
+            "workspace_artifact_count": _count(conn, "SELECT COUNT(*) AS count FROM workspace_artifacts"),
         }

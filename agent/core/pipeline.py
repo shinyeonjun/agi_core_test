@@ -23,7 +23,7 @@ def run_talk(message: str, source: str = "user", source_event_id: int | None = N
     output = render(decision)
     validation = validate_output(output, decision.get("must_include"), decision.get("must_not_include"))
     if not validation["ok"]:
-        output = "v0.6 Core fallback renderer validation failed. Core decision was saved, but output was shortened."
+        output = "v0.7 Core fallback renderer validation failed. Core decision was saved, but output was shortened."
     assistant_event_id = log_event("core", "assistant_output", output, {"validation": validation}, 0.7)
     learner = update_after_turn(message, user_event_id, decision.get("selected_goal_id"), decision)
     return {"text": output, "decision": decision, "validation": validation, "user_event_id": user_event_id, "assistant_event_id": assistant_event_id, "decision_id": decision_row_id, "learner": learner}

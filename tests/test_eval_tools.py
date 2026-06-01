@@ -30,6 +30,7 @@ def test_expanded_eval_suites_exist():
     assert list_tasks("discord")
     assert list_tasks("reflection")
     assert list_tasks("tool")
+    assert list_tasks("workspace")
 
 
 def test_readonly_tool_missing_binary_is_recorded(monkeypatch):

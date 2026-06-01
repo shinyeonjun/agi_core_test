@@ -9,9 +9,9 @@ from typing import Any
 from agent.config.defaults import ensure_runtime_dirs, now_kst, state_path
 
 DEFAULT_STATE: dict[str, Any] = {
-    "version": "0.6",
+    "version": "0.7",
     "mode": "idle",
-    "current_focus": "agent_core_v0_6",
+    "current_focus": "agent_core_v0_7_workspace_autonomy",
     "last_user_interaction_at": None,
     "last_idle_tick_at": None,
     "autonomous_level": 2,
@@ -64,11 +64,11 @@ def load_state() -> dict[str, Any]:
         return state
     merged = _merge_defaults(state, DEFAULT_STATE)
     changed = False
-    if merged.get("version") == "0.1":
-        merged["version"] = "0.6"
+    if merged.get("version") in {"0.1", "0.6"}:
+        merged["version"] = "0.7"
         changed = True
-    if merged.get("current_focus") == "agent_core_v0_1":
-        merged["current_focus"] = "agent_core_v0_6"
+    if merged.get("current_focus") in {"agent_core_v0_1", "agent_core_v0_6"}:
+        merged["current_focus"] = "agent_core_v0_7_workspace_autonomy"
         changed = True
     if changed:
         save_state(merged)

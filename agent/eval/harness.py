@@ -143,6 +143,7 @@ def _isolated_eval_env(temp_dir: Path) -> dict[str, str]:
         shutil.copy2(current_state, eval_state)
     env["AGENT_CORE_DB_PATH"] = str(eval_db)
     env["AGENT_CORE_STATE_PATH"] = str(eval_state)
+    env["AGENT_WORKSPACE_ROOT"] = str(temp_dir / "workspace")
     return env
 
 

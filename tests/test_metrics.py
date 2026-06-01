@@ -18,6 +18,7 @@ METRIC_KEYS = {
     "policy_critical_count_24h",
     "discord_messages_24h",
     "tick_count_24h",
+    "workspace_artifact_count",
 }
 
 
@@ -40,3 +41,4 @@ def test_metrics_cli_text_shape(capsys):
     output = capsys.readouterr().out
     assert "events_count:" in output
     assert "tick_count_24h:" in output
+    assert "workspace_artifact_count:" in output

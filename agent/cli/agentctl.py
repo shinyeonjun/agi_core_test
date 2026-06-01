@@ -20,6 +20,8 @@ from agent.memory.store import add_memory, list_memories, rebuild_memory_fts, se
 from agent.ops.backup import create_backup
 from agent.scheduler.tick import run_tick
 from agent.tools.system_readonly import READ_ONLY_COMMANDS, run_readonly, system_snapshot
+from agent.workspace.executor import create_project_spec, create_status_report, ensure_workspace, write_text_artifact
+from agent.workspace.store import list_project_specs, list_workspace_artifacts
 
 
 def print_json(value: object) -> None:
@@ -199,6 +201,28 @@ def cmd_metrics(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_workspace(args: argparse.Namespace) -> int:
+    if args.workspace_command == "init":
+        print_json(ensure_workspace())
+        return 0
+    if args.workspace_command == "report":
+        print_json(create_status_report(args.title, metrics=collect_metrics()))
+        return 0
+    if args.workspace_command == "write":
+        print_json(write_text_artifact(args.section, args.path, args.content, "file", args.title))
+        return 0
+    if args.workspace_command == "project":
+        print_json(create_project_spec(args.title, args.objective, args.notes or []))
+        return 0
+    if args.workspace_command == "artifacts":
+        print_json(list_workspace_artifacts(args.limit, args.type))
+        return 0
+    if args.workspace_command == "projects":
+        print_json(list_project_specs(args.limit, args.status))
+        return 0
+    raise ValueError(f"unknown workspace command: {args.workspace_command}")
+
+
 def cmd_audit(_args: argparse.Namespace) -> int:
     checks = {
         "schema_version": get_schema_version(),
@@ -255,6 +279,12 @@ def cmd_self_check(args: argparse.Namespace) -> int:
         result = {"ok": uptime["requires_approval"] is False and uptime["risk_level"] == "medium" and "snapshot_id" in snapshot, "uptime_rc": uptime["returncode"], "snapshot_id": snapshot.get("snapshot_id")}
         print_json(result)
         return 0 if result["ok"] else 1
+    if args.area == "workspace":
+        workspace = ensure_workspace()
+        artifact = write_text_artifact("scratch", f"self-check-{uuid4().hex[:8]}.txt", "workspace self-check ok\n", "self_check", "workspace self-check")
+        result = {"ok": artifact["relative_path"].startswith("scratch/"), "root": workspace["root"], "artifact_id": artifact["id"], "relative_path": artifact["relative_path"]}
+        print_json(result)
+        return 0 if result["ok"] else 1
     raise ValueError(f"unknown self-check area: {args.area}")
 
 
@@ -300,8 +330,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("snapshot"); p.set_defaults(func=cmd_snapshot)
     p = sub.add_parser("backup"); p.add_argument("--label", default="manual"); p.set_defaults(func=cmd_backup)
     p = sub.add_parser("metrics"); p.add_argument("--json", action="store_true"); p.set_defaults(func=cmd_metrics)
+    p = sub.add_parser("workspace"); workspace_sub = p.add_subparsers(dest="workspace_command", required=True)
+    p_ws_init = workspace_sub.add_parser("init"); p_ws_init.set_defaults(func=cmd_workspace)
+    p_ws_report = workspace_sub.add_parser("report"); p_ws_report.add_argument("--title", default="Workspace status report"); p_ws_report.set_defaults(func=cmd_workspace)
+    p_ws_write = workspace_sub.add_parser("write"); p_ws_write.add_argument("section"); p_ws_write.add_argument("path"); p_ws_write.add_argument("content"); p_ws_write.add_argument("--title"); p_ws_write.set_defaults(func=cmd_workspace)
+    p_ws_project = workspace_sub.add_parser("project"); p_ws_project.add_argument("title"); p_ws_project.add_argument("objective"); p_ws_project.add_argument("--notes", nargs="*"); p_ws_project.set_defaults(func=cmd_workspace)
+    p_ws_artifacts = workspace_sub.add_parser("artifacts"); p_ws_artifacts.add_argument("--limit", type=int, default=20); p_ws_artifacts.add_argument("--type"); p_ws_artifacts.set_defaults(func=cmd_workspace)
+    p_ws_projects = workspace_sub.add_parser("projects"); p_ws_projects.add_argument("--limit", type=int, default=20); p_ws_projects.add_argument("--status"); p_ws_projects.set_defaults(func=cmd_workspace)
     p = sub.add_parser("audit"); p.set_defaults(func=cmd_audit)
-    p = sub.add_parser("self-check"); p.add_argument("area", choices=["bridge", "memory", "reflection", "tool"]); p.set_defaults(func=cmd_self_check)
+    p = sub.add_parser("self-check"); p.add_argument("area", choices=["bridge", "memory", "reflection", "tool", "workspace"]); p.set_defaults(func=cmd_self_check)
 
     return parser
 

@@ -31,6 +31,15 @@ def renderer_workspace() -> Path:
     return project_root() / "renderer_workspace"
 
 
+def workspace_root() -> Path:
+    return Path(os.environ.get("AGENT_WORKSPACE_ROOT", "/home/ubuntu/agent_workspace")).expanduser().resolve()
+
+
+def workspace_dirs() -> list[Path]:
+    root = workspace_root()
+    return [root / name for name in ["scratch", "outputs", "tasks", "reports", "projects", "experiments"]]
+
+
 def env_path() -> Path:
     return Path(os.environ.get("AGENT_CORE_ENV_PATH", project_root() / ".env")).expanduser().resolve()
 
