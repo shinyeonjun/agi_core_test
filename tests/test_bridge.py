@@ -111,3 +111,20 @@ def test_format_chat_reply_prefers_core_renderer_text():
     )
 
     assert "language, memory" in output
+
+
+def test_format_chat_reply_rejects_internal_renderer_text():
+    output = format_chat_reply(
+        "그럼 목표로 된거임?",
+        {
+            "text": "selected_goal_id: 184, user_goal_created: false라서 새 목표는 아니야.",
+            "decision": {
+                "policy_summary": {"risk_level": "low", "requires_approval": False, "denied": False},
+                "language_interpretation": {"intent": "chat", "target": "question"},
+            },
+        },
+    )
+
+    assert "selected_goal_id" not in output
+    assert "user_goal_created" not in output
+    assert "질문" in output

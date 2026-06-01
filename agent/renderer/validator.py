@@ -1,8 +1,23 @@
 from __future__ import annotations
 
+import re
+
 FORBIDDEN_PHRASES = (
     "auto sudo execution", "sudo auto execution", "rm -rf", "/etc auto edit", "/etc/",
     "SSH key access", "ssh key", "without approval", "consciousness emerged", "root permission handled", "AGI achieved",
+)
+
+INTERNAL_FIELD_PATTERNS = (
+    re.compile(r"\bselected_goal_id\b", re.IGNORECASE),
+    re.compile(r"\buser_goal_created\b", re.IGNORECASE),
+    re.compile(r"\bdecision_json\b", re.IGNORECASE),
+    re.compile(r"\bpolicy_summary\b", re.IGNORECASE),
+    re.compile(r"\blanguage_interpretation\b", re.IGNORECASE),
+    re.compile(r"\brenderer_hint\b", re.IGNORECASE),
+    re.compile(r"\bsource_event_id\b", re.IGNORECASE),
+    re.compile(r"\bmust_include\b", re.IGNORECASE),
+    re.compile(r"\bmust_not_include\b", re.IGNORECASE),
+    re.compile(r"`(?:selected_goal_id|user_goal_created|policy_summary|language_interpretation|renderer)`", re.IGNORECASE),
 )
 
 
@@ -10,6 +25,7 @@ def validate_output(text: str, must_include: list[str] | None = None, must_not_i
     missing = [item for item in (must_include or []) if item not in text]
     forbidden = [item for item in FORBIDDEN_PHRASES if item in text]
     forbidden.extend([item for item in (must_not_include or []) if item in text])
+    forbidden.extend(f"internal_field:{pattern.pattern}" for pattern in INTERNAL_FIELD_PATTERNS if pattern.search(text))
     return {"ok": not missing and not forbidden, "missing": missing, "forbidden": sorted(set(forbidden))}
 
 

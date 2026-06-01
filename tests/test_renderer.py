@@ -24,6 +24,16 @@ def test_codex_validator_rejects_unsafe_command():
     assert result["ok"] is False
 
 
+def test_codex_validator_rejects_internal_field_leak():
+    result = validate_codex_output(
+        "selected_goal_id: 184, user_goal_created: false라서 새 목표는 아니야.",
+        {"must_include": [], "must_not_include": []},
+    )
+
+    assert result["ok"] is False
+    assert any("internal_field" in item for item in result["forbidden"])
+
+
 def test_codex_renderer_sanitizes_sensitive_decision_fields():
     decision = {
         "version": "0.8",

@@ -284,6 +284,13 @@ def _core_chat_text(core_result: dict[str, Any]) -> str | None:
         "- renderer:",
         "relevant memories:",
         "relevant skills:",
+        "selected_goal_id",
+        "user_goal_created",
+        "policy_summary",
+        "language_interpretation",
+        "source_event_id",
+        "must_include",
+        "must_not_include",
     )
     if any(marker in lowered for marker in internal_markers):
         return None
