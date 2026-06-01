@@ -114,6 +114,8 @@ def test_codex_interpretation_is_cached(capsys, monkeypatch, tmp_path):
     def fake_run(args, **kwargs):
         calls["count"] += 1
         assert "--output-schema" in args
+        assert "-c" in args
+        assert "model_reasoning_effort=low" in args
         assert kwargs["stdin"] is not None
         output_path = args[args.index("--output-last-message") + 1]
         with open(output_path, "w", encoding="utf-8") as handle:
@@ -143,6 +145,38 @@ def test_codex_interpretation_is_cached(capsys, monkeypatch, tmp_path):
     stats = json.loads(capsys.readouterr().out)
     assert stats["entries"] == 1
     assert stats["hits"] == 1
+
+
+def test_codex_interpretation_respects_component_env(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    monkeypatch.setenv("AGENT_CODEX_LANGUAGE_MODEL", "language-model")
+    monkeypatch.setenv("AGENT_CODEX_LANGUAGE_REASONING", "minimal")
+    monkeypatch.setenv("AGENT_CODEX_LANGUAGE_TIMEOUT", "7")
+
+    def fake_run(args, **kwargs):
+        assert args[:4] == ["codex", "exec", "--model", "language-model"]
+        assert "model_reasoning_effort=minimal" in args
+        assert kwargs["timeout"] == 7
+        output_path = args[args.index("--output-last-message") + 1]
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps({
+                "intent": "chat",
+                "sentiment": "neutral",
+                "target": "question",
+                "confidence": 0.9,
+                "style_update": {},
+                "memory_instruction": False,
+                "execution": {"requires_action": False},
+                "idea": {},
+                "safety_notes": [],
+            }))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("agent.language.codex_engine.subprocess.run", fake_run)
+
+    result = CodexLanguageEngine().interpret_user_message("질문", {})
+
+    assert result.engine == "codex"
 
 
 def test_language_cli_logs_interpretation(capsys, monkeypatch, tmp_path):

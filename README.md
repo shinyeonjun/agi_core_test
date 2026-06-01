@@ -56,3 +56,23 @@ agentctl action run "printf lab-ok"
 agentctl action history
 agentctl autonomy set safe
 ```
+
+## Codex Runtime Tuning
+
+Chat and language interpretation use component-specific Codex settings. Leave model variables empty unless the current auth mode supports the target model.
+
+```bash
+AGENT_CODEX_LANGUAGE_REASONING=low
+AGENT_CODEX_LANGUAGE_TIMEOUT=20
+AGENT_CODEX_RENDERER_REASONING=low
+AGENT_CODEX_RENDERER_TIMEOUT=20
+AGENT_CODEX_WORK_REASONING=medium
+```
+
+Optional model overrides:
+
+```bash
+AGENT_CODEX_LANGUAGE_MODEL=
+AGENT_CODEX_RENDERER_MODEL=
+AGENT_CODEX_WORK_MODEL=
+```

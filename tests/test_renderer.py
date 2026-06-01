@@ -80,6 +80,7 @@ def test_codex_renderer_uses_output_last_message(monkeypatch, tmp_path):
         assert "--output-last-message" in args
         assert "--ephemeral" in args
         assert "--sandbox" in args
+        assert "model_reasoning_effort=low" in args
         assert kwargs["stdin"] is not None
         output_path = args[args.index("--output-last-message") + 1]
         with open(output_path, "w", encoding="utf-8") as handle:
@@ -98,3 +99,34 @@ def test_codex_renderer_uses_output_last_message(monkeypatch, tmp_path):
     })
 
     assert "자연어 답변" in text
+
+
+def test_codex_renderer_respects_component_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENT_CORE_DB_PATH", str(tmp_path / "agent.db"))
+    monkeypatch.setenv("AGENT_CORE_STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setenv("AGENT_CORE_HOME", str(tmp_path))
+    monkeypatch.setenv("AGENT_CODEX_RENDERER_MODEL", "renderer-model")
+    monkeypatch.setenv("AGENT_CODEX_RENDERER_REASONING", "minimal")
+    monkeypatch.setenv("AGENT_CODEX_RENDERER_TIMEOUT", "9")
+
+    def fake_run(args, **kwargs):
+        assert args[:4] == ["codex", "exec", "--model", "renderer-model"]
+        assert "model_reasoning_effort=minimal" in args
+        assert kwargs["timeout"] == 9
+        output_path = args[args.index("--output-last-message") + 1]
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write("환경별 빠른 렌더링.")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("agent.renderer.codex_renderer.subprocess.run", fake_run)
+
+    text = render_with_codex({
+        "version": "0.8",
+        "user_input": "ㅎㅇ",
+        "selected_goal": {"id": 1, "title": "Answer user input"},
+        "policy_summary": {"risk_level": "low", "requires_approval": False},
+        "must_include": [],
+        "must_not_include": ["AGI achieved"],
+    })
+
+    assert "빠른 렌더링" in text

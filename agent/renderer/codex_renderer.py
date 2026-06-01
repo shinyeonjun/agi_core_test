@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from agent.codex_config import codex_exec_args, codex_exec_config
 from agent.config.defaults import renderer_workspace, now_kst
 from agent.core.database import connect, init_db
 from agent.renderer.fallback_renderer import render as fallback_render
@@ -100,8 +101,9 @@ def _record_renderer_run(decision: dict[str, Any], rendered_text: str | None, su
         return int(cur.lastrowid)
 
 
-def render_with_codex(decision: dict[str, Any], timeout_seconds: int = 30) -> str:
+def render_with_codex(decision: dict[str, Any], timeout_seconds: int | None = None) -> str:
     start = time.monotonic()
+    config = codex_exec_config("RENDERER", default_reasoning="low", default_timeout=20)
     workspace = renderer_workspace()
     workspace.mkdir(parents=True, exist_ok=True)
     output_path = Path(tempfile.gettempdir()) / f"agent_core_chat_{uuid4().hex}.md"
@@ -111,23 +113,23 @@ def render_with_codex(decision: dict[str, Any], timeout_seconds: int = 30) -> st
     try:
         if output_path.exists():
             output_path.unlink()
+        args = [
+            *codex_exec_args(config),
+            "--sandbox",
+            "read-only",
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "--output-last-message",
+            str(output_path),
+            prompt,
+        ]
         completed = subprocess.run(
-            [
-                "codex",
-                "exec",
-                "--sandbox",
-                "read-only",
-                "--ephemeral",
-                "--skip-git-repo-check",
-                "--output-last-message",
-                str(output_path),
-                prompt,
-            ],
+            args,
             cwd=workspace,
             text=True,
             capture_output=True,
             stdin=subprocess.DEVNULL,
-            timeout=timeout_seconds,
+            timeout=timeout_seconds or config.timeout_seconds,
             check=False,
         )
         text = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else (completed.stdout or "").strip()

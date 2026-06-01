@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from agent.codex_config import codex_exec_args, codex_exec_config
 from agent.language.fallback_rule import FallbackRuleLanguageEngine
 from agent.language.schemas import Interpretation, normalize_interpretation
 
@@ -87,7 +88,8 @@ class CodexLanguageEngine:
 
     def __init__(self, *, fallback: FallbackRuleLanguageEngine | None = None, timeout_seconds: int | None = None) -> None:
         self.fallback = fallback or FallbackRuleLanguageEngine()
-        self.timeout_seconds = timeout_seconds or int(os.getenv("AGENT_LANGUAGE_CODEX_TIMEOUT", "20"))
+        self.config = codex_exec_config("LANGUAGE", default_reasoning="low", default_timeout=20)
+        self.timeout_seconds = timeout_seconds or self.config.timeout_seconds
 
     def _parse_json_output(self, stdout: str) -> dict[str, Any] | None:
         text = stdout.strip()
@@ -124,20 +126,20 @@ class CodexLanguageEngine:
             if output_path.exists():
                 output_path.unlink()
             schema_path.write_text(json.dumps(LANGUAGE_OUTPUT_SCHEMA, ensure_ascii=False), encoding="utf-8")
+            args = [
+                *codex_exec_args(self.config),
+                "--sandbox",
+                "read-only",
+                "--ephemeral",
+                "--skip-git-repo-check",
+                "--output-schema",
+                str(schema_path),
+                "--output-last-message",
+                str(output_path),
+                prompt,
+            ]
             completed = subprocess.run(
-                [
-                    "codex",
-                    "exec",
-                    "--sandbox",
-                    "read-only",
-                    "--ephemeral",
-                    "--skip-git-repo-check",
-                    "--output-schema",
-                    str(schema_path),
-                    "--output-last-message",
-                    str(output_path),
-                    prompt,
-                ],
+                args,
                 text=True,
                 capture_output=True,
                 stdin=subprocess.DEVNULL,
