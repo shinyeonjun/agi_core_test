@@ -25,7 +25,7 @@ STYLE_FEEDBACK_PATTERNS: tuple[tuple[str, re.Pattern[str], dict[str, Any], str],
     ("too_ai_like", re.compile(r"(너무|좀).*(ai|챗봇|기계|정중|딱딱)|ai\s*같", re.IGNORECASE), {"avoid": ["AI-like praise", "overly polite filler"], "tone": "natural_blunt"}, "negative"),
     ("shorter", re.compile(r"(짧게|간단히|줄여|너무\s*길)", re.IGNORECASE), {"detail_level": "shorter"}, "neutral"),
     ("more_detail", re.compile(r"(자세히|디테일|구체적|왜인지)", re.IGNORECASE), {"detail_level": "more_detail"}, "neutral"),
-    ("colder", re.compile(r"(냉정|직설|팩트|비판)", re.IGNORECASE), {"tone": "calm_blunt", "structure": "findings_first"}, "neutral"),
+    ("colder", re.compile(r"(말투|톤|어조|답변|응답).*(냉정|직설|팩트|비판)|(냉정|직설|팩트|비판).*(말투|톤|어조|답변|응답)", re.IGNORECASE), {"tone": "calm_blunt", "structure": "findings_first"}, "neutral"),
     ("softer", re.compile(r"(부드럽|친절|덜\s*세게)", re.IGNORECASE), {"tone": "warm_direct"}, "neutral"),
     ("no_emoji", re.compile(r"(이모지|emoji).*(쓰지|빼|싫)", re.IGNORECASE), {"emoji": False}, "negative"),
 )
@@ -86,6 +86,10 @@ def _chat_target(text: str) -> str | None:
         return "greeting"
     if any(token in text for token in ["상태", "뭐 하고", "뭐 하는", "뭐해", "살아", "정상", "체크", "확인"]) or any(token in normalized for token in ["뭐하고", "뭐하는", "뭐해", "하고있", "하는중"]):
         return "status"
+    if any(token in text for token in ["할 수 있는", "뭘 할 수", "뭐 할 수", "가능한", "능력", "할수있는"]):
+        return "capabilities"
+    if any(token in text for token in ["코어", "구조", "이루어져", "구성", "아키텍처", "어떻게 되어"]):
+        return "architecture"
     if any(token in text.lower() for token in ["도움", "명령", "help", "뭐 할", "사용법", "기능"]):
         return "help"
     if text.endswith("?") or text.endswith("？"):
@@ -135,6 +139,28 @@ class FallbackRuleLanguageEngine:
             )
 
         lowered = cleaned.lower()
+        if any(token in cleaned for token in ["할 수 있는", "뭘 할 수", "뭐 할 수", "가능한", "능력", "할수있는"]):
+            return normalize_interpretation(
+                {
+                    "intent": "chat",
+                    "sentiment": "neutral",
+                    "target": "capabilities",
+                    "confidence": 0.82,
+                    "execution": {"requires_action": False},
+                },
+                engine=self.name,
+            )
+        if any(token in cleaned for token in ["코어", "구조", "이루어져", "구성", "아키텍처", "어떻게 되어"]):
+            return normalize_interpretation(
+                {
+                    "intent": "chat",
+                    "sentiment": "neutral",
+                    "target": "architecture",
+                    "confidence": 0.82,
+                    "execution": {"requires_action": False},
+                },
+                engine=self.name,
+            )
         if any(token in lowered for token in ["아이디어", "어떰", "어때", "가능", "쓸만", "평가"]):
             return normalize_interpretation(
                 {

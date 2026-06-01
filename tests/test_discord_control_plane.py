@@ -17,6 +17,7 @@ def setup_isolated(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_CORE_STATE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setenv("AGENT_WORKSPACE_ROOT", str(tmp_path / "workspace"))
     monkeypatch.setenv("AGENT_CORE_ENV_PATH", str(tmp_path / ".env"))
+    monkeypatch.setenv("AGENT_LANGUAGE_ENGINE", "rule")
     monkeypatch.delenv("DISCORD_SUMMARY_WEBHOOK_URL", raising=False)
     monkeypatch.delenv("DISCORD_UPDATE_WEBHOOK_URL", raising=False)
     init_db()
@@ -210,6 +211,26 @@ def test_chat_status_message_does_not_create_user_goal(monkeypatch, tmp_path):
     route_discord_event(event, control_config())
     goals = list_goals(limit=10, include_archived=True)
     assert not any(goal["goal_type"] == "user_directed" for goal in goals)
+
+
+def test_chat_architecture_question_gets_specific_answer(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    monkeypatch.setenv("AGENT_LANGUAGE_ENGINE", "rule")
+    event = DiscordEvent(None, "10", "1", "m-arch", False, False, "그 너 코어 어떻게 이루어져있어?")
+    output = "\n".join(route_discord_event(event, control_config()))
+    assert "LanguageEngine" in output
+    assert "PolicyEngine" in output
+    assert "더 구체적" not in output
+
+
+def test_chat_capability_question_is_not_style_feedback(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    monkeypatch.setenv("AGENT_LANGUAGE_ENGINE", "rule")
+    event = DiscordEvent(None, "10", "1", "m-cap", False, False, "너가할 수 있는거 냉정하게 뭐뭐 할 수 있는지 궁금해")
+    output = "\n".join(route_discord_event(event, control_config()))
+    assert "할 수 있는" in output
+    assert "약한 건" in output
+    assert "말투 피드백" not in output
 
 
 def test_dangerous_chat_task_is_blocked_goal(monkeypatch, tmp_path):

@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
+from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from agent.language.fallback_rule import FallbackRuleLanguageEngine
 from agent.language.schemas import Interpretation, normalize_interpretation
@@ -22,6 +25,9 @@ intent, sentiment, target, confidence, style_update, memory_instruction, executi
 Rules:
 - execution.requires_action may describe a request, but never approve execution.
 - policy, risk, approval, and full_device_lab decisions belong to Core.
+- Use target=architecture for questions about Core structure, composition, or how it is built.
+- Use target=capabilities for questions about what Core can do, limitations, or current ability.
+- Use target=status/help/greeting/question when those are the best fit.
 - If uncertain, use intent=unknown and low confidence.
 """
 
@@ -32,6 +38,28 @@ class CodexLanguageEngine:
     def __init__(self, *, fallback: FallbackRuleLanguageEngine | None = None, timeout_seconds: int | None = None) -> None:
         self.fallback = fallback or FallbackRuleLanguageEngine()
         self.timeout_seconds = timeout_seconds or int(os.getenv("AGENT_LANGUAGE_CODEX_TIMEOUT", "20"))
+
+    def _parse_json_output(self, stdout: str) -> dict[str, Any] | None:
+        text = stdout.strip()
+        if not text:
+            return None
+        if text.startswith("```"):
+            lines = [line for line in text.splitlines() if not line.strip().startswith("```")]
+            text = "\n".join(lines).strip()
+        try:
+            parsed = json.loads(text)
+            return parsed if isinstance(parsed, dict) else None
+        except json.JSONDecodeError:
+            pass
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+        try:
+            parsed = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
 
     def interpret_user_message(self, text: str, context: dict[str, Any] | None = None) -> Interpretation:
         prompt = "\n".join([
@@ -44,10 +72,24 @@ class CodexLanguageEngine:
             text,
         ])
         try:
+            output_path = Path(tempfile.gettempdir()) / f"agent_core_language_{os.getpid()}_{uuid4().hex}.json"
+            if output_path.exists():
+                output_path.unlink()
             completed = subprocess.run(
-                ["codex", "exec", "--sandbox", "read-only", "--ask-for-approval", "never", prompt],
+                [
+                    "codex",
+                    "exec",
+                    "--sandbox",
+                    "read-only",
+                    "--ephemeral",
+                    "--skip-git-repo-check",
+                    "--output-last-message",
+                    str(output_path),
+                    prompt,
+                ],
                 text=True,
                 capture_output=True,
+                stdin=subprocess.DEVNULL,
                 timeout=self.timeout_seconds,
                 check=False,
             )
@@ -55,13 +97,14 @@ class CodexLanguageEngine:
             fallback = self.fallback.interpret_user_message(text, context or {})
             return normalize_interpretation(fallback, engine=self.fallback.name, fallback_reason=f"codex_error:{type(exc).__name__}")
 
-        stdout = (completed.stdout or "").strip()
+        stdout = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else (completed.stdout or "").strip()
+        if output_path.exists():
+            output_path.unlink()
         if completed.returncode != 0 or not stdout:
             fallback = self.fallback.interpret_user_message(text, context or {})
             return normalize_interpretation(fallback, engine=self.fallback.name, fallback_reason="codex_empty_or_failed")
-        try:
-            parsed = json.loads(stdout)
-        except json.JSONDecodeError:
+        parsed = self._parse_json_output(stdout)
+        if parsed is None:
             fallback = self.fallback.interpret_user_message(text, context or {})
             return normalize_interpretation(fallback, engine=self.fallback.name, fallback_reason="codex_invalid_json")
         return normalize_interpretation(parsed, engine=self.name)

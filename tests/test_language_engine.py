@@ -16,7 +16,7 @@ def setup_isolated(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_CORE_STATE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setenv("AGENT_WORKSPACE_ROOT", str(tmp_path / "workspace"))
     monkeypatch.setenv("AGENT_CORE_ENV_PATH", str(tmp_path / ".env"))
-    monkeypatch.delenv("AGENT_LANGUAGE_ENGINE", raising=False)
+    monkeypatch.setenv("AGENT_LANGUAGE_ENGINE", "rule")
     init_db()
 
 
@@ -75,6 +75,21 @@ def test_codex_invalid_json_falls_back(monkeypatch, tmp_path):
     assert result.intent == "task_request"
     assert result.engine == "fallback_rule"
     assert result.fallback_reason == "codex_invalid_json"
+
+
+def test_codex_extracts_json_from_fenced_output(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+
+    def fake_run(*_args, **_kwargs):
+        return SimpleNamespace(returncode=0, stdout='```json\n{"intent":"chat","sentiment":"neutral","target":"architecture","confidence":0.9,"style_update":{},"memory_instruction":false,"execution":{"requires_action":false},"idea":{},"safety_notes":[]}\n```', stderr="")
+
+    monkeypatch.setattr("agent.language.codex_engine.subprocess.run", fake_run)
+    engine = CodexLanguageEngine()
+    result = engine.interpret_user_message("그 너 코어 어떻게 이루어져있어?", {})
+
+    assert result.intent == "chat"
+    assert result.target == "architecture"
+    assert result.engine == "codex"
 
 
 def test_language_cli_logs_interpretation(capsys, monkeypatch, tmp_path):

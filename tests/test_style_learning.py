@@ -15,6 +15,7 @@ def setup_isolated(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_CORE_STATE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setenv("AGENT_WORKSPACE_ROOT", str(tmp_path / "workspace"))
     monkeypatch.setenv("AGENT_CORE_ENV_PATH", str(tmp_path / ".env"))
+    monkeypatch.setenv("AGENT_LANGUAGE_ENGINE", "rule")
     init_db()
 
 
@@ -64,7 +65,7 @@ def test_discord_style_feedback_reply_is_conversational(monkeypatch, tmp_path):
 def test_style_cli_show_and_feedback(capsys, monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
 
-    assert main(["style", "feedback", "냉정하게 팩트 위주로 말해줘"]) == 0
+    assert main(["style", "feedback", "답변 말투를 냉정하게 팩트 위주로 해줘"]) == 0
     feedback = json.loads(capsys.readouterr().out)
     assert feedback["feedback_type"] == "colder"
 

@@ -321,11 +321,28 @@ def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
         return "아이디어 검토로 이해했어. 지금은 바로 실행하지 않고, 장점/걸리는 점/다음 실험 단위로 나눠서 볼게."
     if target == "greeting" or _looks_like_greeting(text):
         return "\uc751, \uc5ec\uae30 \uc788\uc5b4. \ud3b8\ud558\uac8c \ub9d0\ud574\uc918."
+    if target == "capabilities":
+        return "\n".join([
+            "냉정하게 지금 내가 할 수 있는 건 이 정도야.",
+            "- Discord에서 네 말을 받아 의도/말투/작업 요청으로 분류하고 기록하기",
+            "- 기억, 목표, 회고, 평가 결과를 쌓고 요약하기",
+            "- 안전 정책 안에서 오렌지파이 로컬 상태 점검 같은 action 실행하기",
+            "- 승인 필요한 작업은 바로 실행하지 않고 대기시키기",
+            "- 코드 개선 방향을 만들고 테스트/eval로 확인하기",
+            "아직 약한 건 자유로운 장기 계획 실행, 복잡한 대화 맥락 추론, 스스로 큰 프로젝트를 끝까지 밀어붙이는 능력이야. 이건 이제 작업 큐/worker/LLM 해석을 더 붙여야 해.",
+        ])
     if target == "help" or _asks_for_help(text):
         return "\n".join([
             "\uc5ec\uae30\ub294 \ub300\ud654 \ucc44\ub110\uc774\uc57c. \uadf8\ub0e5 \uc790\uc5f0\uc5b4\ub85c \ub9d0\ud558\uba74 \ub3fc.",
             "\uc2b9\uc778\uc774 \ud544\uc694\ud55c \uc791\uc5c5\uc740 #\uc2b9\uc778, \ubcf4\uace0\uc11c\ub294 #\uc694\uc57d, \uc2e4\uc2dc\uac04 \ub85c\uadf8\ub294 #\uc5c5\ub370\uc774\ud2b8\ub85c \uac08 \uac70\uc57c.",
             "\uc790\uc138\ud55c \ub0b4\ubd80 \uc0c1\ud0dc\uac00 \ud544\uc694\ud560 \ub54c\ub9cc `!state`, `!goals`, `!approvals`\ub97c \uc368\uc918.",
+        ])
+    if target == "architecture":
+        return "\n".join([
+            "지금 Core는 크게 `대화/언어 해석`, `기억`, `목표`, `정책`, `실행`, `평가`, `Discord 관제`로 나뉘어 있어.",
+            "대화가 오면 LanguageEngine이 의도를 먼저 구조화하고, Core가 목표/정책/기억을 붙인 뒤 답변하거나 작업 목표로 넘겨.",
+            "실제 실행은 PolicyEngine과 full_device_lab 경계를 통과해야 하고, 위험한 삭제/시크릿/외부 전송은 계속 막혀 있어.",
+            "아직 똑똑한 추론기는 아니고, 안전한 운영 뼈대 위에 언어/학습/작업 큐를 붙여가는 단계야.",
         ])
     if target == "status" or _asks_for_status(text):
         metrics = decision.get("metrics") or {}

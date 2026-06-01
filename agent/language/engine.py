@@ -85,7 +85,7 @@ def list_interpretation_logs(limit: int = 20) -> list[dict[str, Any]]:
 
 
 def get_language_engine() -> Any:
-    mode = os.getenv("AGENT_LANGUAGE_ENGINE", "rule").strip().lower()
+    mode = os.getenv("AGENT_LANGUAGE_ENGINE", "codex").strip().lower()
     fallback = FallbackRuleLanguageEngine()
     if mode in {"codex", "codex_cli"}:
         return CodexLanguageEngine(fallback=fallback)

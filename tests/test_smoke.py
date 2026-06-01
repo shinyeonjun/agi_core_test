@@ -17,7 +17,8 @@ def test_state_and_memory_smoke():
     assert "score" in results[0]
 
 
-def test_talk_pipeline_creates_v08_output():
+def test_talk_pipeline_creates_v08_output(monkeypatch):
+    monkeypatch.setenv("AGENT_LANGUAGE_ENGINE", "rule")
     result = run_talk("Core next step?")
     assert "v0.8" in result["text"]
     assert result["decision"]["version"] == "0.8"
