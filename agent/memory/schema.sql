@@ -152,6 +152,41 @@ CREATE TABLE IF NOT EXISTS skills (
 CREATE INDEX IF NOT EXISTS idx_skills_archived ON skills(archived);
 CREATE INDEX IF NOT EXISTS idx_skills_confidence ON skills(confidence);
 
+CREATE TABLE IF NOT EXISTS style_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    profile_json TEXT NOT NULL,
+    confidence REAL DEFAULT 0.6,
+    active INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_style_profiles_active ON style_profiles(active);
+
+CREATE TABLE IF NOT EXISTS style_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    source_text TEXT NOT NULL,
+    target_response_id INTEGER,
+    feedback_type TEXT NOT NULL,
+    feedback_text TEXT,
+    extracted_preference_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_style_feedback_type ON style_feedback(feedback_type);
+
+CREATE TABLE IF NOT EXISTS style_examples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    label TEXT NOT NULL,
+    input_text TEXT,
+    good_response TEXT,
+    bad_response TEXT,
+    reason TEXT,
+    tags_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_style_examples_label ON style_examples(label);
+
 CREATE TABLE IF NOT EXISTS eval_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,

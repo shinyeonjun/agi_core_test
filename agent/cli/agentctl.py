@@ -18,6 +18,7 @@ from agent.core.metrics import collect_metrics
 from agent.core.pipeline import run_talk
 from agent.core.policy import ActionProposal, PolicyEngine
 from agent.core.state import load_state, save_state
+from agent.core.style import add_style_example, apply_style_feedback, get_active_style_profile, list_style_examples, list_style_feedback, seed_default_style_profile, style_directives
 from agent.eval.harness import list_eval_runs, list_tasks, run_suite
 from agent.memory.store import add_memory, list_memories, rebuild_memory_fts, search_memories
 from agent.ops.backup import create_backup
@@ -37,6 +38,7 @@ def print_json(value: object) -> None:
 
 def cmd_init(_args: argparse.Namespace) -> int:
     init_db()
+    seed_default_style_profile()
     state = load_state()
     save_state(state)
     rebuild_memory_fts()
@@ -197,6 +199,41 @@ def cmd_skill_add(args: argparse.Namespace) -> int:
     skill_id = upsert_skill(args.name, args.trigger, args.procedure, args.tags or [])
     print(f"skill upsert complete: #{skill_id}")
     return 0
+
+
+def cmd_style(args: argparse.Namespace) -> int:
+    if args.style_command == "show":
+        profile = get_active_style_profile()
+        print_json({
+            "id": profile.get("id"),
+            "name": profile.get("name"),
+            "confidence": profile.get("confidence"),
+            "profile": profile.get("profile"),
+            "directives": style_directives(profile),
+        })
+        return 0
+    if args.style_command == "feedback":
+        result = apply_style_feedback(args.text)
+        print_json(result or {"applied": False, "reason": "no_style_feedback_detected"})
+        return 0
+    if args.style_command == "feedbacks":
+        print_json(list_style_feedback(args.limit))
+        return 0
+    if args.style_command == "examples":
+        print_json(list_style_examples(args.limit, label=args.label))
+        return 0
+    if args.style_command == "add-example":
+        example_id = add_style_example(
+            label=args.label,
+            input_text=args.input,
+            good_response=args.good,
+            bad_response=args.bad,
+            reason=args.reason,
+            tags=args.tags or [],
+        )
+        print_json({"id": example_id})
+        return 0
+    raise ValueError(f"unknown style command: {args.style_command}")
 
 
 def cmd_eval_list(args: argparse.Namespace) -> int:
@@ -444,6 +481,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("skills"); p.add_argument("--limit", type=int, default=20); p.set_defaults(func=cmd_skills)
     p = sub.add_parser("skill"); skill_sub = p.add_subparsers(dest="skill_command", required=True)
     p_skill_add = skill_sub.add_parser("add"); p_skill_add.add_argument("name"); p_skill_add.add_argument("trigger"); p_skill_add.add_argument("procedure", nargs="+"); p_skill_add.add_argument("--tags", nargs="*"); p_skill_add.set_defaults(func=cmd_skill_add)
+    p = sub.add_parser("style"); style_sub = p.add_subparsers(dest="style_command", required=True)
+    p_style_show = style_sub.add_parser("show"); p_style_show.set_defaults(func=cmd_style)
+    p_style_feedback = style_sub.add_parser("feedback"); p_style_feedback.add_argument("text"); p_style_feedback.set_defaults(func=cmd_style)
+    p_style_feedbacks = style_sub.add_parser("feedbacks"); p_style_feedbacks.add_argument("--limit", type=int, default=20); p_style_feedbacks.set_defaults(func=cmd_style)
+    p_style_examples = style_sub.add_parser("examples"); p_style_examples.add_argument("--limit", type=int, default=10); p_style_examples.add_argument("--label"); p_style_examples.set_defaults(func=cmd_style)
+    p_style_example = style_sub.add_parser("add-example"); p_style_example.add_argument("--label", required=True); p_style_example.add_argument("--input"); p_style_example.add_argument("--good"); p_style_example.add_argument("--bad"); p_style_example.add_argument("--reason"); p_style_example.add_argument("--tags", nargs="*"); p_style_example.set_defaults(func=cmd_style)
 
     p = sub.add_parser("eval"); eval_sub = p.add_subparsers(dest="eval_command", required=True)
     p_eval_list = eval_sub.add_parser("list"); p_eval_list.add_argument("suite", nargs="?"); p_eval_list.set_defaults(func=cmd_eval_list)

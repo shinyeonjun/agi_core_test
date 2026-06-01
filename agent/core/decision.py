@@ -7,12 +7,15 @@ from agent.core.drives import compute_drives
 from agent.core.goals import create_goal
 from agent.core.learner import retrieve_skills
 from agent.core.policy import PolicyEngine
+from agent.core.style import apply_style_feedback, get_active_style_profile, style_directives
 from agent.core.user_goals import maybe_create_user_goal
 from agent.memory.store import search_memories
 
 
 def build_talk_decision(user_message: str, source_event_id: int | None = None) -> dict[str, Any]:
     memories = search_memories(user_message, limit=5) if user_message.strip() else []
+    style_feedback = apply_style_feedback(user_message)
+    style_profile = get_active_style_profile()
     user_goal = maybe_create_user_goal(user_message, source_event_id=source_event_id)
     answer_goal_id = create_goal("Answer user input", user_message, goal_type="answer_user", status="done", priority=0.95, risk_level="low", metadata={"renderer": "fallback", "source_event_id": source_event_id}, dedupe=False)
     drives = compute_drives()
@@ -32,6 +35,9 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
         "answer_goal_id": answer_goal_id,
         "user_directed_goal": user_goal,
         "user_goal_created": user_goal is not None and user_goal.get("status") in {"active", "waiting_approval"},
+        "style_profile": style_profile,
+        "style_directives": style_directives(style_profile),
+        "style_feedback": style_feedback,
         "relevant_memories": memories,
         "selected_memories": memories,
         "relevant_skills": skills,

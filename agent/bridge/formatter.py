@@ -276,7 +276,15 @@ def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
     decision = core_result.get("decision") or {}
     policy = decision.get("policy_summary") or {}
     user_goal = decision.get("user_directed_goal") or {}
+    style_feedback = decision.get("style_feedback") or {}
     text = redact_discord_content(user_text).strip()
+    if style_feedback:
+        feedback_type = compact_text(style_feedback.get("feedback_type"))
+        return "\n".join([
+            "좋아. 말투 피드백으로 기억해뒀어.",
+            f"\ubc18\uc601: {feedback_type}",
+            "\uc774\uac74 \ub2f5\ubcc0 \ubc29\uc2dd\uc5d0\ub9cc \uc801\uc6a9\ub418\uace0, \uc2e4\ud589/\uc815\ucc45 \ud310\ub2e8\uc740 \ubc14\uafb8\uc9c0 \uc54a\uc544.",
+        ])
     if user_goal:
         if user_goal.get("denied") or user_goal.get("status") == "blocked":
             return "\n".join([

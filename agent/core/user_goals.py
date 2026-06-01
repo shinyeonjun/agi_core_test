@@ -5,6 +5,7 @@ from typing import Any
 
 from agent.core.goals import create_goal
 from agent.core.policy import PolicyEngine
+from agent.core.style import detect_style_feedback
 
 TASK_KEYWORDS = (
     "해줘", "해봐", "하자", "가자", "ㄱㄱ", "만들", "구현", "개발", "디벨롭", "정리",
@@ -21,6 +22,8 @@ NON_TASK_PATTERNS = (
 def is_user_goal_request(text: str) -> bool:
     cleaned = text.strip()
     if not cleaned or cleaned.startswith("!"):
+        return False
+    if detect_style_feedback(cleaned):
         return False
     if any(pattern.search(cleaned) for pattern in NON_TASK_PATTERNS):
         return False
