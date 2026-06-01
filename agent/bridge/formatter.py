@@ -275,7 +275,24 @@ def _asks_for_help(text: str) -> bool:
 def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
     decision = core_result.get("decision") or {}
     policy = decision.get("policy_summary") or {}
+    user_goal = decision.get("user_directed_goal") or {}
     text = redact_discord_content(user_text).strip()
+    if user_goal:
+        if user_goal.get("denied") or user_goal.get("status") == "blocked":
+            return "\n".join([
+                "\uadf8 \uc791\uc5c5\uc740 \uc704\ud5d8\ud560 \uc218 \uc788\uc5b4\uc11c \uc2e4\ud589 \ubaa9\ud45c\ub85c\ub294 \uc7a0\uad88\ub450\uc5c8\uc5b4.",
+                f"\ubaa9\ud45c: #{user_goal.get('id')}",
+                f"\uc774\uc720: {compact_text(user_goal.get('reason'))}",
+            ])
+        if user_goal.get("status") == "waiting_approval":
+            return "\n".join([
+                f"\uc88b\uc544. \uc791\uc5c5 \ubaa9\ud45c #{user_goal.get('id')}\ub85c \ub4f1\ub85d\ud588\uace0, \uc2b9\uc778\uc774 \ud544\uc694\ud55c \uc0c1\ud0dc\ub85c \ub450었어.",
+                "\uc2b9\uc778 \ucc44\ub110\uc5d0\uc11c \ud655\uc778\ud558\uba74 \uc790\uc728 \ubaa9\ud45c\ubcf4\ub2e4 \uba3c\uc800 \ucc98\ub9ac\ud560\uac8c.",
+            ])
+        return "\n".join([
+            f"\uc88b\uc544. \uc791\uc5c5 \ubaa9\ud45c #{user_goal.get('id')}\ub85c \ub4f1\ub85d\ud588\uc5b4.",
+            "\uc774 \ubaa9\ud45c\ub294 Core\uac00 \uc2a4\uc2a4\ub85c \ub9cc\ub4e0 \ubaa9\ud45c\ubcf4\ub2e4 \uba3c\uc800 \ubcf4\uace0, \uc548\uc804\ud55c \ubc94\uc704\uc5d0\uc11c \ucc98\ub9ac\ud560\uac8c.",
+        ])
     if policy.get("denied"):
         reason = compact_text(policy.get("reason") or policy.get("denied_reason") or "\uc815\ucc45 \ucc28\ub2e8")
         return "\n".join([

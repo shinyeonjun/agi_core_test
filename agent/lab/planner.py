@@ -28,6 +28,7 @@ SYSTEM_OBSERVATION_SEQUENCE = [
 ]
 
 ARTIFACT_ONLY_GOAL_TYPES = {
+    "user_directed",
     "workspace_experiment",
     "self_improvement_proposal",
     "project_incubation",
@@ -105,6 +106,8 @@ def build_action_proposals(goal: dict[str, Any] | None, drives: dict[str, float]
     goal_id = int(goal["id"]) if goal and goal.get("id") is not None else None
     cwd = str(project_root())
     if kind == "memory_hygiene":
+        return []
+    if kind in ARTIFACT_ONLY_GOAL_TYPES:
         return []
     if kind == "system_observation":
         completed_steps = _goal_completed_steps(goal)
@@ -195,10 +198,61 @@ def _artifact_content(title: str, goal: dict[str, Any], metrics: dict[str, Any],
     ])
 
 
+def _handle_user_directed_goal(goal: dict[str, Any], drives: dict[str, float]) -> dict[str, Any]:
+    metadata = goal_metadata(goal)
+    task_kind = str(metadata.get("task_kind") or "task_note")
+    user_text = str(metadata.get("raw_user_text") or goal.get("description") or goal.get("title") or "")
+    metrics = collect_metrics()
+    if task_kind == "project_spec":
+        artifact = create_project_spec(
+            str(goal.get("title") or "User requested project"),
+            user_text,
+            ["User-directed priority", "Workspace-only first pass", "No OS mutation without policy approval"],
+        )
+    else:
+        title = {
+            "report": "User requested report",
+            "improvement_plan": "User requested improvement plan",
+            "workspace_experiment": "User requested workspace experiment plan",
+            "task_note": "User requested task note",
+        }.get(task_kind, "User requested task note")
+        artifact = write_text_artifact(
+            "reports",
+            f"user-goal-{goal.get('id')}-{task_kind}.md",
+            _artifact_content(title, goal, metrics, drives),
+            f"user_directed_{task_kind}",
+            title,
+            {"source": "lab_planner", "goal_id": goal.get("id"), "goal_type": "user_directed", "task_kind": task_kind},
+        )
+    mark_goal_done(int(goal["id"]))
+    reflection_id = create_reflection(
+        "Lab tick completed a user-directed goal before autonomous goals.",
+        goal_id=goal.get("id"),
+        learned={"artifact_id": artifact.get("id"), "task_kind": task_kind, "priority_owner": "user"},
+        confidence=0.86,
+    )
+    result = {
+        "status": "user_goal_completed",
+        "executed": False,
+        "profile": current_profile(),
+        "goal_id": goal.get("id"),
+        "artifact_id": artifact.get("id"),
+        "artifact_type": artifact.get("artifact_type"),
+        "task_kind": task_kind,
+        "reflection_id": reflection_id,
+    }
+    log_event("lab", "lab_user_goal_completed", task_kind, result, 0.82)
+    return result
+
+
 def _handle_artifact_goal(goal: dict[str, Any], drives: dict[str, float]) -> dict[str, Any] | None:
     kind = str(goal.get("goal_type") or "")
     if kind not in ARTIFACT_ONLY_GOAL_TYPES:
         return None
+    if goal.get("status") not in {"active", "proposed"}:
+        return None
+    if kind == "user_directed":
+        return _handle_user_directed_goal(goal, drives)
     metrics = collect_metrics()
     if kind == "workspace_experiment":
         artifact = create_status_report("Workspace experiment report", metrics=metrics, drives=drives)

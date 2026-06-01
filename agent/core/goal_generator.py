@@ -157,7 +157,10 @@ def meaningful_open_goals(limit: int = 200) -> list[dict[str, Any]]:
             f"""
             SELECT * FROM goals
             WHERE status IN ({placeholders})
-            ORDER BY id DESC
+            ORDER BY
+                goal_type = 'user_directed' DESC,
+                priority DESC,
+                id DESC
             LIMIT ?
             """,
             (*OPEN_STATUSES, limit),

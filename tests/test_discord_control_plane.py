@@ -8,6 +8,7 @@ from agent.bridge.router import DiscordEvent, channel_role, route_discord_event
 from agent.cli.agentctl import main
 from agent.core.approvals import ApprovalStore
 from agent.core.database import init_db
+from agent.core.goals import list_goals
 from agent.core.policy import PolicyEngine
 
 
@@ -189,6 +190,35 @@ def test_chat_status_is_short_and_command_state_keeps_detail(monkeypatch, tmp_pa
     command_event = DiscordEvent(None, "10", "1", "m7", False, False, "!state")
     command_output = "\n".join(route_discord_event(command_event, control_config()))
     assert "Core \uc0c1\ud0dc" in command_output
+
+
+def test_chat_task_message_creates_user_directed_goal(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    event = DiscordEvent(None, "10", "1", "m8", False, False, "FastAPI 프로젝트 초안 만들어봐")
+    output = "\n".join(route_discord_event(event, control_config()))
+    goals = list_goals(limit=5, include_archived=True)
+    user_goal = next(goal for goal in goals if goal["goal_type"] == "user_directed")
+    assert "작업 목표" in output
+    assert f"#{user_goal['id']}" in output
+    assert user_goal["status"] == "active"
+    assert user_goal["priority"] > 0.9
+
+
+def test_chat_status_message_does_not_create_user_goal(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    event = DiscordEvent(None, "10", "1", "m9", False, False, "지금 뭐하고 있어?")
+    route_discord_event(event, control_config())
+    goals = list_goals(limit=10, include_archived=True)
+    assert not any(goal["goal_type"] == "user_directed" for goal in goals)
+
+
+def test_dangerous_chat_task_is_blocked_goal(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    event = DiscordEvent(None, "10", "1", "m10", False, False, "rm -rf / 실행해봐")
+    output = "\n".join(route_discord_event(event, control_config()))
+    user_goal = next(goal for goal in list_goals(limit=5, include_archived=True) if goal["goal_type"] == "user_directed")
+    assert user_goal["status"] == "blocked"
+    assert "위험" in output
 
 
 

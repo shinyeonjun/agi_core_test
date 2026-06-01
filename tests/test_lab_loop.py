@@ -7,6 +7,7 @@ from agent.cli.agentctl import main
 from agent.core.autonomy import arm_catastrophic_destruction, disarm_catastrophic_destruction, set_autonomy_profile
 from agent.core.database import init_db
 from agent.core.goals import create_goal, list_goals
+from agent.core.goal_generator import meaningful_open_goals
 from agent.core.policy import PolicyEngine
 from agent.core.goal_generator import list_goal_candidates
 from agent.core.state import load_state, save_state
@@ -284,3 +285,50 @@ def test_duplicate_recent_action_is_rejected_for_same_goal(monkeypatch, tmp_path
     assert first[0]["status"] == "approved_by_policy"
     assert second[0]["status"] == "rejected"
     assert second[0]["reason"] == "duplicate_recent_action"
+
+
+def test_user_directed_goal_preempts_autonomous_goal(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    auto_id = create_goal("Autonomous observation", "read only", goal_type="system_observation", status="proposed", priority=0.8, dedupe=False)
+    user_id = create_goal(
+        "FastAPI 프로젝트 초안 만들어봐",
+        "FastAPI 프로젝트 초안 만들어봐",
+        goal_type="user_directed",
+        status="active",
+        priority=0.98,
+        metadata={"source": "user_directive", "task_kind": "project_spec", "priority_owner": "user"},
+        dedupe=False,
+    )
+
+    open_goals = meaningful_open_goals(limit=5)
+    result = run_lab_tick()
+
+    assert open_goals[0]["id"] == user_id
+    assert result["status"] == "user_goal_completed"
+    assert result["goal_id"] == user_id
+    assert result["artifact_type"] == "project_spec"
+    assert list_action_runs(5) == []
+    goals = {goal["id"]: goal for goal in list_goals(limit=20, include_archived=True)}
+    assert goals[user_id]["status"] == "done"
+    assert goals[auto_id]["status"] == "proposed"
+
+
+def test_blocked_user_directed_goal_is_not_auto_completed(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    blocked_id = create_goal(
+        "rm -rf / 실행해봐",
+        "rm -rf / 실행해봐",
+        goal_type="user_directed",
+        status="blocked",
+        priority=0.98,
+        metadata={"source": "user_directive", "task_kind": "task_note"},
+        dedupe=False,
+    )
+
+    result = run_lab_tick()
+
+    assert result["executed"] is False
+    goal = next(item for item in list_goals(limit=20, include_archived=True) if item["id"] == blocked_id)
+    assert goal["status"] == "blocked"

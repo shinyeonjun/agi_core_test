@@ -7,16 +7,19 @@ from agent.core.drives import compute_drives
 from agent.core.goals import create_goal
 from agent.core.learner import retrieve_skills
 from agent.core.policy import PolicyEngine
+from agent.core.user_goals import maybe_create_user_goal
 from agent.memory.store import search_memories
 
 
 def build_talk_decision(user_message: str, source_event_id: int | None = None) -> dict[str, Any]:
     memories = search_memories(user_message, limit=5) if user_message.strip() else []
-    goal_id = create_goal("Answer user input", user_message, goal_type="answer_user", status="done", priority=0.95, risk_level="low", metadata={"renderer": "fallback", "source_event_id": source_event_id}, dedupe=False)
+    user_goal = maybe_create_user_goal(user_message, source_event_id=source_event_id)
+    answer_goal_id = create_goal("Answer user input", user_message, goal_type="answer_user", status="done", priority=0.95, risk_level="low", metadata={"renderer": "fallback", "source_event_id": source_event_id}, dedupe=False)
     drives = compute_drives()
     policy = PolicyEngine().classify_decision(user_message, action_type="user_message")
     skills = retrieve_skills(user_message, tags=["talk", "core"], limit=3)
-    selected_goal = {"id": goal_id, "title": "Answer user input", "goal_type": "answer_user"}
+    selected_goal = user_goal or {"id": answer_goal_id, "title": "Answer user input", "goal_type": "answer_user"}
+    selected_goal_id = int(selected_goal["id"])
     return {
         "version": "0.8",
         "kind": "talk_response",
@@ -25,7 +28,10 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
         "user_message": user_message,
         "source_event_id": source_event_id,
         "selected_goal": selected_goal,
-        "selected_goal_id": goal_id,
+        "selected_goal_id": selected_goal_id,
+        "answer_goal_id": answer_goal_id,
+        "user_directed_goal": user_goal,
+        "user_goal_created": user_goal is not None and user_goal.get("status") in {"active", "waiting_approval"},
         "relevant_memories": memories,
         "selected_memories": memories,
         "relevant_skills": skills,
