@@ -290,6 +290,23 @@ CREATE INDEX IF NOT EXISTS idx_action_runs_created ON action_runs(created_at);
 CREATE INDEX IF NOT EXISTS idx_action_runs_profile ON action_runs(profile);
 CREATE INDEX IF NOT EXISTS idx_action_runs_status ON action_runs(status);
 
+CREATE TABLE IF NOT EXISTS action_proposals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    goal_id INTEGER,
+    command TEXT NOT NULL,
+    cwd TEXT,
+    profile TEXT NOT NULL,
+    risk_level TEXT NOT NULL,
+    status TEXT NOT NULL,
+    reason TEXT,
+    metadata_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_action_proposals_created ON action_proposals(created_at);
+CREATE INDEX IF NOT EXISTS idx_action_proposals_goal ON action_proposals(goal_id);
+CREATE INDEX IF NOT EXISTS idx_action_proposals_profile ON action_proposals(profile);
+CREATE INDEX IF NOT EXISTS idx_action_proposals_status ON action_proposals(status);
+
 CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,

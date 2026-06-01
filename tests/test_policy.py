@@ -241,12 +241,11 @@ def test_policy_full_device_lab_allows_local_os_mutation():
     assert "full_device_lab_local_mutation_allowed" in proposal.payload["matched_rules"]
 
 
-def test_policy_full_device_lab_allows_local_destruction():
+def test_policy_full_device_lab_blocks_catastrophic_destruction_without_arm():
     proposal = PolicyEngine(profile="full_device_lab").classify_text("rm -rf /")
     assert proposal.risk_level == "critical"
-    assert proposal.requires_approval is False
-    assert proposal.denied_reason is None
-    assert "full_device_lab_local_destruction_allowed" in proposal.payload["matched_rules"]
+    assert proposal.requires_approval is True
+    assert proposal.denied_reason == "root_delete_denied"
 
 
 def test_policy_full_device_lab_still_denies_secret_and_remote_script():

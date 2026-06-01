@@ -198,9 +198,13 @@ class PolicyEngine:
         if self.profile != "full_device_lab":
             return risk_level, requires_approval, denied_reason, matched
         if denied_reason == "root_delete_denied":
-            if "full_device_lab_local_destruction_allowed" not in matched:
-                matched.append("full_device_lab_local_destruction_allowed")
-            return risk_level, False, None, matched
+            from agent.core.autonomy import is_catastrophic_destruction_armed
+
+            if is_catastrophic_destruction_armed():
+                if "full_device_lab_catastrophic_destruction_armed" not in matched:
+                    matched.append("full_device_lab_catastrophic_destruction_armed")
+                return risk_level, False, None, matched
+            return risk_level, True, denied_reason, matched
         if denied_reason is not None:
             return risk_level, requires_approval, denied_reason, matched
         local_mutation_rules = {

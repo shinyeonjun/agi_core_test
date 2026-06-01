@@ -6,7 +6,7 @@ from typing import Sequence
 from uuid import uuid4
 
 from agent import __version__
-from agent.core.autonomy import get_autonomy_state, set_autonomy_profile
+from agent.core.autonomy import arm_catastrophic_destruction, disarm_catastrophic_destruction, get_autonomy_state, set_autonomy_profile
 from agent.core.approvals import ApprovalStore
 from agent.core.database import get_schema_version, init_db
 from agent.core.events import list_events, log_event
@@ -22,6 +22,9 @@ from agent.ops.backup import create_backup
 from agent.scheduler.tick import run_tick
 from agent.tools.system_readonly import READ_ONLY_COMMANDS, run_readonly, system_snapshot
 from agent.tools.full_device import get_action_run, list_action_runs, run_action
+from agent.lab.codex_bridge import write_codex_lab_context
+from agent.lab.planner import lab_report, run_lab_tick
+from agent.lab.proposals import list_action_proposals
 from agent.workspace.executor import create_project_spec, create_status_report, ensure_workspace, write_text_artifact
 from agent.workspace.store import list_project_specs, list_workspace_artifacts
 
@@ -210,6 +213,12 @@ def cmd_autonomy(args: argparse.Namespace) -> int:
     if args.autonomy_command == "set":
         print_json(set_autonomy_profile(args.profile))
         return 0
+    if args.autonomy_command == "arm-destruction":
+        print_json(arm_catastrophic_destruction(args.ttl))
+        return 0
+    if args.autonomy_command == "disarm-destruction":
+        print_json(disarm_catastrophic_destruction())
+        return 0
     raise ValueError(f"unknown autonomy command: {args.autonomy_command}")
 
 
@@ -225,6 +234,22 @@ def cmd_action(args: argparse.Namespace) -> int:
         print_json(item or {})
         return 0 if item else 1
     raise ValueError(f"unknown action command: {args.action_command}")
+
+
+def cmd_lab(args: argparse.Namespace) -> int:
+    if args.lab_command == "tick":
+        print_json(run_lab_tick())
+        return 0
+    if args.lab_command == "proposals":
+        print_json(list_action_proposals(args.limit, args.status))
+        return 0
+    if args.lab_command == "report":
+        print_json(lab_report(args.limit))
+        return 0
+    if args.lab_command == "codex-plan":
+        print_json(write_codex_lab_context(args.limit))
+        return 0
+    raise ValueError(f"unknown lab command: {args.lab_command}")
 
 
 def cmd_workspace(args: argparse.Namespace) -> int:
@@ -359,10 +384,17 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("autonomy"); autonomy_sub = p.add_subparsers(dest="autonomy_command", required=True)
     p_auto_show = autonomy_sub.add_parser("show"); p_auto_show.set_defaults(func=cmd_autonomy)
     p_auto_set = autonomy_sub.add_parser("set"); p_auto_set.add_argument("profile", choices=["safe", "workspace", "full_device_lab"]); p_auto_set.set_defaults(func=cmd_autonomy)
+    p_auto_arm = autonomy_sub.add_parser("arm-destruction"); p_auto_arm.add_argument("--ttl", type=int, default=300); p_auto_arm.set_defaults(func=cmd_autonomy)
+    p_auto_disarm = autonomy_sub.add_parser("disarm-destruction"); p_auto_disarm.set_defaults(func=cmd_autonomy)
     p = sub.add_parser("action"); action_sub = p.add_subparsers(dest="action_command", required=True)
     p_action_run = action_sub.add_parser("run"); p_action_run.add_argument("command"); p_action_run.add_argument("--cwd"); p_action_run.add_argument("--timeout", type=int, default=15); p_action_run.add_argument("--goal-id", type=int); p_action_run.add_argument("--shell", action="store_true"); p_action_run.set_defaults(func=cmd_action)
     p_action_history = action_sub.add_parser("history"); p_action_history.add_argument("--limit", type=int, default=20); p_action_history.set_defaults(func=cmd_action)
     p_action_show = action_sub.add_parser("show"); p_action_show.add_argument("action_id", type=int); p_action_show.set_defaults(func=cmd_action)
+    p = sub.add_parser("lab"); lab_sub = p.add_subparsers(dest="lab_command", required=True)
+    p_lab_tick = lab_sub.add_parser("tick"); p_lab_tick.set_defaults(func=cmd_lab)
+    p_lab_proposals = lab_sub.add_parser("proposals"); p_lab_proposals.add_argument("--limit", type=int, default=20); p_lab_proposals.add_argument("--status"); p_lab_proposals.set_defaults(func=cmd_lab)
+    p_lab_report = lab_sub.add_parser("report"); p_lab_report.add_argument("--limit", type=int, default=10); p_lab_report.set_defaults(func=cmd_lab)
+    p_lab_codex = lab_sub.add_parser("codex-plan"); p_lab_codex.add_argument("--limit", type=int, default=10); p_lab_codex.set_defaults(func=cmd_lab)
     p = sub.add_parser("workspace"); workspace_sub = p.add_subparsers(dest="workspace_command", required=True)
     p_ws_init = workspace_sub.add_parser("init"); p_ws_init.set_defaults(func=cmd_workspace)
     p_ws_report = workspace_sub.add_parser("report"); p_ws_report.add_argument("--title", default="Workspace status report"); p_ws_report.set_defaults(func=cmd_workspace)

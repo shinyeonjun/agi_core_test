@@ -1,7 +1,7 @@
 import json
 
 from agent.cli.agentctl import main
-from agent.core.autonomy import get_autonomy_state, set_autonomy_profile
+from agent.core.autonomy import arm_catastrophic_destruction, get_autonomy_state, set_autonomy_profile
 from agent.core.database import init_db
 from agent.tools.action_log import get_action_run, list_action_runs
 from agent.tools.full_device import redact_action_output, run_action
@@ -23,6 +23,7 @@ def test_autonomy_profile_defaults_and_set(monkeypatch, tmp_path):
     assert state["os_mutation_allowed"] is True
     assert state["external_network_actions_allowed"] is False
     assert state["self_modification_allowed"] == "branch_or_proposal"
+    assert state["catastrophic_local_destruction_allowed"] is False
 
 
 def test_action_run_safe_profile_blocks_execution(monkeypatch, tmp_path):
@@ -83,3 +84,16 @@ def test_action_cli_history(monkeypatch, tmp_path, capsys):
     history_output = capsys.readouterr().out
     assert "full_device_lab" in history_output
     assert list_action_runs(1)
+
+
+def test_catastrophic_destruction_arm_allows_root_delete(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    state = arm_catastrophic_destruction(ttl_seconds=30)
+    assert state["catastrophic_local_destruction_allowed"] is True
+    from agent.core.policy import PolicyEngine
+
+    proposal = PolicyEngine(profile="full_device_lab").classify_text("rm -rf /")
+    assert proposal.denied_reason is None
+    assert proposal.requires_approval is False
+    assert "full_device_lab_catastrophic_destruction_armed" in proposal.payload["matched_rules"]

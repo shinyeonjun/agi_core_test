@@ -32,6 +32,9 @@ DEFAULT_STATE: dict[str, Any] = {
     "external_network_actions_allowed": False,
     "os_mutation_allowed": False,
     "self_modification_allowed": "proposal_only",
+    "catastrophic_local_destruction_allowed": False,
+    "catastrophic_local_destruction_armed_until": None,
+    "codex_lab_planner_enabled": False,
     "limits": {
         "max_idle_actions_per_hour": 3,
         "max_codex_calls_per_hour": 0,
