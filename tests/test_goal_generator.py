@@ -3,7 +3,7 @@ import json
 from agent.cli.agentctl import main
 from agent.core.database import init_db
 from agent.core.goal_generator import add_root_objective, generate_goal_candidates, list_goal_candidates, list_root_objectives, meaningful_open_goals, seed_default_objectives
-from agent.core.goals import create_goal, list_goals
+from agent.core.goals import cleanup_noise_goals, create_goal, list_goals
 
 
 def setup_isolated(monkeypatch, tmp_path):
@@ -108,3 +108,34 @@ def test_meaningful_open_goal_filter_sees_past_many_noise_goals(monkeypatch, tmp
     result = generate_goal_candidates()
     assert result["created_goal_id"] is None
     assert result["reason"] == "meaningful_open_goal_exists"
+
+
+def test_cleanup_noise_goals_marks_noise_done_and_redacts(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    noise_id = create_goal(
+        "secret goal summary marker",
+        "description contains DISCORD_BOT_TOKEN=abc123",
+        goal_type="test",
+        status="active",
+        metadata={"token": "abc123"},
+        dedupe=False,
+    )
+    real_id = create_goal("Generate a real report", "meaningful", goal_type="reporting", status="active", dedupe=False)
+
+    result = cleanup_noise_goals()
+
+    goals = {goal["id"]: goal for goal in list_goals(limit=10, include_archived=True)}
+    assert result["marked_done"] == 1
+    assert noise_id in result["noise_goal_ids"]
+    assert goals[noise_id]["status"] == "done"
+    assert goals[noise_id]["description"] == "redacted test/noise goal"
+    assert goals[noise_id]["metadata_json"] == "{}"
+    assert goals[real_id]["status"] == "active"
+
+
+def test_cleanup_noise_cli(monkeypatch, tmp_path, capsys):
+    setup_isolated(monkeypatch, tmp_path)
+    create_goal("secret goal summary marker", "description contains DISCORD_BOT_TOKEN=abc123", goal_type="test", status="active", metadata={"token": "abc123"}, dedupe=False)
+    assert main(["goal", "cleanup-noise"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["marked_done"] == 1

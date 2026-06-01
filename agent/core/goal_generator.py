@@ -10,13 +10,11 @@ from agent.core.autonomy import current_profile
 from agent.core.database import connect, init_db
 from agent.core.drives import compute_drives
 from agent.core.events import list_events, log_event
-from agent.core.goals import create_goal, list_goals, similar
+from agent.core.goals import create_goal, is_noise_goal_record, list_goals, similar
 from agent.core.learner import list_reflections
 from agent.tools.action_log import list_action_runs
 
 OPEN_STATUSES = {"proposed", "active", "waiting_approval", "blocked"}
-NOISE_GOAL_TYPES = {"answer_user", "test", "debug", "debug_smoke", "smoke"}
-NOISE_TITLE_TOKENS = {"answer user input", "secret goal summary marker", "apply user negative feedback"}
 ALLOWED_GENERATED_GOAL_TYPES = {
     "reporting", "system_observation", "workspace_experiment", "research_note",
     "self_improvement_proposal", "skill_review", "memory_cleanup", "project_incubation",
@@ -148,9 +146,7 @@ def list_goal_candidates(limit: int = 20, status: str | None = None) -> list[dic
 
 
 def is_noise_goal(goal: dict[str, Any]) -> bool:
-    title = str(goal.get("title") or "").lower()
-    goal_type = str(goal.get("goal_type") or "").lower()
-    return goal_type in NOISE_GOAL_TYPES or any(token in title for token in NOISE_TITLE_TOKENS)
+    return is_noise_goal_record(goal)
 
 
 def meaningful_open_goals(limit: int = 200) -> list[dict[str, Any]]:

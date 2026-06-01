@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import shlex
+from datetime import datetime, timedelta
 from typing import Any
 
-from agent.config.defaults import now_kst
+from agent.config.defaults import KST, now_kst
 from agent.core.database import connect, init_db
 
 
@@ -14,6 +16,23 @@ def _decode(row: dict[str, Any]) -> dict[str, Any]:
     except json.JSONDecodeError:
         row["metadata"] = {"decode_error": True}
     return row
+
+
+def normalize_command(command: str | list[str] | tuple[str, ...]) -> str:
+    if isinstance(command, (list, tuple)):
+        parts = [str(part) for part in command]
+    else:
+        try:
+            decoded = json.loads(str(command))
+        except json.JSONDecodeError:
+            decoded = None
+        if isinstance(decoded, list):
+            parts = [str(part) for part in decoded]
+        elif isinstance(decoded, str):
+            parts = shlex.split(decoded)
+        else:
+            parts = shlex.split(str(command))
+    return " ".join(parts).strip()
 
 
 def create_action_proposal(
@@ -86,3 +105,33 @@ def proposal_status_counts() -> dict[str, int]:
     with connect() as conn:
         rows = conn.execute("SELECT status, COUNT(*) AS count FROM action_proposals GROUP BY status").fetchall()
     return {str(row["status"]): int(row["count"]) for row in rows}
+
+
+def has_recent_goal_command(goal_id: int | None, command: str, within_hours: int = 24) -> bool:
+    if goal_id is None:
+        return False
+    cutoff = (datetime.now(KST) - timedelta(hours=within_hours)).isoformat(timespec="seconds")
+    target = normalize_command(command)
+    init_db()
+    with connect() as conn:
+        proposals = conn.execute(
+            """
+            SELECT command FROM action_proposals
+            WHERE goal_id = ?
+              AND created_at >= ?
+              AND status IN ('proposed', 'approved_by_policy', 'executed')
+            ORDER BY id DESC
+            """,
+            (goal_id, cutoff),
+        ).fetchall()
+        runs = conn.execute(
+            """
+            SELECT command_json FROM action_runs
+            WHERE goal_id = ?
+              AND created_at >= ?
+              AND status IN ('running', 'completed', 'timeout')
+            ORDER BY id DESC
+            """,
+            (goal_id, cutoff),
+        ).fetchall()
+    return any(normalize_command(row["command"]) == target for row in proposals) or any(normalize_command(row["command_json"]) == target for row in runs)

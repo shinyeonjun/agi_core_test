@@ -6,13 +6,15 @@ import pytest
 from agent.cli.agentctl import main
 from agent.core.autonomy import arm_catastrophic_destruction, disarm_catastrophic_destruction, set_autonomy_profile
 from agent.core.database import init_db
+from agent.core.goals import create_goal, list_goals
 from agent.core.policy import PolicyEngine
 from agent.core.goal_generator import list_goal_candidates
 from agent.core.state import load_state, save_state
 from agent.lab.codex_bridge import write_codex_lab_context
-from agent.lab.planner import lab_report, run_lab_tick, run_lab_tick_if_enabled
+from agent.lab.planner import lab_report, plan_action_proposals, run_lab_tick, run_lab_tick_if_enabled
 from agent.lab.proposals import list_action_proposals
 from agent.tools.action_log import list_action_runs
+from agent.workspace.store import list_project_specs, list_workspace_artifacts
 
 
 def setup_isolated(monkeypatch, tmp_path):
@@ -168,3 +170,117 @@ def test_full_device_lab_tick_if_enabled_does_not_execute_generated_goal_same_ti
     assert result["executed"] is False
     assert result["action_id"] is None
     assert list_action_runs(5) == []
+
+
+def test_lab_planner_ignores_noise_goal_and_generates_real_goal(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    create_goal("Apply user negative feedback", "noise", goal_type="improvement", status="active", dedupe=False)
+    result = run_lab_tick_if_enabled()
+    assert result["status"] == "goal_generated"
+    assert result["generated_goal_id"] is not None
+    assert list_action_runs(5) == []
+
+
+def test_system_observation_advances_past_repeated_disk_check(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    goal_id = create_goal("Observe this system", "read only", goal_type="system_observation", status="proposed", dedupe=False)
+
+    first = run_lab_tick()
+    second = run_lab_tick()
+
+    assert first["executed"] is True
+    assert second["executed"] is True
+    actions = list(reversed(list_action_runs(10)))
+    commands = [json.loads(row["command_json"]) for row in actions]
+    assert commands[0] == ["df", "-h", "/"]
+    assert commands[1] == ["free", "-h"]
+    assert all(row["goal_id"] == goal_id for row in actions[:2])
+
+
+def test_system_observation_sequence_marks_goal_done(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    goal_id = create_goal("Complete system observation", "read only", goal_type="system_observation", status="proposed", dedupe=False)
+
+    results = [run_lab_tick() for _ in range(6)]
+
+    assert all(result["status"] in {"completed", "artifact_created"} for result in results)
+    goal = next(item for item in list_goals(limit=20, include_archived=True) if item["id"] == goal_id)
+    assert goal["status"] == "done"
+    commands = [json.loads(row["command_json"]) for row in reversed(list_action_runs(10))]
+    assert commands[:5] == [
+        ["df", "-h", "/"],
+        ["free", "-h"],
+        ["swapon", "--show"],
+        ["zramctl"],
+        ["systemctl", "--failed", "--no-pager"],
+    ]
+
+
+def test_workspace_experiment_creates_report_and_marks_done_without_shell(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    goal_id = create_goal("Create workspace experiment", "report only", goal_type="workspace_experiment", status="proposed", dedupe=False)
+
+    result = run_lab_tick()
+
+    assert result["status"] == "artifact_created"
+    assert result["executed"] is False
+    assert list_action_runs(5) == []
+    assert list_workspace_artifacts(limit=5, artifact_type="report")
+    goal = next(item for item in list_goals(limit=20, include_archived=True) if item["id"] == goal_id)
+    assert goal["status"] == "done"
+
+
+def test_self_improvement_proposal_creates_report_only(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    create_goal("Propose Core improvement", "proposal only", goal_type="self_improvement_proposal", status="proposed", dedupe=False)
+
+    result = run_lab_tick()
+
+    assert result["status"] == "artifact_created"
+    assert result["artifact_type"] == "self_improvement_proposal"
+    assert list_action_runs(5) == []
+
+
+def test_project_incubation_creates_project_spec(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    create_goal("Draft project candidate", "workspace only", goal_type="project_incubation", status="proposed", dedupe=False)
+
+    result = run_lab_tick()
+
+    assert result["status"] == "artifact_created"
+    assert result["artifact_type"] == "project_spec"
+    assert list_project_specs(limit=5)
+    assert list_action_runs(5) == []
+
+
+def test_memory_cleanup_creates_no_shell_action(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    create_goal("Review memory cleanup", "report only", goal_type="memory_cleanup", status="proposed", dedupe=False)
+
+    result = run_lab_tick()
+
+    assert result["status"] == "artifact_created"
+    assert result["artifact_type"] == "memory_cleanup"
+    assert list_action_runs(5) == []
+
+
+def test_duplicate_recent_action_is_rejected_for_same_goal(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    goal = {
+        "id": create_goal("Observe duplicate suppression", "read only", goal_type="system_observation", status="proposed", dedupe=False),
+        "goal_type": "system_observation",
+        "metadata_json": json.dumps({"sequence": ["disk"], "completed_steps": []}),
+    }
+    first = plan_action_proposals(goal, limit=1)
+    second = plan_action_proposals(goal, limit=1)
+    assert first[0]["status"] == "approved_by_policy"
+    assert second[0]["status"] == "rejected"
+    assert second[0]["reason"] == "duplicate_recent_action"

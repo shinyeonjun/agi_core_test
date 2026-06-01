@@ -11,7 +11,7 @@ from agent.core.autonomy import arm_catastrophic_destruction, disarm_catastrophi
 from agent.core.approvals import ApprovalStore
 from agent.core.database import get_schema_version, init_db
 from agent.core.events import list_events, log_event
-from agent.core.goals import list_goals, mark_goal_done
+from agent.core.goals import cleanup_noise_goals, list_goals, mark_goal_done
 from agent.core.goal_generator import add_root_objective, generate_goal_candidates, list_goal_candidates, list_root_objectives, seed_default_objectives, set_objective_enabled
 from agent.core.learner import list_reflections, list_skills, upsert_skill, update_after_turn
 from agent.core.metrics import collect_metrics
@@ -83,6 +83,11 @@ def cmd_goal_generate(args: argparse.Namespace) -> int:
 
 def cmd_goal_candidates(args: argparse.Namespace) -> int:
     print_json(list_goal_candidates(limit=args.limit, status=args.status))
+    return 0
+
+
+def cmd_goal_cleanup_noise(_args: argparse.Namespace) -> int:
+    print_json(cleanup_noise_goals())
     return 0
 
 
@@ -415,6 +420,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_done = goal_sub.add_parser("done"); p_done.add_argument("goal_id", type=int); p_done.set_defaults(func=cmd_goal_done)
     p_goal_generate = goal_sub.add_parser("generate"); p_goal_generate.add_argument("--dry-run", action="store_true"); p_goal_generate.set_defaults(func=cmd_goal_generate)
     p_goal_candidates = goal_sub.add_parser("candidates"); p_goal_candidates.add_argument("--limit", type=int, default=20); p_goal_candidates.add_argument("--status"); p_goal_candidates.set_defaults(func=cmd_goal_candidates)
+    p_goal_cleanup = goal_sub.add_parser("cleanup-noise"); p_goal_cleanup.set_defaults(func=cmd_goal_cleanup_noise)
 
     p = sub.add_parser("objective"); objective_sub = p.add_subparsers(dest="objective_command", required=True)
     p_objective_seed = objective_sub.add_parser("seed"); p_objective_seed.set_defaults(func=cmd_objective)
