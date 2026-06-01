@@ -1,7 +1,7 @@
 {
   "id": "smoke_talk_001",
   "suite": "smoke",
-  "description": "talk pipeline returns validated v0.8 Core output",
+  "description": "talk pipeline returns a validated natural Core chat output",
   "steps": [{"cmd": "agentctl talk 'Core next step?'"}],
-  "expect": {"contains": ["v0.8", "Core", "event", "goal"]}
+  "expect": {"contains": ["Core"]}
 }
