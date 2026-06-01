@@ -64,6 +64,22 @@ def _approval_summary() -> str:
     ])
 
 
+def _goal_summary() -> str:
+    rows = list_goals(limit=10)
+    return _json_text([
+        {
+            "id": row.get("id"),
+            "title": row.get("title"),
+            "goal_type": row.get("goal_type"),
+            "status": row.get("status"),
+            "priority": row.get("priority"),
+            "risk_level": row.get("risk_level"),
+            "requires_approval": row.get("requires_approval"),
+        }
+        for row in rows
+    ])
+
+
 def handle_command(text: str) -> str | None:
     if not text.startswith("!"):
         return None
@@ -73,7 +89,7 @@ def handle_command(text: str) -> str | None:
     if command == "!state":
         return _state_summary()
     if command == "!goals":
-        return _json_text(list_goals(limit=10))
+        return _goal_summary()
     if command == "!tick":
         return run_tick()["message"]
     if command == "!memories":

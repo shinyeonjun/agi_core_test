@@ -11,6 +11,7 @@ from agent.core.database import get_schema_version, init_db
 from agent.core.events import list_events, log_event
 from agent.core.goals import list_goals, mark_goal_done
 from agent.core.learner import list_reflections, list_skills, upsert_skill, update_after_turn
+from agent.core.metrics import collect_metrics
 from agent.core.pipeline import run_talk
 from agent.core.policy import ActionProposal, PolicyEngine
 from agent.core.state import load_state, save_state
@@ -188,6 +189,16 @@ def cmd_backup(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_metrics(args: argparse.Namespace) -> int:
+    metrics = collect_metrics()
+    if args.json:
+        print_json(metrics)
+    else:
+        for key, value in metrics.items():
+            print(f"{key}: {value}")
+    return 0
+
+
 def cmd_audit(_args: argparse.Namespace) -> int:
     checks = {
         "schema_version": get_schema_version(),
@@ -288,6 +299,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_tool_run = tool_sub.add_parser("run"); p_tool_run.add_argument("name"); p_tool_run.set_defaults(func=cmd_tool_run)
     p = sub.add_parser("snapshot"); p.set_defaults(func=cmd_snapshot)
     p = sub.add_parser("backup"); p.add_argument("--label", default="manual"); p.set_defaults(func=cmd_backup)
+    p = sub.add_parser("metrics"); p.add_argument("--json", action="store_true"); p.set_defaults(func=cmd_metrics)
     p = sub.add_parser("audit"); p.set_defaults(func=cmd_audit)
     p = sub.add_parser("self-check"); p.add_argument("area", choices=["bridge", "memory", "reflection", "tool"]); p.set_defaults(func=cmd_self_check)
 

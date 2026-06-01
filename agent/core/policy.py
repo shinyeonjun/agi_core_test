@@ -68,9 +68,9 @@ class PolicyEngine:
         PolicyRule("ssh_dir", _rx(r"(?:~|/home/[^\s;&|]+|/root)/\.ssh(?:/|\s|$)"), "critical", True, "ssh_key_access_denied"),
         PolicyRule("private_key", _rx(r"\b(id_rsa|id_ed25519|authorized_keys)\b"), "critical", True, "ssh_key_access_denied"),
         PolicyRule("env_file", _rx(r"(?:^|[\s;&|/])\.env(?:[.\w-]*)?(?:[\s;&|]|$)"), "critical", True, "env_access_denied"),
-        PolicyRule("secret_text", _rx(r"(?:\b(secret|api[_-]?key|authorization:\s*bearer|token=|token:|token\.(?:txt|json|env|key)|secret\.(?:txt|json|env|key)|credentials|hosts\.yml)\b|(?:^|[\s/])\.(?:npmrc|pypirc)(?:[\s;&|]|$))"), "critical", True, "secret_access_denied"),
+        PolicyRule("secret_text", _rx(r"(?:\b(secret|secrets|api[_-]?key|authorization:\s*bearer|token=|token:|token\.(?:txt|json|env|key)|secrets?\.(?:txt|json|env|key)|credentials|hosts\.yml|application_default_credentials\.json|config\.json)\b|(?:^|[\s/])\.(?:npmrc|pypirc|netrc)(?:[\s;&|]|$))"), "critical", True, "secret_access_denied"),
         PolicyRule("external_secret_send", _rx(r"\b(external secret|send secret|upload .*secret)\b"), "critical", True, "external_secret_send_denied"),
-        PolicyRule("pipe_to_shell", _rx(r"(?:curl|wget)[^|;&]*\|\s*(?:sh|bash)|bash\s+<\s*\("), "critical", True, "remote_script_execution_denied"),
+        PolicyRule("pipe_to_shell", _rx(r"(?:curl|wget)[^|;&]*\|\s*(?:sh|bash|zsh|python|python3)|(?:bash|sh|zsh)\s+<\s*\(|(?:bash|sh|zsh)\s+-c\s+.*(?:curl|wget)"), "critical", True, "remote_script_execution_denied"),
     )
     approval_rules: tuple[PolicyRule, ...] = (
         PolicyRule("sudo", _rx(r"(?:^|[;&|\s])sudo(?:\s|$)"), "critical", True),
@@ -79,7 +79,7 @@ class PolicyEngine:
         PolicyRule("apt_write", _rx(r"\bapt(?:-get)?\s+(install|remove|purge|upgrade|dist-upgrade|full-upgrade|autoremove)\b"), "high", True),
         PolicyRule("file_write", _rx(r"(?:^|[;&|\s])(rm|mv|chmod|chown|truncate|dd)\b"), "high", True),
         PolicyRule("network_fetch", _rx(r"(?:^|[;&|\s])(curl|wget|scp|rsync)\b"), "medium", True),
-        PolicyRule("installer", _rx(r"(?:^|[;&|\s])(?:python\s+-m\s+pip|pip|npm)\s+(?:install|i)(?:\s|$)"), "high", True),
+        PolicyRule("installer", _rx(r"(?:^|[;&|\s])(?:(?:python|python3)\s+-m\s+pip|pip3?|uv\s+pip|npm|pnpm|yarn|poetry)\s+(?:install|i|add)(?:\s|$)"), "high", True),
     )
     read_only_rules: tuple[PolicyRule, ...] = (
         PolicyRule("df", _rx(r"^\s*df\s+-h(?:\s+/)?\s*$"), "medium", False),

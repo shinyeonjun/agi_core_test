@@ -1,6 +1,6 @@
 from agent.bridge.auth import DiscordAuthConfig, classify_context
 from agent.bridge.formatter import split_for_discord, strip_bot_mention
-from agent.bridge.router import DiscordEvent, _approval_summary, _memory_summary, route_discord_event
+from agent.bridge.router import DiscordEvent, _approval_summary, _goal_summary, _memory_summary, route_discord_event
 
 
 def config() -> DiscordAuthConfig:
@@ -68,3 +68,21 @@ def test_command_approval_summary_hides_payload():
     output = _approval_summary()
     assert "proposed_payload_json" not in output
     assert "proposal" not in output
+
+
+def test_command_goal_summary_hides_description_and_metadata():
+    from agent.core.goals import create_goal
+
+    create_goal(
+        "secret goal summary marker",
+        "description contains DISCORD_BOT_TOKEN=abc123",
+        goal_type="test",
+        metadata={"token": "abc123"},
+        dedupe=False,
+    )
+    output = _goal_summary()
+    assert "secret goal summary marker" in output
+    assert "description" not in output
+    assert "metadata_json" not in output
+    assert "DISCORD_BOT_TOKEN" not in output
+    assert "abc123" not in output
