@@ -89,19 +89,144 @@ def format_approval_card(row: dict[str, Any]) -> str:
 def format_action_update(row: dict[str, Any] | None) -> str:
     if not row:
         return "**\uc791\uc5c5 \uc5c5\ub370\uc774\ud2b8**\n\uc694\uccad\ud55c action\uc744 \ucc3e\uc9c0 \ubabb\ud588\uc5b4."
-    command = row.get("command_json")
-    try:
-        command = json.loads(command) if isinstance(command, str) else command
-    except json.JSONDecodeError:
-        pass
+    command = _decode_command(row.get("command_json"))
+    detail = _action_detail(command, row.get("returncode"))
     return "\n".join([
-        f"**\uc791\uc5c5 {compact_text(row.get('status'))} #{row.get('id')}**",
-        f"\ud504\ub85c\ud544: {compact_text(row.get('profile'))}",
-        f"\uc704\ud5d8\ub3c4: {compact_text(row.get('risk_level'))}",
-        f"\uba85\ub839: `{compact_text(command)}`",
-        f"\uacb0\uacfc: {compact_text(row.get('result_summary'))}",
-        f"\ubc18\ud658\uac12: {compact_text(row.get('returncode'))}",
+        f"**작업 {_status_title(row.get('status'))} #{row.get('id')}**",
+        _action_sentence(row, command),
+        "",
+        f"프로필: {compact_text(row.get('profile'))}",
+        f"위험도: {compact_text(row.get('risk_level'))}",
+        f"영향: {_impact_label(row, command)}",
+        f"결과: {_result_label(row)}",
+        f"상세: {detail}",
     ])
+
+
+def _decode_command(value: object) -> list[str]:
+    if value is None:
+        return []
+    try:
+        decoded = json.loads(str(value))
+    except json.JSONDecodeError:
+        return [compact_text(value)]
+    if isinstance(decoded, list):
+        return [compact_text(item) for item in decoded]
+    return [compact_text(decoded)]
+
+
+def _command_text(command: list[str]) -> str:
+    return " ".join(part for part in command if part and part != "-").strip()
+
+
+def _action_purpose(row: dict[str, Any], command: list[str]) -> str:
+    summary = compact_text(row.get("result_summary"))
+    text = _command_text(command).lower()
+    if summary == "profile_not_full_device_lab":
+        return "안전 모드라 로컬 실행 차단"
+    if summary == "ssh_key_access_denied":
+        return "SSH 키 접근 차단"
+    if summary == "root_delete_denied":
+        return "위험한 삭제 차단"
+    if "df -h /" in text or text == "df -h /":
+        return "루트 디스크 상태 확인"
+    if text.startswith("df "):
+        return "디스크 상태 확인"
+    if text.startswith("free "):
+        return "메모리 상태 확인"
+    if "systemctl --failed" in text:
+        return "실패한 서비스 확인"
+    if text.startswith("printf "):
+        return "lab 동작 테스트"
+    if row.get("status") == "blocked":
+        return "정책에 의해 action 차단"
+    return "로컬 action 처리"
+
+
+def _action_sentence(row: dict[str, Any], command: list[str]) -> str:
+    purpose = _action_purpose(row, command)
+    status = compact_text(row.get("status"))
+    if status == "completed":
+        return _completed_sentence(purpose)
+    if status == "blocked":
+        return f"{purpose} 때문에 실행하지 않았어."
+    if status == "timeout":
+        return f"{purpose} 중 시간이 초과됐어."
+    if status == "failed":
+        return f"{purpose} 중 실패했어."
+    return f"{purpose} 상태를 업데이트했어."
+
+
+def _completed_sentence(purpose: str) -> str:
+    mapping = {
+        "루트 디스크 상태 확인": "루트 디스크 상태를 확인했어.",
+        "디스크 상태 확인": "디스크 상태를 확인했어.",
+        "메모리 상태 확인": "메모리 상태를 확인했어.",
+        "실패한 서비스 확인": "실패한 서비스를 확인했어.",
+        "lab 동작 테스트": "lab 동작 테스트를 완료했어.",
+        "로컬 action 처리": "로컬 action을 처리했어.",
+    }
+    return mapping.get(purpose, f"{purpose}을 완료했어.")
+
+
+def _status_title(value: object) -> str:
+    mapping = {
+        "completed": "완료",
+        "blocked": "차단",
+        "timeout": "시간 초과",
+        "failed": "실패",
+        "running": "진행 중",
+    }
+    raw = compact_text(value)
+    return mapping.get(raw, raw)
+
+
+def _result_label(row: dict[str, Any]) -> str:
+    status = compact_text(row.get("status"))
+    summary = compact_text(row.get("result_summary"))
+    returncode = row.get("returncode")
+    if status == "completed" and (returncode == 0 or summary == "rc=0"):
+        return "성공"
+    if status == "blocked":
+        return f"차단 ({_summary_label(summary)})"
+    if status == "timeout":
+        return "시간 초과"
+    if status == "failed":
+        return "실패"
+    if returncode is not None:
+        return f"{_summary_label(summary)}, rc={compact_text(returncode)}"
+    return _summary_label(summary)
+
+
+def _summary_label(summary: str) -> str:
+    mapping = {
+        "rc=0": "성공",
+        "timeout": "시간 초과",
+        "ssh_key_access_denied": "SSH 키 접근 차단",
+        "profile_not_full_device_lab": "실행 프로필 불일치",
+        "root_delete_denied": "위험한 삭제 차단",
+        "remote_script_execution_denied": "원격 스크립트 실행 차단",
+    }
+    return mapping.get(summary, summary.replace("_", " "))
+
+
+def _impact_label(row: dict[str, Any], command: list[str]) -> str:
+    status = compact_text(row.get("status"))
+    text = _command_text(command).lower()
+    readonly_patterns = ("df ", "free ", "systemctl --failed", "pwd", "ls ", "find ")
+    if status == "blocked":
+        return "실행 안 됨, 시스템 변경 없음"
+    if text.startswith(readonly_patterns) or "systemctl --failed" in text:
+        return "읽기 전용, 시스템 변경 없음"
+    return "로컬 명령 1회 실행"
+
+
+def _action_detail(command: list[str], returncode: object) -> str:
+    command_text = _command_text(command) or "-"
+    rc = compact_text(returncode)
+    if rc == "-":
+        return f"`{command_text}`"
+    return f"`{command_text}`, rc={rc}"
 
 
 def format_daily_summary(metrics: dict[str, Any], approvals: list[dict[str, Any]], actions: list[dict[str, Any]], goals: list[dict[str, Any]]) -> str:

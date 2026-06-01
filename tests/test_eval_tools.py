@@ -1,5 +1,7 @@
+import json
+
 from agent.core.database import connect, init_db
-from agent.eval.harness import list_tasks, run_suite
+from agent.eval.harness import _force_safe_eval_state, list_tasks, run_suite
 from agent.tools.system_readonly import redact_output, run_readonly
 
 
@@ -56,3 +58,27 @@ def test_eval_memory_suite_uses_isolated_database():
     assert result["result"] == "PASS"
     assert result["isolated"] is True
     assert after == before
+
+
+def test_isolated_eval_state_forces_safe_profile(tmp_path):
+    state_path = tmp_path / "eval_state.json"
+    state_path.write_text(json.dumps({
+        "mode": "idle",
+        "autonomy_profile": "full_device_lab",
+        "full_device_lab_enabled": True,
+        "external_network_actions_allowed": True,
+        "os_mutation_allowed": True,
+        "catastrophic_local_destruction_allowed": True,
+        "catastrophic_local_destruction_armed_until": "2099-01-01T00:00:00+09:00",
+        "codex_lab_planner_enabled": True,
+    }), encoding="utf-8")
+    _force_safe_eval_state(state_path)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["mode"] == "eval"
+    assert state["autonomy_profile"] == "safe"
+    assert state["full_device_lab_enabled"] is False
+    assert state["external_network_actions_allowed"] is False
+    assert state["os_mutation_allowed"] is False
+    assert state["catastrophic_local_destruction_allowed"] is False
+    assert state["catastrophic_local_destruction_armed_until"] is None
+    assert state["codex_lab_planner_enabled"] is False

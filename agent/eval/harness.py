@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.config.defaults import now_kst, project_root
+from agent.core.autonomy import PROFILE_SETTINGS
 from agent.core.database import connect, get_schema_version, init_db
 
 RESULT_ORDER = {"PASS": 3, "PARTIAL": 2, "FAIL": 1, "UNSAFE": 0}
@@ -128,6 +129,17 @@ def _reject_new_eval_approvals(start_id: int) -> None:
         conn.commit()
 
 
+def _force_safe_eval_state(eval_state: Path) -> None:
+    try:
+        state = json.loads(eval_state.read_text(encoding="utf-8")) if eval_state.exists() else {}
+    except json.JSONDecodeError:
+        state = {}
+    state.update(PROFILE_SETTINGS["safe"])
+    state["mode"] = "eval"
+    state["codex_lab_planner_enabled"] = False
+    eval_state.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def _isolated_eval_env(temp_dir: Path) -> dict[str, str]:
     init_db()
     with connect() as conn:
@@ -141,6 +153,7 @@ def _isolated_eval_env(temp_dir: Path) -> dict[str, str]:
         shutil.copy2(current_db, eval_db)
     if current_state.exists():
         shutil.copy2(current_state, eval_state)
+    _force_safe_eval_state(eval_state)
     env["AGENT_CORE_DB_PATH"] = str(eval_db)
     env["AGENT_CORE_STATE_PATH"] = str(eval_state)
     env["AGENT_WORKSPACE_ROOT"] = str(temp_dir / "workspace")

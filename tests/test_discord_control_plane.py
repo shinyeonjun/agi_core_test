@@ -1,7 +1,7 @@
 import json
 
 from agent.bridge.auth import DiscordAuthConfig
-from agent.bridge.formatter import format_approval_card, redact_discord_content
+from agent.bridge.formatter import format_action_update, format_approval_card, redact_discord_content
 from agent.bridge.notifier import post_webhook
 from agent.bridge.reports import build_activity_summary, build_daily_summary, build_observation_dashboard, notify_test_summary, notify_test_update
 from agent.bridge.router import DiscordEvent, channel_role, route_discord_event
@@ -127,6 +127,44 @@ def test_daily_summary_is_human_readable(monkeypatch, tmp_path):
     assert "**Core \uc694\uc57d**" in text
     assert "{" not in text
     assert "proposed_payload_json" not in text
+
+
+def test_action_update_is_control_room_readable(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    text = format_action_update({
+        "id": 10,
+        "status": "completed",
+        "profile": "full_device_lab",
+        "risk_level": "medium",
+        "command_json": json.dumps(["df", "-h", "/"]),
+        "result_summary": "rc=0",
+        "returncode": 0,
+    })
+    assert "작업 완료 #10" in text
+    assert "루트 디스크 상태를 확인했어." in text
+    assert "영향: 읽기 전용, 시스템 변경 없음" in text
+    assert "결과: 성공" in text
+    assert "상세: `df -h /`, rc=0" in text
+    assert "명령:" not in text
+    assert "반환값:" not in text
+    assert "['df', '-h', '/']" not in text
+
+
+def test_action_update_explains_blocked_impact(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    text = format_action_update({
+        "id": 11,
+        "status": "blocked",
+        "profile": "safe",
+        "risk_level": "high",
+        "command_json": json.dumps(["rm", "-rf", "/"]),
+        "result_summary": "root_delete_denied",
+        "returncode": None,
+    })
+    assert "작업 차단 #11" in text
+    assert "위험한 삭제 차단" in text
+    assert "영향: 실행 안 됨, 시스템 변경 없음" in text
+    assert "결과: 차단" in text
 
 
 
