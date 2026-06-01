@@ -27,6 +27,11 @@ DEFAULT_STATE: dict[str, Any] = {
         "last_success_at": None,
         "failure_count": 0,
     },
+    "autonomy_profile": "safe",
+    "full_device_lab_enabled": False,
+    "external_network_actions_allowed": False,
+    "os_mutation_allowed": False,
+    "self_modification_allowed": "proposal_only",
     "limits": {
         "max_idle_actions_per_hour": 3,
         "max_codex_calls_per_hour": 0,

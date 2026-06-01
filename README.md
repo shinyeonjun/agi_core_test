@@ -30,6 +30,8 @@ agentctl audit
 agentctl metrics
 agentctl workspace init
 agentctl workspace report --title "Daily workspace status"
+agentctl autonomy show
+agentctl action history
 ```
 
 ## Discord
@@ -42,3 +44,15 @@ python -m agent.bridge.discord_bot
 ```
 
 Discord connects to Core only. Discord input never executes shell commands directly. Risky requests are separated into policy and approval flow.
+
+## Full Device Lab
+
+Default autonomy profile is `safe`. `full_device_lab` must be enabled explicitly before `agentctl action run` can execute local commands. Even in lab mode, secret access, credential exfiltration, remote script execution, network scanning, payment, and cloud creation patterns stay denied.
+
+```bash
+agentctl autonomy show
+agentctl autonomy set full_device_lab
+agentctl action run "printf lab-ok"
+agentctl action history
+agentctl autonomy set safe
+```

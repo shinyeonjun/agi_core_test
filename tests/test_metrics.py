@@ -19,6 +19,7 @@ METRIC_KEYS = {
     "discord_messages_24h",
     "tick_count_24h",
     "workspace_artifact_count",
+    "action_runs_count",
 }
 
 

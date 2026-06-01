@@ -267,6 +267,29 @@ CREATE TABLE IF NOT EXISTS project_specs (
 );
 CREATE INDEX IF NOT EXISTS idx_project_specs_status ON project_specs(status);
 
+
+CREATE TABLE IF NOT EXISTS action_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    goal_id INTEGER,
+    action_type TEXT NOT NULL,
+    command_json TEXT NOT NULL,
+    cwd TEXT,
+    profile TEXT NOT NULL,
+    risk_level TEXT NOT NULL,
+    status TEXT NOT NULL,
+    returncode INTEGER,
+    stdout TEXT,
+    stderr TEXT,
+    before_snapshot_json TEXT,
+    after_snapshot_json TEXT,
+    result_summary TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_action_runs_created ON action_runs(created_at);
+CREATE INDEX IF NOT EXISTS idx_action_runs_profile ON action_runs(profile);
+CREATE INDEX IF NOT EXISTS idx_action_runs_status ON action_runs(status);
+
 CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,

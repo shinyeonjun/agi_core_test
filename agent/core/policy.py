@@ -63,6 +63,9 @@ def _rx(pattern: str) -> re.Pattern[str]:
 
 
 class PolicyEngine:
+    def __init__(self, profile: str | None = None) -> None:
+        self.profile = profile or "safe"
+
     deny_rules: tuple[PolicyRule, ...] = (
         PolicyRule("root_delete", _rx(r"(?:^|[;&|\s])rm\s+(?:--\s+)?-[^\s]*[rR][^\s]*[fF][^\s]*(?:\s+--)?\s+/(?:\*|\.{1,2}(?:/)?|\s|$)"), "critical", True, "root_delete_denied"),
         PolicyRule("ssh_dir", _rx(r"(?:~|/home/[^\s;&|]+|/root)/\.ssh(?:/|\s|$)"), "critical", True, "ssh_key_access_denied"),
@@ -70,6 +73,9 @@ class PolicyEngine:
         PolicyRule("env_file", _rx(r"(?:^|[\s;&|/])\.env(?:[.\w-]*)?(?:[\s;&|]|$)"), "critical", True, "env_access_denied"),
         PolicyRule("secret_text", _rx(r"(?:\b(secret|secrets|api[_-]?key|authorization:\s*bearer|token=|token:|token\.(?:txt|json|env|key)|secrets?\.(?:txt|json|env|key)|credentials|hosts\.yml|application_default_credentials\.json|config\.json)\b|(?:^|[\s/])\.(?:npmrc|pypirc|netrc)(?:[\s;&|]|$))"), "critical", True, "secret_access_denied"),
         PolicyRule("external_secret_send", _rx(r"\b(external secret|send secret|upload .*secret)\b"), "critical", True, "external_secret_send_denied"),
+        PolicyRule("network_scan", _rx(r"(?:^|[;&|\s])(nmap|masscan|zmap|hydra|sqlmap|nikto|hping3)(?:\s|$)|\b(port scan|network scan|bruteforce|brute force|ddos|dos attack)\b"), "critical", True, "external_harm_denied"),
+        PolicyRule("credential_upload", _rx(r"\b(upload|post|send|exfiltrate)\b.*\b(secret|token|credential|\.env|id_rsa|private key)\b|(?:^|[;&|\s])(scp|rsync)\b"), "critical", True, "credential_exfiltration_denied"),
+        PolicyRule("payment_or_cloud", _rx(r"\b(stripe|paypal|billing|purchase|buy|aws\s+.*create|gcloud\s+.*create|az\s+.*create)\b"), "critical", True, "payment_or_cloud_creation_denied"),
         PolicyRule("pipe_to_shell", _rx(r"(?:curl|wget)[^|;&]*\|\s*(?:sh|bash|zsh|python|python3)|(?:bash|sh|zsh)\s+<\s*\(|(?:bash|sh|zsh)\s+-c\s+.*(?:curl|wget)"), "critical", True, "remote_script_execution_denied"),
     )
     approval_rules: tuple[PolicyRule, ...] = (
@@ -142,6 +148,9 @@ class PolicyEngine:
                     requires_approval = False
                     break
 
+        risk_level, requires_approval, denied_reason, matched = self._apply_profile_policy(
+            risk_level, requires_approval, denied_reason, matched
+        )
         return PolicyDecision(
             input_text=text,
             normalized_text=normalized,
@@ -178,6 +187,35 @@ class PolicyEngine:
         if action_type in self.internal_actions:
             return ActionProposal(action_type, description, payload, "low", False)
         return self.classify_text(f"{description} {payload}", action_type=action_type)
+
+    def _apply_profile_policy(
+        self,
+        risk_level: RiskLevel,
+        requires_approval: bool,
+        denied_reason: str | None,
+        matched: list[str],
+    ) -> tuple[RiskLevel, bool, str | None, list[str]]:
+        if self.profile != "full_device_lab":
+            return risk_level, requires_approval, denied_reason, matched
+        if denied_reason == "root_delete_denied":
+            if "full_device_lab_local_destruction_allowed" not in matched:
+                matched.append("full_device_lab_local_destruction_allowed")
+            return risk_level, False, None, matched
+        if denied_reason is not None:
+            return risk_level, requires_approval, denied_reason, matched
+        local_mutation_rules = {
+            "sudo",
+            "etc_path",
+            "systemctl_write",
+            "apt_write",
+            "file_write",
+            "installer",
+        }
+        if any(rule in local_mutation_rules for rule in matched):
+            if "full_device_lab_local_mutation_allowed" not in matched:
+                matched.append("full_device_lab_local_mutation_allowed")
+            return risk_level, False, None, matched
+        return risk_level, requires_approval, denied_reason, matched
 
     def _normalize_text(self, text: str) -> str:
         text = text.strip().lower().replace("'", " ").replace('"', " ")
