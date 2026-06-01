@@ -6,7 +6,7 @@ from typing import Sequence
 from uuid import uuid4
 
 from agent import __version__
-from agent.bridge.reports import notify_action, notify_daily_summary, notify_test_summary, notify_test_update
+from agent.bridge.reports import notify_action, notify_activity_summary, notify_daily_summary, notify_test_summary, notify_test_update
 from agent.core.autonomy import arm_catastrophic_destruction, disarm_catastrophic_destruction, get_autonomy_state, set_autonomy_profile
 from agent.core.approvals import ApprovalStore
 from agent.core.database import get_schema_version, init_db
@@ -208,6 +208,9 @@ def cmd_notify(args: argparse.Namespace) -> int:
     if args.notify_command == "daily-summary":
         print_json(notify_daily_summary(dry_run=dry_run))
         return 0
+    if args.notify_command == "activity-summary":
+        print_json(notify_activity_summary(dry_run=dry_run))
+        return 0
     if args.notify_command == "action":
         print_json(notify_action(args.action_id, dry_run=dry_run))
         return 0
@@ -403,6 +406,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_notify_summary = notify_sub.add_parser("test-summary"); p_notify_summary.add_argument("--dry-run", action="store_true"); p_notify_summary.set_defaults(func=cmd_notify)
     p_notify_update = notify_sub.add_parser("test-update"); p_notify_update.add_argument("--dry-run", action="store_true"); p_notify_update.set_defaults(func=cmd_notify)
     p_notify_daily = notify_sub.add_parser("daily-summary"); p_notify_daily.add_argument("--dry-run", action="store_true"); p_notify_daily.set_defaults(func=cmd_notify)
+    p_notify_activity = notify_sub.add_parser("activity-summary"); p_notify_activity.add_argument("--dry-run", action="store_true"); p_notify_activity.set_defaults(func=cmd_notify)
     p_notify_action = notify_sub.add_parser("action"); p_notify_action.add_argument("action_id", type=int); p_notify_action.add_argument("--dry-run", action="store_true"); p_notify_action.set_defaults(func=cmd_notify)
     p = sub.add_parser("autonomy"); autonomy_sub = p.add_subparsers(dest="autonomy_command", required=True)
     p_auto_show = autonomy_sub.add_parser("show"); p_auto_show.set_defaults(func=cmd_autonomy)

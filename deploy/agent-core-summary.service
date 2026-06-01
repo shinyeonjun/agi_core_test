@@ -1,0 +1,12 @@
+[Unit]
+Description=Local Stateful Agent Core Activity Summary
+Wants=network-online.target
+After=network-online.target agent-core-discord.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/agent_core
+EnvironmentFile=-/home/ubuntu/agent_core/.env
+ExecStart=/home/ubuntu/agent_core/venv/bin/agentctl notify activity-summary
+NoNewPrivileges=true

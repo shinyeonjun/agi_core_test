@@ -1,0 +1,12 @@
+[Unit]
+Description=Send Local Stateful Agent Core activity summary periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+AccuracySec=1min
+Persistent=true
+Unit=agent-core-summary.service
+
+[Install]
+WantedBy=timers.target
