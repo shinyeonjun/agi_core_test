@@ -59,20 +59,15 @@ agentctl autonomy set safe
 
 ## Codex Runtime Tuning
 
-Chat and language interpretation use component-specific Codex settings. Leave model variables empty unless the current auth mode supports the target model.
+Chat and language interpretation use faster Codex settings. Code work should keep the stronger default model.
 
 ```bash
+AGENT_CODEX_LANGUAGE_MODEL=gpt-5.3-codex-spark
 AGENT_CODEX_LANGUAGE_REASONING=low
 AGENT_CODEX_LANGUAGE_TIMEOUT=20
+AGENT_CODEX_RENDERER_MODEL=gpt-5.3-codex-spark
 AGENT_CODEX_RENDERER_REASONING=low
 AGENT_CODEX_RENDERER_TIMEOUT=20
+AGENT_CODEX_WORK_MODEL=gpt-5.5
 AGENT_CODEX_WORK_REASONING=medium
-```
-
-Optional model overrides:
-
-```bash
-AGENT_CODEX_LANGUAGE_MODEL=
-AGENT_CODEX_RENDERER_MODEL=
-AGENT_CODEX_WORK_MODEL=
 ```
