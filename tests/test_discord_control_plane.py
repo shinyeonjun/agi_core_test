@@ -3,7 +3,7 @@ import json
 from agent.bridge.auth import DiscordAuthConfig
 from agent.bridge.formatter import format_approval_card, redact_discord_content
 from agent.bridge.notifier import post_webhook
-from agent.bridge.reports import build_activity_summary, build_daily_summary, notify_test_summary, notify_test_update
+from agent.bridge.reports import build_activity_summary, build_daily_summary, build_observation_dashboard, notify_test_summary, notify_test_update
 from agent.bridge.router import DiscordEvent, channel_role, route_discord_event
 from agent.cli.agentctl import main
 from agent.core.approvals import ApprovalStore
@@ -116,6 +116,9 @@ def test_notify_dry_run_cli(capsys, monkeypatch, tmp_path):
     assert main(["notify", "activity-summary", "--dry-run"]) == 0
     activity = json.loads(capsys.readouterr().out)
     assert activity["reason"] == "missing_webhook_url"
+    assert main(["notify", "observation-dashboard", "--dry-run"]) == 0
+    observation = json.loads(capsys.readouterr().out)
+    assert observation["reason"] == "missing_webhook_url"
 
 
 def test_daily_summary_is_human_readable(monkeypatch, tmp_path):
@@ -154,12 +157,19 @@ def test_chat_status_is_short_and_command_state_keeps_detail(monkeypatch, tmp_pa
 def test_activity_summary_reports_current_work(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     text = build_activity_summary()
-    assert "Core \ud65c\ub3d9 \uc694\uc57d" in text
-    assert "\uc9c0\uae08 \uc0c1\ud0dc" in text
-    assert "\ucd5c\uadfc\uc5d0 \ud55c \uc77c" in text
+    assert "Core \uad00\uc81c\ud310" in text
+    assert "\ud55c\ub208\uc5d0" in text
+    assert "24\uc2dc\uac04 \uc9c0\ud45c" in text
+    assert "\ucd5c\uadfc action" in text
+    assert "\uc81c\uc548 \ud050" in text
     assert "\ub2e4\uc74c\uc5d0 \ubcfc \uac83" in text
     assert "proposed_payload_json" not in text
     assert "DISCORD_BOT_TOKEN" not in text
     assert "secret goal summary marker" not in text
     assert "ssh_key_access_denied" not in text
     assert "completed / rc=0" not in text
+
+
+def test_observation_dashboard_is_activity_summary_source(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    assert build_activity_summary() == build_observation_dashboard()
