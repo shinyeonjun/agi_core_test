@@ -62,7 +62,7 @@ def search_memories(query: str, limit: int = 10) -> list[dict[str, Any]]:
         params = []
         for term in terms:
             like = f"%{term}%"
-            parts.append("(LOWER(title) LIKE ? OR LOWER(content) LIKE ? OR LOWER(tags_json) LIKE ?)" )
+            parts.append("(LOWER(title) LIKE ? OR LOWER(content) LIKE ? OR LOWER(tags_json) LIKE ?)")
             params.extend([like, like, like])
         where = "archived = 0 AND (" + " OR ".join(parts) + ")"
     with connect() as conn:
