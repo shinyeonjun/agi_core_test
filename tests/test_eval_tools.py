@@ -1,3 +1,4 @@
+from agent.core.database import connect, init_db
 from agent.eval.harness import list_tasks, run_suite
 from agent.tools.system_readonly import redact_output, run_readonly
 
@@ -10,6 +11,7 @@ def test_eval_tasks_exist():
 def test_run_policy_suite_passes():
     result = run_suite("policy")
     assert result["result"] == "PASS"
+    assert result["isolated"] is True
     assert result["release_blocked"] is False
 
 
@@ -40,3 +42,15 @@ def test_readonly_tool_missing_binary_is_recorded(monkeypatch):
         system_readonly.READ_ONLY_COMMANDS["uptime"] = original
     assert result["returncode"] == 127
     assert result["error"] == "command_not_found"
+
+
+def test_eval_memory_suite_uses_isolated_database():
+    init_db()
+    with connect() as conn:
+        before = conn.execute("SELECT COUNT(*) AS count FROM memories").fetchone()["count"]
+    result = run_suite("memory")
+    with connect() as conn:
+        after = conn.execute("SELECT COUNT(*) AS count FROM memories").fetchone()["count"]
+    assert result["result"] == "PASS"
+    assert result["isolated"] is True
+    assert after == before

@@ -42,6 +42,28 @@ def _json_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2)
 
 
+def _state_summary() -> str:
+    state = load_state()
+    keys = ["version", "mode", "current_focus", "autonomous_level", "risk_level", "memory_clutter", "last_user_interaction_at", "last_idle_tick_at"]
+    return _json_text({key: state.get(key) for key in keys})
+
+
+def _memory_summary(query: str) -> str:
+    rows = search_memories(query or "core", limit=8)
+    return _json_text([
+        {"id": row.get("id"), "title": row.get("title"), "memory_type": row.get("memory_type"), "importance": row.get("importance"), "score": row.get("score")}
+        for row in rows
+    ])
+
+
+def _approval_summary() -> str:
+    rows = ApprovalStore().list_pending()
+    return _json_text([
+        {"id": row.get("id"), "action_type": row.get("action_type"), "risk_level": row.get("risk_level"), "status": row.get("status"), "description": row.get("description")}
+        for row in rows
+    ])
+
+
 def handle_command(text: str) -> str | None:
     if not text.startswith("!"):
         return None
@@ -49,15 +71,15 @@ def handle_command(text: str) -> str | None:
     command = parts[0].lower()
     arg = parts[1] if len(parts) > 1 else ""
     if command == "!state":
-        return _json_text(load_state())
+        return _state_summary()
     if command == "!goals":
         return _json_text(list_goals(limit=10))
     if command == "!tick":
         return run_tick()["message"]
     if command == "!memories":
-        return _json_text(search_memories(arg or "core", limit=8))
+        return _memory_summary(arg)
     if command == "!approvals":
-        return _json_text(ApprovalStore().list_pending())
+        return _approval_summary()
     if command == "!approve" and arg.strip().isdigit():
         ok = ApprovalStore().approve(int(arg.strip()))
         return "approved" if ok else "not found or not pending"

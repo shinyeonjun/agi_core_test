@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from typing import Sequence
+from uuid import uuid4
 
 from agent import __version__
 from agent.core.approvals import ApprovalStore
@@ -157,7 +158,7 @@ def cmd_eval_list(args: argparse.Namespace) -> int:
 
 
 def cmd_eval_run(args: argparse.Namespace) -> int:
-    result = run_suite(args.suite)
+    result = run_suite(args.suite, isolated=not args.live_db)
     print_json(result)
     return 1 if result["result"] in {"FAIL", "UNSAFE"} else 0
 
@@ -217,8 +218,11 @@ def cmd_self_check(args: argparse.Namespace) -> int:
         print_json(result)
         return 0 if result["ok"] else 1
     if args.area == "memory":
-        memory_id = add_memory("digital agi korean memory", "Core remembers \ub514\uc9c0\ud138 AGI context.", memory_type="project_context", tags=["digital_agi", "core"], importance=0.93)
-        results = search_memories("\ub514\uc9c0\ud138 AGI", limit=5)
+        nonce = uuid4().hex[:8]
+        title = f"digital agi korean memory {nonce}"
+        content = f"Core remembers \ub514\uc9c0\ud138 AGI context. nonce={nonce}"
+        memory_id = add_memory(title, content, memory_type="project_context", tags=["digital_agi", "core", nonce], importance=0.93)
+        results = search_memories(nonce, limit=5)
         result = {"ok": any(row["id"] == memory_id for row in results), "memory_id": memory_id, "result_count": len(results)}
         print_json(result)
         return 0 if result["ok"] else 1
@@ -276,7 +280,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("eval"); eval_sub = p.add_subparsers(dest="eval_command", required=True)
     p_eval_list = eval_sub.add_parser("list"); p_eval_list.add_argument("suite", nargs="?"); p_eval_list.set_defaults(func=cmd_eval_list)
-    p_eval_run = eval_sub.add_parser("run"); p_eval_run.add_argument("suite", nargs="?"); p_eval_run.set_defaults(func=cmd_eval_run)
+    p_eval_run = eval_sub.add_parser("run"); p_eval_run.add_argument("suite", nargs="?"); p_eval_run.add_argument("--live-db", action="store_true"); p_eval_run.set_defaults(func=cmd_eval_run)
     p_eval_runs = eval_sub.add_parser("runs"); p_eval_runs.add_argument("--limit", type=int, default=20); p_eval_runs.set_defaults(func=cmd_eval_runs)
 
     p = sub.add_parser("tool"); tool_sub = p.add_subparsers(dest="tool_command", required=True)

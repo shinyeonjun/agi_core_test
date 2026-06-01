@@ -1,6 +1,6 @@
 from agent.bridge.auth import DiscordAuthConfig, classify_context
 from agent.bridge.formatter import split_for_discord, strip_bot_mention
-from agent.bridge.router import DiscordEvent, route_discord_event
+from agent.bridge.router import DiscordEvent, _approval_summary, _memory_summary, route_discord_event
 
 
 def config() -> DiscordAuthConfig:
@@ -40,6 +40,7 @@ def test_route_command_state_returns_chunks():
     chunks = route_discord_event(event, config())
     assert chunks
     assert "mode" in chunks[0]
+    assert "renderer" not in chunks[0]
 
 
 def test_bot_message_ignored():
@@ -51,3 +52,19 @@ def test_bot_message_ignored():
 def test_self_check_bridge_cli_shape():
     from agent.cli.agentctl import main
     assert main(["self-check", "bridge"]) == 0
+
+
+def test_command_memory_summary_hides_content():
+    from agent.memory.store import add_memory
+
+    add_memory("secret marker memory", "DISCORD_BOT_TOKEN=abc123", tags=["secret_marker"])
+    output = _memory_summary("secret marker")
+    assert "secret marker memory" in output
+    assert "DISCORD_BOT_TOKEN" not in output
+    assert "content" not in output
+
+
+def test_command_approval_summary_hides_payload():
+    output = _approval_summary()
+    assert "proposed_payload_json" not in output
+    assert "proposal" not in output

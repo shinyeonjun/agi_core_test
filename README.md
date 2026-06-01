@@ -4,12 +4,12 @@ Digital AGI-oriented Local Stateful Agent Core for Orange Pi 5. This project doe
 
 ## Current Scope
 
-- v0.3 Discord conversational bridge
+- v0.6-alpha Discord conversational bridge
 - Goal deduplication and cooldown
 - Reflection plus skill learner
 - SQLite FTS5 memory search with LIKE fallback
 - Evaluation harness
-- CodexRenderer isolation skeleton with fallback
+- CodexRenderer sanitized isolation boundary with fallback
 - Read-only ToolExecutor and system snapshot
 - systemd unit templates
 

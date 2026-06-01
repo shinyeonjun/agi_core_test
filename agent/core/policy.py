@@ -67,9 +67,10 @@ class PolicyEngine:
         PolicyRule("root_delete", _rx(r"(?:^|[;&|\s])rm\s+(?:--\s+)?-[^\s]*[rR][^\s]*[fF][^\s]*(?:\s+--)?\s+/(?:\*|\.{1,2}(?:/)?|\s|$)"), "critical", True, "root_delete_denied"),
         PolicyRule("ssh_dir", _rx(r"(?:~|/home/[^\s;&|]+|/root)/\.ssh(?:/|\s|$)"), "critical", True, "ssh_key_access_denied"),
         PolicyRule("private_key", _rx(r"\b(id_rsa|id_ed25519|authorized_keys)\b"), "critical", True, "ssh_key_access_denied"),
-        PolicyRule("env_file", _rx(r"(?:^|[\s;&|/])\.env(?:\s|$)"), "critical", True, "env_access_denied"),
-        PolicyRule("secret_text", _rx(r"\b(secret|api[_-]?key|authorization:\s*bearer|token=|token:|token\.(?:txt|json|env|key)|secret\.(?:txt|json|env|key))"), "critical", True, "secret_access_denied"),
+        PolicyRule("env_file", _rx(r"(?:^|[\s;&|/])\.env(?:[.\w-]*)?(?:[\s;&|]|$)"), "critical", True, "env_access_denied"),
+        PolicyRule("secret_text", _rx(r"(?:\b(secret|api[_-]?key|authorization:\s*bearer|token=|token:|token\.(?:txt|json|env|key)|secret\.(?:txt|json|env|key)|credentials|hosts\.yml)\b|(?:^|[\s/])\.(?:npmrc|pypirc)(?:[\s;&|]|$))"), "critical", True, "secret_access_denied"),
         PolicyRule("external_secret_send", _rx(r"\b(external secret|send secret|upload .*secret)\b"), "critical", True, "external_secret_send_denied"),
+        PolicyRule("pipe_to_shell", _rx(r"(?:curl|wget)[^|;&]*\|\s*(?:sh|bash)|bash\s+<\s*\("), "critical", True, "remote_script_execution_denied"),
     )
     approval_rules: tuple[PolicyRule, ...] = (
         PolicyRule("sudo", _rx(r"(?:^|[;&|\s])sudo(?:\s|$)"), "critical", True),
@@ -78,6 +79,7 @@ class PolicyEngine:
         PolicyRule("apt_write", _rx(r"\bapt(?:-get)?\s+(install|remove|purge|upgrade|dist-upgrade|full-upgrade|autoremove)\b"), "high", True),
         PolicyRule("file_write", _rx(r"(?:^|[;&|\s])(rm|mv|chmod|chown|truncate|dd)\b"), "high", True),
         PolicyRule("network_fetch", _rx(r"(?:^|[;&|\s])(curl|wget|scp|rsync)\b"), "medium", True),
+        PolicyRule("installer", _rx(r"(?:^|[;&|\s])(?:python\s+-m\s+pip|pip|npm)\s+(?:install|i)(?:\s|$)"), "high", True),
     )
     read_only_rules: tuple[PolicyRule, ...] = (
         PolicyRule("df", _rx(r"^\s*df\s+-h(?:\s+/)?\s*$"), "medium", False),
@@ -112,9 +114,16 @@ class PolicyEngine:
         requires_approval = False
         denied_reason: str | None = None
 
+        if self._looks_like_root_delete(normalized):
+            matched.append("root_delete")
+            risk_level = "critical"
+            requires_approval = True
+            denied_reason = denied_reason or "root_delete_denied"
+
         for rule in self.deny_rules:
             if rule.matches(normalized):
-                matched.append(rule.name)
+                if rule.name not in matched:
+                    matched.append(rule.name)
                 risk_level = self._max_risk(risk_level, rule.risk_level)  # type: ignore[assignment]
                 requires_approval = requires_approval or rule.requires_approval
                 denied_reason = denied_reason or rule.denied_reason
@@ -175,6 +184,30 @@ class PolicyEngine:
         text = re.sub(r"\s+", " ", text)
         text = re.sub(r"\s*([;&|])\s*", r" \1 ", text)
         return re.sub(r"\s+", " ", text).strip()
+
+    def _looks_like_root_delete(self, text: str) -> bool:
+        dangerous_targets = {"", "/", "/*", "/.", "/..", "~", "$home", "${home}", "/root", "/home/ubuntu"}
+        for segment in re.split(r"[;&|]+", text):
+            tokens = segment.strip().split()
+            if "rm" not in tokens:
+                continue
+            rm_index = tokens.index("rm")
+            args = tokens[rm_index + 1:]
+            flags = ""
+            targets: list[str] = []
+            for arg in args:
+                if arg == "--":
+                    continue
+                if arg.startswith("-"):
+                    flags += arg.lstrip("-").lower()
+                    continue
+                targets.append(arg.rstrip("/") or "/")
+            if "r" not in flags or "f" not in flags:
+                continue
+            for target in targets:
+                if target in dangerous_targets or target.startswith("/home/ubuntu/"):
+                    return True
+        return False
 
     def _max_risk(self, current: str, candidate: str) -> str:
         return candidate if RISK_ORDER[candidate] > RISK_ORDER[current] else current

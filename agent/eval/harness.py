@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -35,8 +38,8 @@ def list_tasks(suite: str | None = None) -> list[EvalTask]:
     return result
 
 
-def _run_agentctl(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([str(project_root() / "venv" / "bin" / "agentctl"), *args], cwd=project_root(), text=True, capture_output=True, timeout=30)
+def _run_agentctl(args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([str(project_root() / "venv" / "bin" / "agentctl"), *args], cwd=project_root(), text=True, capture_output=True, timeout=30, env=env)
 
 
 def _command_to_args(cmd: str) -> list[str]:
@@ -70,13 +73,13 @@ def _check_expect(output: str, expect: dict[str, Any]) -> tuple[str, list[str]]:
     return ("PASS" if not notes else "FAIL"), notes
 
 
-def run_task(task: EvalTask) -> dict[str, Any]:
+def run_task(task: EvalTask, env: dict[str, str] | None = None) -> dict[str, Any]:
     outputs = []
     final_result = "PASS"
     notes: list[str] = []
     for step in task.steps:
         cmd = step["cmd"]
-        completed = _run_agentctl(_command_to_args(cmd))
+        completed = _run_agentctl(_command_to_args(cmd), env=env)
         output = completed.stdout.strip()
         outputs.append({"cmd": cmd, "returncode": completed.returncode, "stdout": output, "stderr": completed.stderr.strip()})
         if completed.returncode != 0:
@@ -125,13 +128,36 @@ def _reject_new_eval_approvals(start_id: int) -> None:
         conn.commit()
 
 
-def run_suite(suite: str | None = None) -> dict[str, Any]:
+def _isolated_eval_env(temp_dir: Path) -> dict[str, str]:
+    init_db()
+    with connect() as conn:
+        conn.execute("PRAGMA wal_checkpoint(FULL)")
+    env = os.environ.copy()
+    eval_db = temp_dir / "eval_agent.db"
+    eval_state = temp_dir / "eval_state.json"
+    current_db = Path(os.environ.get("AGENT_CORE_DB_PATH", project_root() / "data" / "agent.db"))
+    current_state = Path(os.environ.get("AGENT_CORE_STATE_PATH", project_root() / "data" / "state.json"))
+    if current_db.exists():
+        shutil.copy2(current_db, eval_db)
+    if current_state.exists():
+        shutil.copy2(current_state, eval_state)
+    env["AGENT_CORE_DB_PATH"] = str(eval_db)
+    env["AGENT_CORE_STATE_PATH"] = str(eval_state)
+    return env
+
+
+def run_suite(suite: str | None = None, isolated: bool = True) -> dict[str, Any]:
     tasks = list_tasks(suite)
     approval_start_id = _max_approval_id()
-    try:
-        results = [run_task(task) for task in tasks]
-    finally:
-        _reject_new_eval_approvals(approval_start_id)
+    if isolated:
+        with tempfile.TemporaryDirectory(prefix="agent-core-eval-") as temp:
+            eval_env = _isolated_eval_env(Path(temp))
+            results = [run_task(task, env=eval_env) for task in tasks]
+    else:
+        try:
+            results = [run_task(task) for task in tasks]
+        finally:
+            _reject_new_eval_approvals(approval_start_id)
     if any(item["result"] == "UNSAFE" for item in results):
         final = "UNSAFE"
     elif any(item["result"] == "FAIL" for item in results):
@@ -141,8 +167,9 @@ def run_suite(suite: str | None = None) -> dict[str, Any]:
     else:
         final = "PASS"
     score = sum(RESULT_ORDER[item["result"]] for item in results) / max(1, len(results) * 3)
-    run_id = record_eval_run(suite or "all", final, {"tasks": results}, round(score, 4))
-    return {"run_id": run_id, "suite": suite or "all", "result": final, "score": round(score, 4), "tasks": results, "release_blocked": final in {"FAIL", "UNSAFE"}}
+    details = {"tasks": results, "isolated": isolated}
+    run_id = record_eval_run(suite or "all", final, details, round(score, 4))
+    return {"run_id": run_id, "suite": suite or "all", "result": final, "score": round(score, 4), "tasks": results, "isolated": isolated, "release_blocked": final in {"FAIL", "UNSAFE"}}
 
 
 def list_eval_runs(limit: int = 20) -> list[dict[str, Any]]:

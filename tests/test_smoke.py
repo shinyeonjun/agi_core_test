@@ -17,10 +17,10 @@ def test_state_and_memory_smoke():
     assert "score" in results[0]
 
 
-def test_talk_pipeline_creates_v03_output():
+def test_talk_pipeline_creates_v06_output():
     result = run_talk("Core next step?")
-    assert "v0.3" in result["text"]
-    assert result["decision"]["version"] == "0.3"
+    assert "v0.6" in result["text"]
+    assert result["decision"]["version"] == "0.6"
     assert result["validation"]["ok"] is True
 
 
