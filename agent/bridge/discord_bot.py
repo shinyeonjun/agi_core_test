@@ -32,6 +32,8 @@ def check_config() -> int:
     print("Discord config:")
     print(f"- allowed_users={len(config.allowed_user_ids)}")
     print(f"- allowed_channels={len(config.allowed_channel_ids)}")
+    print(f"- chat_channel_configured={bool(config.chat_channel_id)}")
+    print(f"- approval_channel_configured={bool(config.approval_channel_id)}")
     print(f"- max_response_chars={config.max_response_chars}")
     if problems:
         print("CONFIG_FAIL: " + ", ".join(problems))

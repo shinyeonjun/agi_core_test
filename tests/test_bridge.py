@@ -39,7 +39,7 @@ def test_route_command_state_returns_chunks():
     event = DiscordEvent(None, "10", "1", "m1", False, False, "!state")
     chunks = route_discord_event(event, config())
     assert chunks
-    assert "mode" in chunks[0]
+    assert "Core \uc0c1\ud0dc" in chunks[0]
     assert "renderer" not in chunks[0]
 
 
