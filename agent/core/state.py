@@ -9,9 +9,9 @@ from typing import Any
 from agent.config.defaults import ensure_runtime_dirs, now_kst, state_path
 
 DEFAULT_STATE: dict[str, Any] = {
-    "version": "0.13",
+    "version": "0.14",
     "mode": "idle",
-    "current_focus": "agent_core_v0_13_local_sparse_vectors",
+    "current_focus": "agent_core_v0_14_project_execution_loop",
     "last_user_interaction_at": None,
     "last_idle_tick_at": None,
     "autonomous_level": 2,
@@ -72,11 +72,11 @@ def load_state() -> dict[str, Any]:
         return state
     merged = _merge_defaults(state, DEFAULT_STATE)
     changed = False
-    if merged.get("version") in {"0.1", "0.6", "0.7", "0.8", "0.10", "0.11", "0.12"}:
-        merged["version"] = "0.13"
+    if merged.get("version") in {"0.1", "0.6", "0.7", "0.8", "0.10", "0.11", "0.12", "0.13"}:
+        merged["version"] = "0.14"
         changed = True
-    if merged.get("current_focus") in {"agent_core_v0_1", "agent_core_v0_6", "agent_core_v0_7_workspace_autonomy", "agent_core_v0_11_operating_intelligence", "agent_core_v0_12_memory_intelligence"}:
-        merged["current_focus"] = "agent_core_v0_13_local_sparse_vectors"
+    if merged.get("current_focus") in {"agent_core_v0_1", "agent_core_v0_6", "agent_core_v0_7_workspace_autonomy", "agent_core_v0_11_operating_intelligence", "agent_core_v0_12_memory_intelligence", "agent_core_v0_13_local_sparse_vectors"}:
+        merged["current_focus"] = "agent_core_v0_14_project_execution_loop"
         changed = True
     if changed:
         save_state(merged)

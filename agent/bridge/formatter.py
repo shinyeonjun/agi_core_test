@@ -329,15 +329,21 @@ def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
             result_label = compact_text(task_result.get("artifact_type") or task_result.get("status"))
             report = compact_text(task_result.get("report"), "")
             report_line = f"\n요약: {report[:700]}" if report else ""
+            plan = task_result.get("project_plan") if isinstance(task_result.get("project_plan"), dict) else {}
+            plan_line = ""
+            if plan:
+                plan_line = f"\n계획: #{compact_text(plan.get('id'))} {compact_text(plan.get('status'))} / 단계 {compact_text(plan.get('steps_done'))}/{compact_text(plan.get('steps_total'))}"
             return "\n".join([
                 f"\uc644\ub8cc\ud588\uc5b4. \uc791\uc5c5 #{compact_text(task_result.get('task_id'))}\ub97c \ucc98\ub9ac\ud588\uace0, \ubaa9\ud45c #{compact_text(user_goal.get('id'))}\ub3c4 \uc815\ub9ac\ud588\uc5b4.",
-                f"\uacb0\uacfc: {result_label}{report_line}",
+                f"\uacb0\uacfc: {result_label}{plan_line}{report_line}",
                 "\uc774 \uc791\uc5c5\uc740 \ub300\ud654 \ud2b8\ub9ac\uac70\ub85c \ubc14\ub85c \ucc98\ub9ac\ud588\uace0, \uc790\uc728 \uc2a4\ucf00\uc904\ub7ec\uc640\ub294 \ubd84\ub9ac\ub418\uc5b4 \uc788\uc5b4.",
             ])
         if task_result.get("status") in {"codex_work_blocked", "codex_work_failed"}:
+            plan = task_result.get("project_plan") if isinstance(task_result.get("project_plan"), dict) else {}
+            plan_line = f"\n계획: #{compact_text(plan.get('id'))} {compact_text(plan.get('status'))}, 실패분류 {compact_text(plan.get('failure_category'))}" if plan else ""
             return "\n".join([
                 f"\uc791\uc5c5 #{compact_text(task_result.get('task_id'))}\ub294 \ubc14\ub85c \uc2e4\ud589\ud558\uc9c0 \uc54a\uc558\uc5b4.",
-                f"\uc774\uc720: {compact_text(task_result.get('reason') or task_result.get('status'))}",
+                f"\uc774\uc720: {compact_text(task_result.get('reason') or task_result.get('status'))}{plan_line}",
                 f"\uc0c1\ud0dc: {compact_text(task_result.get('status'))}",
             ])
         if task_result.get("status") == "skipped":

@@ -12,6 +12,7 @@ from agent.core.learner import create_reflection
 from agent.core.metrics import collect_metrics
 from agent.core.operating_intelligence import refresh_goal_priorities
 from agent.core.policy import PolicyEngine
+from agent.core.project_execution import complete_project_plan, mark_plan_running, project_plan_brief
 from agent.core.state import load_state
 from agent.core.task_lifecycle import record_task_phase
 from agent.core.task_queue import claim_next_task, claim_task, enqueue_task, finish_task, list_tasks, requeue_task, task_status_counts
@@ -255,6 +256,9 @@ def _handle_user_directed_goal(goal: dict[str, Any], drives: dict[str, float], *
     metadata = goal_metadata(goal)
     task_kind = str(metadata.get("task_kind") or "task_note")
     user_text = str(metadata.get("raw_user_text") or goal.get("description") or goal.get("title") or "")
+    project_plan_id = metadata.get("project_plan_id")
+    if project_plan_id is not None:
+        mark_plan_running(int(project_plan_id), task_id=task_id)
     metrics = collect_metrics()
     if task_kind == "code_change":
         result = run_codex_work(user_text, goal_id=int(goal["id"]) if goal.get("id") is not None else None, task_id=task_id)
@@ -267,13 +271,16 @@ def _handle_user_directed_goal(goal: dict[str, Any], drives: dict[str, float], *
                 confidence=0.82,
             )
             result["reflection_id"] = reflection_id
-        return {
+        final = {
             **result,
             "profile": current_profile(),
             "goal_id": goal.get("id"),
             "task_kind": task_kind,
             "artifact_type": "codex_work_report",
         }
+        if project_plan_id is not None:
+            final["project_plan"] = project_plan_brief(complete_project_plan(int(project_plan_id), final))
+        return final
     if task_kind == "project_spec":
         artifact = create_project_spec(
             str(goal.get("title") or "User requested project"),
@@ -312,6 +319,8 @@ def _handle_user_directed_goal(goal: dict[str, Any], drives: dict[str, float], *
         "task_kind": task_kind,
         "reflection_id": reflection_id,
     }
+    if project_plan_id is not None:
+        result["project_plan"] = project_plan_brief(complete_project_plan(int(project_plan_id), result))
     log_event("lab", "lab_user_goal_completed", task_kind, result, 0.82)
     return result
 

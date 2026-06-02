@@ -21,6 +21,7 @@ from agent.core.observability import action_failure_breakdown, action_observatio
 from agent.core.operating_intelligence import action_critics, memory_hygiene_candidates, operating_snapshot, ranked_goals, refresh_goal_priorities, skill_candidates
 from agent.core.pipeline import run_talk
 from agent.core.policy import ActionProposal, PolicyEngine
+from agent.core.project_execution import get_project_plan, list_project_plans
 from agent.core.self_map import latest_self_map, refresh_self_map, self_map_brief
 from agent.core.state import load_state, save_state
 from agent.core.style import add_style_example, apply_style_feedback, get_active_style_profile, list_style_examples, list_style_feedback, seed_default_style_profile, style_directives
@@ -457,6 +458,17 @@ def cmd_tasks(args: argparse.Namespace) -> int:
     raise ValueError(f"unknown tasks command: {args.tasks_command}")
 
 
+def cmd_project(args: argparse.Namespace) -> int:
+    if args.project_command == "plans":
+        print_json(list_project_plans(limit=args.limit, status=args.status))
+        return 0
+    if args.project_command == "show":
+        item = get_project_plan(args.plan_id)
+        print_json(item or {"available": False, "id": args.plan_id})
+        return 0 if item else 1
+    raise ValueError(f"unknown project command: {args.project_command}")
+
+
 def cmd_capability(args: argparse.Namespace) -> int:
     data = collect_capability_map()
     if getattr(args, "json", False):
@@ -700,6 +712,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_tasks_run_user = tasks_sub.add_parser("run-user"); p_tasks_run_user.add_argument("task_id", type=int); p_tasks_run_user.set_defaults(func=cmd_tasks)
     p_tasks_doctor = tasks_sub.add_parser("doctor"); p_tasks_doctor.add_argument("--max-age-seconds", type=int, default=1800); p_tasks_doctor.set_defaults(func=cmd_tasks)
     p_tasks_lifecycle = tasks_sub.add_parser("lifecycle"); p_tasks_lifecycle.add_argument("task_id", type=int); p_tasks_lifecycle.add_argument("--limit", type=int, default=50); p_tasks_lifecycle.set_defaults(func=cmd_tasks)
+    p = sub.add_parser("project"); project_sub = p.add_subparsers(dest="project_command", required=True)
+    p_project_plans = project_sub.add_parser("plans"); p_project_plans.add_argument("--limit", type=int, default=20); p_project_plans.add_argument("--status"); p_project_plans.set_defaults(func=cmd_project)
+    p_project_show = project_sub.add_parser("show"); p_project_show.add_argument("plan_id", type=int); p_project_show.set_defaults(func=cmd_project)
     p = sub.add_parser("capability"); p.add_argument("--json", action="store_true"); p.set_defaults(func=cmd_capability)
     p = sub.add_parser("observe"); observe_sub = p.add_subparsers(dest="observe_command", required=True)
     p_observe_snapshot = observe_sub.add_parser("snapshot"); p_observe_snapshot.add_argument("--limit", type=int, default=10); p_observe_snapshot.set_defaults(func=cmd_observe)

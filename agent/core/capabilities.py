@@ -65,6 +65,7 @@ def collect_capability_map() -> dict[str, Any]:
             {"name": "discord_chat", "status": "enabled", "description": "Discord chat routing through Core run_talk"},
             {"name": "memory_search", "status": "enabled", "description": "FTS plus local sparse vector memory retrieval"},
             {"name": "goal_task_queue", "status": "enabled", "description": "Separate user and autonomous task queues"},
+            {"name": "project_execution_loop", "status": "enabled", "description": "User goals can be decomposed into tracked plans, steps, completion criteria, verification, and failure categories"},
             {"name": "self_map", "status": "enabled" if runtime else "unavailable", "description": "Safe runtime body map without secret values"},
             {"name": "scheduled_tick", "status": "enabled", "description": "Idle tick, lab tick, activity summary, and daily summary timers"},
             {"name": "policy_engine", "status": "enabled", "description": "Risk classification, denial, and approval gating"},

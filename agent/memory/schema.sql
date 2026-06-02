@@ -442,6 +442,45 @@ CREATE INDEX IF NOT EXISTS idx_task_lifecycle_task ON task_lifecycle_events(task
 CREATE INDEX IF NOT EXISTS idx_task_lifecycle_phase ON task_lifecycle_events(phase);
 CREATE INDEX IF NOT EXISTS idx_task_lifecycle_created ON task_lifecycle_events(created_at);
 
+CREATE TABLE IF NOT EXISTS project_execution_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    goal_id INTEGER,
+    task_id INTEGER,
+    source TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    title TEXT NOT NULL,
+    objective TEXT NOT NULL,
+    status TEXT NOT NULL,
+    priority REAL DEFAULT 0.5,
+    current_step_index INTEGER DEFAULT 0,
+    plan_json TEXT,
+    result_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_project_plans_goal ON project_execution_plans(goal_id);
+CREATE INDEX IF NOT EXISTS idx_project_plans_task ON project_execution_plans(task_id);
+CREATE INDEX IF NOT EXISTS idx_project_plans_status ON project_execution_plans(status);
+
+CREATE TABLE IF NOT EXISTS project_execution_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    plan_id INTEGER NOT NULL,
+    step_index INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    task_kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    completion_criteria_json TEXT,
+    verification_json TEXT,
+    failure_category TEXT,
+    result_json TEXT,
+    queued_task_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_project_steps_plan ON project_execution_steps(plan_id);
+CREATE INDEX IF NOT EXISTS idx_project_steps_status ON project_execution_steps(status);
+
 CREATE TABLE IF NOT EXISTS root_objectives (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
@@ -503,4 +542,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR REPLACE INTO schema_meta (key, value)
-VALUES ('schema_version', '0.13.0-alpha');
+VALUES ('schema_version', '0.14.0-alpha');

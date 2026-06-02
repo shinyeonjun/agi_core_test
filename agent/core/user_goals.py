@@ -4,8 +4,9 @@ import re
 from typing import Any
 
 from agent.core.approvals import ApprovalStore
-from agent.core.goals import create_goal
+from agent.core.goals import create_goal, update_goal_metadata
 from agent.core.policy import PolicyEngine
+from agent.core.project_execution import create_project_execution_plan, link_plan_task, needs_project_plan
 from agent.core.task_queue import enqueue_task
 from agent.language.engine import interpret_user_message
 from agent.language.fallback_rule import classify_user_goal_kind_rule
@@ -75,6 +76,20 @@ def maybe_create_user_goal(text: str, *, source_event_id: int | None = None, met
         metadata=goal_metadata,
         dedupe=True,
     )
+    plan_id: int | None = None
+    if status == "active" and needs_project_plan(text, task_kind, interpretation):
+        plan = create_project_execution_plan(
+            goal_id=goal_id,
+            source="user_directive",
+            owner="user",
+            title=_title_from_text(text),
+            objective=text,
+            task_kind=task_kind,
+            priority=0.98,
+        )
+        plan_id = int(plan["id"])
+        goal_metadata["project_plan_id"] = plan_id
+        update_goal_metadata(goal_id, goal_metadata)
     task_status = "blocked" if status == "blocked" else "waiting_approval" if status == "waiting_approval" else "queued"
     task_id = enqueue_task(
         "user",
@@ -85,8 +100,10 @@ def maybe_create_user_goal(text: str, *, source_event_id: int | None = None, met
         priority=0.98,
         status=task_status,
         approval_id=approval_id,
-        payload={"source_event_id": source_event_id, "risk_level": policy.risk_level, "requires_approval": policy.requires_approval, "approval_id": approval_id},
+        payload={"source_event_id": source_event_id, "risk_level": policy.risk_level, "requires_approval": policy.requires_approval, "approval_id": approval_id, "project_plan_id": plan_id},
     )
+    if plan_id is not None:
+        link_plan_task(plan_id, task_id)
     return {
         "id": goal_id,
         "task_id": task_id,
@@ -97,6 +114,7 @@ def maybe_create_user_goal(text: str, *, source_event_id: int | None = None, met
         "risk_level": policy.risk_level,
         "requires_approval": policy.requires_approval,
         "approval_id": approval_id,
+        "project_plan_id": plan_id,
         "denied": policy.denied,
         "reason": policy.reason,
     }

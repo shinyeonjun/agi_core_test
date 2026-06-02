@@ -141,12 +141,67 @@ def _migration_0005_sparse_memory_vectors(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_vectors_updated ON memory_vectors(updated_at)")
 
 
+def _migration_0006_project_execution_plans(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS project_execution_plans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            goal_id INTEGER,
+            task_id INTEGER,
+            source TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            title TEXT NOT NULL,
+            objective TEXT NOT NULL,
+            status TEXT NOT NULL,
+            priority REAL DEFAULT 0.5,
+            current_step_index INTEGER DEFAULT 0,
+            plan_json TEXT,
+            result_json TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_project_plans_goal ON project_execution_plans(goal_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_project_plans_task ON project_execution_plans(task_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_project_plans_status ON project_execution_plans(status)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS project_execution_steps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            plan_id INTEGER NOT NULL,
+            step_index INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            task_kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            completion_criteria_json TEXT,
+            verification_json TEXT,
+            failure_category TEXT,
+            result_json TEXT,
+            queued_task_id INTEGER
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_project_steps_plan ON project_execution_steps(plan_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_project_steps_status ON project_execution_steps(status)")
+    conn.execute(
+        """
+        INSERT INTO schema_meta (key, value) VALUES ('schema_version', '0.14.0-alpha')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("0001_existing_db_repairs", "Backfill approval task links and memory FTS schema", _migration_0001_existing_db_repairs),
     Migration("0002_task_queue_locks", "Add task queue lease, idempotency, and scheduling fields", _migration_0002_task_queue_locks),
     Migration("0003_operating_reviews", "Ensure operating intelligence review storage", _migration_0003_operating_reviews),
     Migration("0004_memory_intelligence_indexes", "Add memory and reflection indexes for compaction and retrieval", _migration_0004_memory_intelligence_indexes),
     Migration("0005_sparse_memory_vectors", "Add local sparse vector storage for memory reranking", _migration_0005_sparse_memory_vectors),
+    Migration("0006_project_execution_plans", "Add project execution plans and step tracking", _migration_0006_project_execution_plans),
 )
 
 
