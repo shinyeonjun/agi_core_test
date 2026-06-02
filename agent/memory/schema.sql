@@ -453,10 +453,23 @@ CREATE INDEX IF NOT EXISTS idx_generated_goal_candidates_created ON generated_go
 CREATE INDEX IF NOT EXISTS idx_generated_goal_candidates_status ON generated_goal_candidates(status);
 CREATE INDEX IF NOT EXISTS idx_generated_goal_candidates_goal ON generated_goal_candidates(generated_goal_id);
 
+CREATE TABLE IF NOT EXISTS operating_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    review_type TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    score REAL DEFAULT 0.0,
+    status TEXT DEFAULT 'open',
+    payload_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_operating_reviews_created ON operating_reviews(created_at);
+CREATE INDEX IF NOT EXISTS idx_operating_reviews_type ON operating_reviews(review_type);
+CREATE INDEX IF NOT EXISTS idx_operating_reviews_status ON operating_reviews(status);
+
 CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR REPLACE INTO schema_meta (key, value)
-VALUES ('schema_version', '0.10.0-alpha');
+VALUES ('schema_version', '0.11.0-alpha');

@@ -10,6 +10,7 @@ from agent.core.goals import get_goal, goal_metadata, mark_goal_done, update_goa
 from agent.core.goal_generator import generate_goal_candidates, meaningful_open_goals
 from agent.core.learner import create_reflection
 from agent.core.metrics import collect_metrics
+from agent.core.operating_intelligence import refresh_goal_priorities
 from agent.core.policy import PolicyEngine
 from agent.core.state import load_state
 from agent.core.task_lifecycle import record_task_phase
@@ -79,6 +80,7 @@ def _task_kind_for_goal(goal: dict[str, Any]) -> str:
 
 
 def sync_open_goals_to_tasks(limit: int = 100) -> dict[str, Any]:
+    priority_refresh = refresh_goal_priorities(limit=limit)
     synced = 0
     skipped = 0
     for goal in meaningful_open_goals(limit=limit):
@@ -97,7 +99,7 @@ def sync_open_goals_to_tasks(limit: int = 100) -> dict[str, Any]:
         )
         if task_id:
             synced += 1
-    return {"synced": synced, "skipped": skipped}
+    return {"synced": synced, "skipped": skipped, "priority_refresh": priority_refresh}
 
 
 def _goal_from_task(task: dict[str, Any] | None) -> dict[str, Any] | None:

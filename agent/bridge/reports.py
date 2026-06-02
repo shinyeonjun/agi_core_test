@@ -13,6 +13,7 @@ from agent.core.goal_generator import list_goal_candidates, meaningful_open_goal
 from agent.core.learner import list_reflections
 from agent.core.metrics import collect_metrics
 from agent.core.observability import action_failure_breakdown, action_observation, task_observation
+from agent.core.operating_intelligence import operating_snapshot
 from agent.core.self_map import self_map_brief
 from agent.core.task_queue import list_tasks, task_status_counts
 from agent.lab.proposals import list_action_proposals, proposal_status_counts
@@ -188,6 +189,7 @@ def build_observation_dashboard() -> str:
     approvals = ApprovalStore().list_pending()
     self_map = self_map_brief()
     task_counts = task_status_counts()
+    intelligence = operating_snapshot(persist=False)
     recent_tasks = list_tasks(limit=6)
     action_breakdown = action_failure_breakdown(actions)
     last_action = actions[0] if actions else None
@@ -259,6 +261,24 @@ def build_observation_dashboard() -> str:
             lines.append(f"- #{candidate.get('id')} {compact_text(candidate.get('title'))}: {_ko_status(candidate.get('status'))} / score {compact_text(candidate.get('score'))}")
     else:
         lines.append("- \uc544\uc9c1 \uc0c8 \ubaa9\ud45c \ud6c4\ubcf4\uac00 \uc5c6\uc5b4.")
+
+    lines.extend(["", "**운영 지능**"])
+    improvements = intelligence.get("next_improvement_candidates") or []
+    if improvements:
+        for item in improvements[:3]:
+            lines.append(f"- {compact_text(item.get('title'))}: {compact_text(item.get('reason'))} / priority {compact_text(item.get('priority'))}")
+    else:
+        lines.append("- 즉시 개선 후보는 낮게 잡혔어.")
+    critics = intelligence.get("action_critics") or []
+    if critics:
+        top_critic = next((row for row in critics if row.get("category") != "success"), critics[0])
+        lines.append(f"- critic: {compact_text(top_critic.get('label'))} / {compact_text(top_critic.get('recommendation'))}")
+    memory_candidates = intelligence.get("memory_hygiene_candidates") or []
+    if memory_candidates:
+        lines.append(f"- memory: 압축/정리 후보 {len(memory_candidates)}건")
+    skill_items = intelligence.get("skill_candidates") or []
+    if skill_items:
+        lines.append(f"- skill: 승격 후보 {len(skill_items)}건")
 
     lines.extend(["", "**\uc81c\uc548 \ud050**"])
     if pending_proposals:

@@ -16,6 +16,7 @@ from agent.core.goal_generator import add_root_objective, generate_goal_candidat
 from agent.core.learner import list_reflections, list_skills, upsert_skill, update_after_turn
 from agent.core.metrics import collect_metrics
 from agent.core.observability import action_failure_breakdown, action_observation, latest_decision_traces, observability_snapshot, task_observation
+from agent.core.operating_intelligence import action_critics, memory_hygiene_candidates, operating_snapshot, ranked_goals, refresh_goal_priorities, skill_candidates
 from agent.core.pipeline import run_talk
 from agent.core.policy import ActionProposal, PolicyEngine
 from agent.core.self_map import latest_self_map, refresh_self_map, self_map_brief
@@ -437,6 +438,26 @@ def cmd_observe(args: argparse.Namespace) -> int:
     raise ValueError(f"unknown observe command: {args.observe_command}")
 
 
+def cmd_intelligence(args: argparse.Namespace) -> int:
+    if args.intelligence_command == "snapshot":
+        print_json(operating_snapshot(persist=bool(args.persist), refresh_priorities=bool(args.refresh)))
+        return 0
+    if args.intelligence_command == "priorities":
+        result = refresh_goal_priorities(limit=args.limit) if args.refresh else {"items": ranked_goals(limit=args.limit), "changed": 0}
+        print_json(result)
+        return 0
+    if args.intelligence_command == "critics":
+        print_json({"items": action_critics(limit=args.limit)})
+        return 0
+    if args.intelligence_command == "memory":
+        print_json({"items": memory_hygiene_candidates(limit=args.limit)})
+        return 0
+    if args.intelligence_command == "skills":
+        print_json({"items": skill_candidates(limit=args.limit)})
+        return 0
+    raise ValueError(f"unknown intelligence command: {args.intelligence_command}")
+
+
 def cmd_workspace(args: argparse.Namespace) -> int:
     if args.workspace_command == "init":
         print_json(ensure_workspace())
@@ -624,6 +645,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_observe_actions = observe_sub.add_parser("actions"); p_observe_actions.add_argument("--limit", type=int, default=10); p_observe_actions.set_defaults(func=cmd_observe)
     p_observe_tasks = observe_sub.add_parser("tasks"); p_observe_tasks.add_argument("--limit", type=int, default=10); p_observe_tasks.set_defaults(func=cmd_observe)
     p_observe_decisions = observe_sub.add_parser("decisions"); p_observe_decisions.add_argument("--limit", type=int, default=5); p_observe_decisions.set_defaults(func=cmd_observe)
+    p = sub.add_parser("intelligence"); intelligence_sub = p.add_subparsers(dest="intelligence_command", required=True)
+    p_int_snapshot = intelligence_sub.add_parser("snapshot"); p_int_snapshot.add_argument("--persist", action="store_true"); p_int_snapshot.add_argument("--refresh", action="store_true"); p_int_snapshot.set_defaults(func=cmd_intelligence)
+    p_int_priorities = intelligence_sub.add_parser("priorities"); p_int_priorities.add_argument("--limit", type=int, default=20); p_int_priorities.add_argument("--refresh", action="store_true"); p_int_priorities.set_defaults(func=cmd_intelligence)
+    p_int_critics = intelligence_sub.add_parser("critics"); p_int_critics.add_argument("--limit", type=int, default=20); p_int_critics.set_defaults(func=cmd_intelligence)
+    p_int_memory = intelligence_sub.add_parser("memory"); p_int_memory.add_argument("--limit", type=int, default=20); p_int_memory.set_defaults(func=cmd_intelligence)
+    p_int_skills = intelligence_sub.add_parser("skills"); p_int_skills.add_argument("--limit", type=int, default=20); p_int_skills.set_defaults(func=cmd_intelligence)
     p = sub.add_parser("workspace"); workspace_sub = p.add_subparsers(dest="workspace_command", required=True)
     p_ws_init = workspace_sub.add_parser("init"); p_ws_init.set_defaults(func=cmd_workspace)
     p_ws_report = workspace_sub.add_parser("report"); p_ws_report.add_argument("--title", default="Workspace status report"); p_ws_report.set_defaults(func=cmd_workspace)
