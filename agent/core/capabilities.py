@@ -66,6 +66,7 @@ def collect_capability_map() -> dict[str, Any]:
             {"name": "memory_search", "status": "enabled", "description": "FTS plus local sparse vector memory retrieval"},
             {"name": "goal_task_queue", "status": "enabled", "description": "Separate user and autonomous task queues"},
             {"name": "core_process_table", "status": "enabled", "description": "OS-like process view for tasks, project plans, lifecycle, progress, blockers, and next actions"},
+            {"name": "control_room_dashboard", "status": "enabled", "description": "Local web dashboard for process table, goals, approvals, actions, memory, self-map, metrics, and safety status"},
             {"name": "project_execution_loop", "status": "enabled", "description": "User goals can be decomposed into tracked plans, steps, completion criteria, verification, and failure categories"},
             {"name": "staged_project_worker", "status": "enabled", "description": "Project plans advance through planning, implementation, verification, and reporting instead of completing as an opaque single step"},
             {"name": "self_map", "status": "enabled" if runtime else "unavailable", "description": "Safe runtime body map without secret values"},

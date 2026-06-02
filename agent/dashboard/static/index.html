@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Core Control Room</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Agent Core</p>
+        <h1>Control Room</h1>
+      </div>
+      <div class="top-actions">
+        <span id="last-updated">연결 대기</span>
+        <button id="refresh" type="button">새로고침</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="hero">
+        <div class="status-ring" id="health-ring">--</div>
+        <div class="hero-copy">
+          <p class="eyebrow">현재 상태</p>
+          <h2 id="headline">스냅샷을 불러오는 중</h2>
+          <p id="focus">Core 상태를 확인하고 있어.</p>
+        </div>
+        <div class="hero-metrics">
+          <div><span id="profile">--</span><small>프로필</small></div>
+          <div><span id="eval">--</span><small>최근 평가</small></div>
+          <div><span id="schema">--</span><small>스키마</small></div>
+        </div>
+      </section>
+
+      <section class="metric-grid" id="metric-grid"></section>
+
+      <section class="split">
+        <div class="panel wide">
+          <div class="panel-head">
+            <h3>Process Table</h3>
+            <span id="process-counts">--</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>PID</th>
+                  <th>상태</th>
+                  <th>큐</th>
+                  <th>제목</th>
+                  <th>진행</th>
+                  <th>다음</th>
+                </tr>
+              </thead>
+              <tbody id="processes"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>승인 대기</h3>
+            <span id="approval-count">0건</span>
+          </div>
+          <div class="stack" id="approvals"></div>
+        </div>
+      </section>
+
+      <section class="split thirds">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>최근 Action</h3>
+            <span id="action-rate">--</span>
+          </div>
+          <div class="stack" id="actions"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>목표 큐</h3>
+            <span id="goal-count">--</span>
+          </div>
+          <div class="stack" id="goals"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>몸 상태</h3>
+            <span id="self-map-state">--</span>
+          </div>
+          <div class="self-map" id="self-map"></div>
+        </div>
+      </section>
+
+      <section class="split">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Memory / Skill</h3>
+            <span id="vector-state">--</span>
+          </div>
+          <div class="stack" id="intelligence"></div>
+        </div>
+        <div class="panel wide">
+          <div class="panel-head">
+            <h3>최근 이벤트</h3>
+            <span id="safety">redaction active</span>
+          </div>
+          <div class="timeline" id="events"></div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

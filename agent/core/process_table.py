@@ -9,7 +9,6 @@ from agent.core.database import connect, init_db
 from agent.core.project_execution import get_project_plan
 from agent.core.task_lifecycle import task_lifecycle_summary
 from agent.core.task_queue import list_tasks
-from agent.tools.action_log import list_action_runs
 
 RUNNING_STATES = {"running"}
 WAITING_STATES = {"queued", "waiting_approval", "planned"}
@@ -97,18 +96,18 @@ def _state_group(status: str) -> str:
 def _next_for_task(task: dict[str, Any], plan: dict[str, Any] | None) -> str:
     status = str(task.get("status") or "")
     if status == "queued" and task.get("queue_type") == "user":
-        return "user worker가 즉시 처리하거나 agentctl tasks run-user로 실행"
+        return "사용자 작업 큐에서 즉시 처리 대기 중"
     if status == "queued":
-        return "lab tick에서 다음 주기에 처리"
+        return "자율 lab tick의 다음 주기에서 처리 예정"
     if status == "waiting_approval":
-        return f"승인 #{task.get('approval_id')} 처리 대기"
+        return f"승인 #{task.get('approval_id')} 처리 대기 중"
     if status == "running":
         progress = _plan_progress(plan)
         step = progress.get("step") or {}
         return f"현재 단계 진행 중: {step.get('title') or '작업 실행'}"
     result = task.get("result") if isinstance(task.get("result"), dict) else _decode_json(task.get("result_json"), {})
     if status == "blocked":
-        return f"실패 원인 확인: {(result or {}).get('reason') or (result or {}).get('status') or 'unknown'}"
+        return f"실패 원인 확인 필요: {(result or {}).get('reason') or (result or {}).get('status') or 'unknown'}"
     return "후속 조치 없음"
 
 
@@ -167,7 +166,7 @@ def _orphan_project_process(plan: dict[str, Any]) -> dict[str, Any]:
         "lifecycle": {},
         "result_status": (plan.get("result") or {}).get("status"),
         "failure_category": progress.get("failure_category"),
-        "next": "연결된 task 없음. goal sync 또는 run-user 확인 필요",
+        "next": "연결된 task 없음. goal sync 또는 run-user 상태 확인 필요",
     }
 
 

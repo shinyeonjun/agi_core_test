@@ -36,7 +36,7 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
     selected_goal = user_goal or {"id": answer_goal_id, "title": "Answer user input", "goal_type": "answer_user"}
     selected_goal_id = int(selected_goal["id"])
     decision = {
-        "version": "0.15",
+        "version": "0.16",
         "kind": "talk_response",
         "created_at": now_kst(),
         "user_input": user_message,

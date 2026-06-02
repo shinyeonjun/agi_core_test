@@ -1,0 +1,19 @@
+[Unit]
+Description=Agent Core Control Room Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/agent_core
+Environment=AGENT_CORE_HOME=/home/ubuntu/agent_core
+Environment=AGENT_DASHBOARD_HOST=127.0.0.1
+Environment=AGENT_DASHBOARD_PORT=8765
+EnvironmentFile=-/home/ubuntu/agent_core/.env
+ExecStart=/home/ubuntu/agent_core/venv/bin/python -m agent.cli.agentctl dashboard serve --host ${AGENT_DASHBOARD_HOST} --port ${AGENT_DASHBOARD_PORT}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
