@@ -245,7 +245,8 @@ def latest_self_map_fresh(*, max_age_seconds: int = 300, refresh_if_stale: bool 
     latest = latest_self_map()
     age = _age_seconds(latest)
     stale = latest is None or age is None or age > max(1, int(max_age_seconds))
-    suspicious = latest is not None and _active_service_count(latest) == 0 and shutil.which("systemctl") is not None
+    suspicious_age = max(60, int(max_age_seconds) // 2)
+    suspicious = latest is not None and age is not None and age > suspicious_age and _active_service_count(latest) == 0 and shutil.which("systemctl") is not None
     if refresh_if_stale and (stale or suspicious):
         return refresh_self_map(record_event=record_event_on_refresh and (stale or suspicious))
     return latest

@@ -107,3 +107,33 @@ def test_self_map_brief_refreshes_stale_snapshot(monkeypatch, tmp_path):
     assert brief is not None
     assert brief["id"] == 2
     assert brief["summary"] != "stale self-map"
+
+
+def test_self_map_brief_does_not_refresh_fresh_zero_service_snapshot(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    monkeypatch.setattr("agent.core.self_map.shutil.which", lambda name: "/bin/systemctl" if name == "systemctl" else None)
+    created = datetime.now(KST).isoformat(timespec="seconds")
+    snapshot = {
+        "created_at": created,
+        "summary": "fresh zero-service self-map",
+        "host": {"os_release": {"pretty_name": "test-os"}, "hostname": "test", "machine": "aarch64"},
+        "paths": {},
+        "git": {},
+        "services": {},
+        "autonomy": {},
+        "database": {},
+    }
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO self_maps (created_at, summary, snapshot_json, fingerprint, changed)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (created, "fresh zero-service self-map", json.dumps(snapshot), "fresh-zero", 1),
+        )
+        conn.commit()
+
+    brief = self_map_brief(max_age_seconds=300, refresh_if_stale=True)
+
+    assert brief is not None
+    assert brief["id"] == 1
