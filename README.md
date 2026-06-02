@@ -4,7 +4,7 @@ Digital AGI-oriented Local Stateful Agent Core for Orange Pi 5. This project doe
 
 ## Current Scope
 
-- v0.16-alpha Agent OS kernel for Orange Pi
+- v0.17-alpha Agent OS kernel for Orange Pi
 - Discord conversational control plane
 - Codex-backed language interpretation and rendering with rule fallback
 - Language interpretation cache and redacted interpretation logs
@@ -23,15 +23,18 @@ Digital AGI-oriented Local Stateful Agent Core for Orange Pi 5. This project doe
 - OS-like Core process table for task/project state, blockers, progress, and next actions
 - Redacted control snapshot for Discord/CLI reporting across process table, goals, approvals, actions, self-map, memory, vectors, metrics, and safety posture
 - Staged project worker loop for planning, implementation, verification, and reporting
+- CorePipeline trace for observe/interpret/retrieve/plan/act/verify/reflect/report phases
+- Typed decision schema with memory, skill, tool routing, policy, and verification metadata
+- Shared failure taxonomy with recovery hints for project worker and decision reporting
 - Operating intelligence snapshots for goal priority, action critic, memory hygiene, skill candidates, and next improvements
 - Explicit DB migration status table and `agentctl db migrate/check`
 - systemd unit templates
 
 Version alignment:
 
-- package: `0.16.0a0`
-- schema: `0.16.0-alpha`
-- runtime scope: `v0.16-alpha`
+- package: `0.17.0a0`
+- schema: `0.17.0-alpha`
+- runtime scope: `v0.17-alpha`
 
 ## Basic Commands
 

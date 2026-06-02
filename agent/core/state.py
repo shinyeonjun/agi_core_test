@@ -9,9 +9,9 @@ from typing import Any
 from agent.config.defaults import ensure_runtime_dirs, now_kst, state_path
 
 DEFAULT_STATE: dict[str, Any] = {
-    "version": "0.16",
+    "version": "0.17",
     "mode": "idle",
-    "current_focus": "agent_core_v0_16_discord_control_snapshot",
+    "current_focus": "agent_core_v0_17_pipeline_kernel",
     "last_user_interaction_at": None,
     "last_idle_tick_at": None,
     "autonomous_level": 2,
@@ -72,11 +72,11 @@ def load_state() -> dict[str, Any]:
         return state
     merged = _merge_defaults(state, DEFAULT_STATE)
     changed = False
-    if merged.get("version") in {"0.1", "0.6", "0.7", "0.8", "0.10", "0.11", "0.12", "0.13", "0.14", "0.15"}:
-        merged["version"] = "0.16"
+    if merged.get("version") in {"0.1", "0.6", "0.7", "0.8", "0.10", "0.11", "0.12", "0.13", "0.14", "0.15", "0.16"}:
+        merged["version"] = "0.17"
         changed = True
-    if merged.get("current_focus") in {"agent_core_v0_1", "agent_core_v0_6", "agent_core_v0_7_workspace_autonomy", "agent_core_v0_11_operating_intelligence", "agent_core_v0_12_memory_intelligence", "agent_core_v0_13_local_sparse_vectors", "agent_core_v0_14_project_execution_loop", "agent_core_v0_15_process_table_project_worker", "agent_core_v0_16_control_room_dashboard"}:
-        merged["current_focus"] = "agent_core_v0_16_discord_control_snapshot"
+    if merged.get("current_focus") in {"agent_core_v0_1", "agent_core_v0_6", "agent_core_v0_7_workspace_autonomy", "agent_core_v0_11_operating_intelligence", "agent_core_v0_12_memory_intelligence", "agent_core_v0_13_local_sparse_vectors", "agent_core_v0_14_project_execution_loop", "agent_core_v0_15_process_table_project_worker", "agent_core_v0_16_control_room_dashboard", "agent_core_v0_16_discord_control_snapshot"}:
+        merged["current_focus"] = "agent_core_v0_17_pipeline_kernel"
         changed = True
     if changed:
         save_state(merged)

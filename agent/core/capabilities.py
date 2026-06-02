@@ -68,6 +68,7 @@ def collect_capability_map() -> dict[str, Any]:
             {"name": "core_process_table", "status": "enabled", "description": "OS-like process view for tasks, project plans, lifecycle, progress, blockers, and next actions"},
             {"name": "control_snapshot", "status": "enabled", "description": "Redacted Discord/CLI snapshot for process table, goals, approvals, actions, memory, self-map, metrics, and safety status"},
             {"name": "project_execution_loop", "status": "enabled", "description": "User goals can be decomposed into tracked plans, steps, completion criteria, verification, and failure categories"},
+            {"name": "core_pipeline_kernel", "status": "enabled", "description": "Talk decisions carry phase traces, typed decision schema, routing metadata, and recovery hints"},
             {"name": "staged_project_worker", "status": "enabled", "description": "Project plans advance through planning, implementation, verification, and reporting instead of completing as an opaque single step"},
             {"name": "self_map", "status": "enabled" if runtime else "unavailable", "description": "Safe runtime body map without secret values"},
             {"name": "scheduled_tick", "status": "enabled", "description": "Idle tick, lab tick, activity summary, and daily summary timers"},

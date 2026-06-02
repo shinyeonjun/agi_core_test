@@ -79,7 +79,7 @@ def create_project_spec(title: str, objective: str, notes: list[str] | None = No
     stamp = now_kst().replace(":", "").replace("+", "_")
     slug = _slug(title)
     spec = {
-        "version": "0.16",
+        "version": "0.17",
         "title": title,
         "objective": objective,
         "status": "draft",

@@ -7,6 +7,7 @@ from typing import Any
 from agent.config.defaults import now_kst
 from agent.core.database import connect, init_db
 from agent.core.events import log_event
+from agent.core.failure import classify_failure, recovery_hint
 
 BROAD_GOAL_TOKENS = (
     "싹", "전부", "완벽", "최대한", "프로젝트", "구현", "개선", "디벨롭",
@@ -14,16 +15,6 @@ BROAD_GOAL_TOKENS = (
 )
 
 PROJECT_PLAN_TASK_KINDS = {"code_change", "project_spec", "improvement_plan", "workspace_experiment"}
-
-FAILURE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("policy_block", ("policy", "approval_required", "denied", "blocked", "secret", "token", ".env", "ssh_key")),
-    ("profile_block", ("profile_not_full_device_lab", "safe profile", "worker_not_available")),
-    ("timeout", ("timeout", "timed out", "returncode: 124", "rc=124")),
-    ("tool_unavailable", ("command_not_found", "returncode: 127", "rc=127", "no such file", "not found")),
-    ("test_failure", ("pytest", "test failed", "assertionerror", "failed", "fail")),
-    ("environment_issue", ("modulenotfounderror", "permission denied", "environment", "venv", "path")),
-    ("input_insufficient", ("too broad", "unclear", "insufficient", "need more detail")),
-)
 
 
 def _json(value: Any) -> str:
@@ -65,11 +56,7 @@ def needs_project_plan(text: str, task_kind: str, interpretation: dict[str, Any]
 
 
 def classify_failure_reason(value: object) -> str:
-    text = json.dumps(value, ensure_ascii=False).lower() if isinstance(value, (dict, list)) else str(value or "").lower()
-    for category, tokens in FAILURE_RULES:
-        if any(token in text for token in tokens):
-            return category
-    return "success" if any(token in text for token in ("completed", "done", "rc=0", "returncode\": 0")) else "unknown"
+    return classify_failure(value)
 
 
 def _verification_for(task_kind: str) -> list[dict[str, str]]:
@@ -281,6 +268,7 @@ def mark_project_step_done(plan_id: int, step_kind: str, result: dict[str, Any] 
 
 def block_project_plan(plan_id: int, result: dict[str, Any]) -> dict[str, Any]:
     failure_category = classify_failure_reason(result)
+    report = {"status": result.get("status"), "failure_category": failure_category, "recovery_hint": recovery_hint(failure_category), "task_result": result}
     ts = now_kst()
     init_db()
     with connect() as conn:
@@ -301,7 +289,7 @@ def block_project_plan(plan_id: int, result: dict[str, Any]) -> dict[str, Any]:
             SET status = 'blocked', updated_at = ?, result_json = ?
             WHERE id = ?
             """,
-            (ts, _json({"status": result.get("status"), "failure_category": failure_category, "task_result": result}), int(plan_id)),
+            (ts, _json(report), int(plan_id)),
         )
         conn.commit()
     plan = get_project_plan(plan_id) or {"id": plan_id, "status": "blocked"}
@@ -314,6 +302,7 @@ def complete_project_plan(plan_id: int, result: dict[str, Any]) -> dict[str, Any
     status = str(result.get("status") or "")
     success = status in {"user_goal_completed", "artifact_created", "completed", "done", "codex_work_completed"}
     failure_category = None if success else classify_failure_reason(result)
+    recovery = None if success else recovery_hint(failure_category or "unknown")
     final_status = "done" if success else "blocked"
     ts = now_kst()
     with connect() as conn:
@@ -336,7 +325,7 @@ def complete_project_plan(plan_id: int, result: dict[str, Any]) -> dict[str, Any
             SET status = ?, current_step_index = ?, updated_at = ?, result_json = ?
             WHERE id = ?
             """,
-            (final_status, len(rows), ts, _json({"status": status, "failure_category": failure_category, "task_result": result}), int(plan_id)),
+            (final_status, len(rows), ts, _json({"status": status, "failure_category": failure_category, "recovery_hint": recovery, "task_result": result}), int(plan_id)),
         )
         conn.commit()
     plan = get_project_plan(plan_id) or {"id": plan_id, "status": final_status}
@@ -358,4 +347,5 @@ def project_plan_brief(plan: dict[str, Any] | None) -> dict[str, Any]:
         "steps_done": done,
         "steps_blocked": blocked,
         "failure_category": (plan.get("result") or {}).get("failure_category"),
+        "recovery_hint": (plan.get("result") or {}).get("recovery_hint"),
     }

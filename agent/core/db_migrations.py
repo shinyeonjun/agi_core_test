@@ -213,6 +213,15 @@ def _migration_0008_control_room_dashboard(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0009_pipeline_kernel(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        INSERT INTO schema_meta (key, value) VALUES ('schema_version', '0.17.0-alpha')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("0001_existing_db_repairs", "Backfill approval task links and memory FTS schema", _migration_0001_existing_db_repairs),
     Migration("0002_task_queue_locks", "Add task queue lease, idempotency, and scheduling fields", _migration_0002_task_queue_locks),
@@ -222,6 +231,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0006_project_execution_plans", "Add project execution plans and step tracking", _migration_0006_project_execution_plans),
     Migration("0007_process_table_runtime", "Align schema for process table and staged project runtime", _migration_0007_process_table_runtime),
     Migration("0008_control_room_dashboard", "Align schema for control room dashboard runtime", _migration_0008_control_room_dashboard),
+    Migration("0009_pipeline_kernel", "Align schema for pipeline trace and typed decision routing runtime", _migration_0009_pipeline_kernel),
 )
 
 

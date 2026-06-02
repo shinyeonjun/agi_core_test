@@ -18,7 +18,7 @@ def test_migrations_are_recorded_and_schema_is_current(monkeypatch, tmp_path):
 
     status = check_migrations()
 
-    assert get_schema_version() == "0.16.0-alpha"
+    assert get_schema_version() == "0.17.0-alpha"
     assert status["pending"] == []
     assert {row["version"] for row in status["known"]} >= {
         "0001_existing_db_repairs",
@@ -29,6 +29,7 @@ def test_migrations_are_recorded_and_schema_is_current(monkeypatch, tmp_path):
         "0006_project_execution_plans",
         "0007_process_table_runtime",
         "0008_control_room_dashboard",
+        "0009_pipeline_kernel",
     }
     with connect() as conn:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(task_queue)").fetchall()}

@@ -12,6 +12,8 @@ from agent.core.learner import retrieve_skills
 from agent.core.metrics import collect_metrics
 from agent.core.observability import decision_trace
 from agent.core.policy import PolicyEngine
+from agent.core.decision_schema import build_decision_schema
+from agent.core.routing import memory_route, skill_route, tool_routes
 from agent.core.self_map import self_map_brief
 from agent.core.style import apply_style_feedback, get_active_style_profile, style_directives
 from agent.core.user_goals import maybe_create_user_goal
@@ -33,10 +35,15 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
     capability_map = collect_capability_map()
     policy = PolicyEngine().classify_decision(user_message, action_type="user_message")
     skills = retrieve_skills(user_message, tags=["talk", "core"], limit=3)
+    routing = {
+        "memory": memory_route(user_message, memories),
+        "skills": skill_route(user_message, skills),
+        "tools": tool_routes(language_interpretation, policy, capability_map),
+    }
     selected_goal = user_goal or {"id": answer_goal_id, "title": "Answer user input", "goal_type": "answer_user"}
     selected_goal_id = int(selected_goal["id"])
     decision = {
-        "version": "0.16",
+        "version": "0.17",
         "kind": "talk_response",
         "created_at": now_kst(),
         "user_input": user_message,
@@ -58,6 +65,7 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
         "metrics": metrics,
         "runtime_self_map": runtime_self_map,
         "capability_map": capability_map,
+        "routing": routing,
         "policy_summary": {"risk_level": policy.risk_level, "requires_approval": policy.requires_approval, "denied": policy.denied, "reason": policy.reason, "matched_rules": policy.matched_rules},
         "core_judgment": "Core stored the input as an event and used memory, skill, goal, and state to build a verifiable response.",
         "confidence": 0.82,
@@ -68,5 +76,6 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
         "must_not_include": ["auto sudo execution", "consciousness emerged", "OS change without approval", "AGI achieved"],
         "renderer_hint": {"language": "ko", "style": "calm, precise"},
     }
+    decision["decision_schema"] = build_decision_schema(decision)
     decision["decision_trace"] = decision_trace(decision)
     return decision
