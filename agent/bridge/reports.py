@@ -9,7 +9,6 @@ from agent.core.approvals import ApprovalStore
 from agent.core.autonomy import get_autonomy_state
 from agent.core.cooldown import is_ready, mark
 from agent.core.events import list_events
-from agent.core.goals import list_goals
 from agent.core.goal_generator import list_goal_candidates, meaningful_open_goals
 from agent.core.learner import list_reflections
 from agent.core.metrics import collect_metrics
@@ -24,7 +23,7 @@ def build_daily_summary() -> str:
     self_map = self_map_brief()
     approvals = ApprovalStore().list(status=None, limit=20)
     actions = list_action_runs(20)
-    goals = list_goals(limit=10)
+    goals = meaningful_open_goals(limit=10)
     content = format_daily_summary(metrics, approvals, actions, goals)
     if self_map:
         content += "\n\n**\ubab8 \uc0c1\ud0dc**\n" + _line("\ucd5c\uadfc \ud655\uc778", self_map.get("summary"))
@@ -175,6 +174,7 @@ def build_observation_dashboard() -> str:
     autonomy = get_autonomy_state()
     actions = list_action_runs(10)
     proposals = list_action_proposals(8)
+    pending_proposals = [row for row in proposals if row.get("status") not in {"executed", "rejected"}]
     proposal_counts = proposal_status_counts()
     goal_candidates = list_goal_candidates(limit=5)
     goals = meaningful_open_goals(limit=10)
@@ -230,13 +230,14 @@ def build_observation_dashboard() -> str:
         lines.append("- \uc544\uc9c1 \uc0c8 \ubaa9\ud45c \ud6c4\ubcf4\uac00 \uc5c6\uc5b4.")
 
     lines.extend(["", "**\uc81c\uc548 \ud050**"])
-    if proposals:
-        count_text = ", ".join(f"{_ko_status(status)} {count}" for status, count in sorted(proposal_counts.items())) or "\uc5c6\uc74c"
+    if pending_proposals:
+        active_counts = {status: count for status, count in proposal_counts.items() if status not in {"executed", "rejected"}}
+        count_text = ", ".join(f"{_ko_status(status)} {count}" for status, count in sorted(active_counts.items())) or "\uc5c6\uc74c"
         lines.append(f"- \uc0c1\ud0dc \ud569\uacc4: {count_text}")
-        for proposal in proposals[:3]:
+        for proposal in pending_proposals[:3]:
             lines.append(f"- #{proposal.get('id')} {_proposal_label(proposal)}: {_ko_status(proposal.get('status'))}")
     else:
-        lines.append("- \ud604\uc7ac action \uc81c\uc548\uc774 \ube44\uc5b4 \uc788\uc5b4.")
+        lines.append("- \ud604\uc7ac 처리 대기 중인 action 제안은 없어.")
 
     lines.extend(["", "**\ud559\uc2b5/\ud68c\uace0**"])
     if reflections:

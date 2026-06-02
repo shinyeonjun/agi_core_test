@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,7 +41,9 @@ def list_tasks(suite: str | None = None) -> list[EvalTask]:
 
 
 def _run_agentctl(args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([str(project_root() / "venv" / "bin" / "agentctl"), *args], cwd=project_root(), text=True, capture_output=True, timeout=30, env=env)
+    binary = project_root() / "venv" / "bin" / "agentctl"
+    command = [str(binary), *args] if binary.exists() else [sys.executable, "-m", "agent.cli.agentctl", *args]
+    return subprocess.run(command, cwd=project_root(), text=True, capture_output=True, timeout=30, env=env)
 
 
 def _command_to_args(cmd: str) -> list[str]:

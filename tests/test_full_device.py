@@ -1,4 +1,5 @@
 import json
+import sys
 
 from agent.cli.agentctl import main
 from agent.core.autonomy import arm_catastrophic_destruction, get_autonomy_state, set_autonomy_profile
@@ -40,7 +41,7 @@ def test_action_run_safe_profile_blocks_execution(monkeypatch, tmp_path):
 def test_action_run_full_device_records_snapshots(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     set_autonomy_profile("full_device_lab")
-    result = run_action("printf hello", cwd=str(tmp_path))
+    result = run_action(f'"{sys.executable}" -c "print(\'hello\', end=\'\')"', cwd=str(tmp_path), use_shell=True)
     assert result["executed"] is True
     assert result["returncode"] == 0
     assert result["stdout"] == "hello"
@@ -55,7 +56,7 @@ def test_action_run_full_device_records_snapshots(monkeypatch, tmp_path):
 def test_action_run_timeout_records_timeout(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     set_autonomy_profile("full_device_lab")
-    result = run_action("python3 -c 'import time; time.sleep(2)'", cwd=str(tmp_path), timeout_seconds=1)
+    result = run_action(f'"{sys.executable}" -c "import time; time.sleep(2)"', cwd=str(tmp_path), timeout_seconds=1, use_shell=True)
     assert result["status"] == "timeout"
     assert result["returncode"] == 124
     assert get_action_run(result["id"])["status"] == "timeout"
@@ -77,7 +78,7 @@ def test_redact_action_output():
 def test_action_cli_history(monkeypatch, tmp_path, capsys):
     setup_isolated(monkeypatch, tmp_path)
     assert main(["autonomy", "set", "full_device_lab"]) == 0
-    assert main(["action", "run", "printf cli", "--cwd", str(tmp_path)]) == 0
+    assert main(["action", "run", f'"{sys.executable}" -c "print(\'cli\', end=\'\')"', "--cwd", str(tmp_path), "--shell"]) == 0
     run_output = capsys.readouterr().out
     assert "cli" in run_output
     assert main(["action", "history", "--limit", "1"]) == 0

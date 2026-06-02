@@ -10,7 +10,7 @@ from agent.core.approvals import ApprovalStore
 from agent.core.cooldown import is_ready, mark
 from agent.core.database import connect, init_db
 from agent.core.events import log_event
-from agent.core.goals import list_goals
+from agent.core.goal_generator import meaningful_open_goals
 from agent.core.pipeline import run_talk
 from agent.core.state import load_state
 from agent.lab.planner import run_user_task
@@ -92,7 +92,7 @@ def _approval_summary() -> str:
 
 
 def _goal_summary() -> str:
-    rows = list_goals(limit=10)
+    rows = meaningful_open_goals(limit=10)
     if not rows:
         return "**\ubaa9\ud45c \uc694\uc57d**\n\ub4f1\ub85d\ub41c \ubaa9\ud45c\uac00 \uac70\uc758 \uc5c6\uc5b4."
     lines = ["**\ubaa9\ud45c \uc694\uc57d**"]
@@ -124,10 +124,10 @@ def handle_command(text: str, *, role: ChannelRole = "chat") -> str | None:
         return format_approval_card(rows[0]) if rows else "\ud574\ub2f9 \uc2b9\uc778 \ud56d\ubaa9\uc744 \ucc3e\uc9c0 \ubabb\ud588\uc5b4."
     if command == "!approve" and arg.strip().isdigit():
         ok = ApprovalStore().approve(int(arg.strip()))
-        return f"\uc2b9\uc778 \uc644\ub8cc: #{arg.strip()}" if ok else "\uc2b9\uc778\ud560 \ud56d\ubaa9\uc774 \uc5c6\uac70\ub098 \uc774\ubbf8 \ucc98\ub9ac\ub410\uc5b4."
+        return f"\uc2b9\uc778 \uc644\ub8cc: #{arg.strip()}\n연결된 작업이 있으면 사용자 작업 큐로 돌려뒀어." if ok else "\uc2b9\uc778\ud560 \ud56d\ubaa9\uc774 \uc5c6\uac70\ub098 \uc774\ubbf8 \ucc98\ub9ac\ub410\uc5b4."
     if command == "!reject" and arg.strip().isdigit():
         ok = ApprovalStore().reject(int(arg.strip()))
-        return f"\uac70\uc808 \uc644\ub8cc: #{arg.strip()}" if ok else "\uac70\uc808\ud560 \ud56d\ubaa9\uc774 \uc5c6\uac70\ub098 \uc774\ubbf8 \ucc98\ub9ac\ub410\uc5b4."
+        return f"\uac70\uc808 \uc644\ub8cc: #{arg.strip()}\n연결된 작업이 있으면 차단 상태로 정리했어." if ok else "\uac70\uc808\ud560 \ud56d\ubaa9\uc774 \uc5c6\uac70\ub098 \uc774\ubbf8 \ucc98\ub9ac\ub410\uc5b4."
     return "\uc54c \uc218 \uc5c6\ub294 \uba85\ub839\uc774\uc57c. \uc0ac\uc6a9 \uac00\ub2a5: `!state`, `!goals`, `!tick`, `!memories`, `!approvals`, `!approve <id>`, `!reject <id>`."
 
 

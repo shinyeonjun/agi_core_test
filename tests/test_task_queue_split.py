@@ -1,13 +1,15 @@
 import json
+from datetime import datetime, timedelta, timezone
 
 from agent.bridge.auth import DiscordAuthConfig
 from agent.bridge.router import DiscordEvent, route_discord_event
 from agent.cli.agentctl import main
+from agent.core.approvals import ApprovalStore
 from agent.core.autonomy import set_autonomy_profile
-from agent.core.database import init_db
+from agent.core.database import connect, init_db
 from agent.core.goals import create_goal, list_goals
 from agent.core.pipeline import run_talk
-from agent.core.task_queue import enqueue_task, list_tasks, task_status_counts
+from agent.core.task_queue import claim_task, doctor_tasks, enqueue_task, list_tasks, task_status_counts
 from agent.lab.planner import run_lab_tick, run_lab_tick_if_enabled, run_user_task, sync_open_goals_to_tasks
 
 
@@ -102,3 +104,50 @@ def test_tasks_cli(monkeypatch, tmp_path, capsys):
     assert main(["tasks", "list", "--queue-type", "user"]) == 0
     rows = json.loads(capsys.readouterr().out)
     assert rows[0]["queue_type"] == "user"
+
+
+def test_approval_resume_moves_user_task_to_queue(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+
+    result = run_talk("apt-get install nginx 해줘")
+    user_goal = result["decision"]["user_directed_goal"]
+    approval_id = user_goal["approval_id"]
+    task = list_tasks(limit=5, queue_type="user")[0]
+
+    assert user_goal["status"] == "waiting_approval"
+    assert approval_id is not None
+    assert task["status"] == "waiting_approval"
+    assert task["approval_id"] == approval_id
+
+    assert ApprovalStore().approve(approval_id) is True
+    resumed = list_tasks(limit=5, queue_type="user")[0]
+    assert resumed["status"] == "queued"
+
+
+def test_reject_approval_blocks_waiting_user_task(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+
+    result = run_talk("apt-get install nginx 해줘")
+    approval_id = result["decision"]["user_directed_goal"]["approval_id"]
+
+    assert ApprovalStore().reject(approval_id) is True
+    blocked = list_tasks(limit=5, queue_type="user")[0]
+    assert blocked["status"] == "blocked"
+    assert blocked["result"]["reason"] == "approval_rejected"
+
+
+def test_task_doctor_recovers_stale_running_task(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    goal_id = create_goal("Doctor task", "doctor", goal_type="user_directed", status="active", priority=0.9, metadata={"priority_owner": "user", "task_kind": "task_note"}, dedupe=False)
+    task_id = enqueue_task("user", goal_id=goal_id, task_kind="task_note", title="Doctor task", source="test", priority=0.9)
+    assert claim_task(task_id)["status"] == "running"
+    old = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(timespec="seconds")
+    with connect() as conn:
+        conn.execute("UPDATE task_queue SET claimed_at = ? WHERE id = ?", (old, task_id))
+        conn.commit()
+
+    result = doctor_tasks(max_age_seconds=60)
+    task = next(row for row in list_tasks(limit=5, queue_type="user") if row["id"] == task_id)
+
+    assert result["stale_running"]["recovered"] == 1
+    assert task["status"] == "queued"

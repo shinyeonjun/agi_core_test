@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from agent.core.approvals import ApprovalStore
 from agent.core.goals import create_goal
 from agent.core.policy import PolicyEngine
 from agent.core.task_queue import enqueue_task
@@ -39,12 +40,16 @@ def maybe_create_user_goal(text: str, *, source_event_id: int | None = None, met
     if not is_user_goal_request(text, interpretation=interpretation):
         return None
 
-    policy = PolicyEngine().classify_decision(text, action_type="user_directive")
+    engine = PolicyEngine()
+    policy = engine.classify_decision(text, action_type="user_directive")
+    proposal = engine.classify_text(text, action_type="user_directive")
     task_kind = classify_user_goal_kind(text, interpretation=interpretation)
+    approval_id: int | None = None
     if policy.denied:
         status = "blocked"
     elif policy.requires_approval:
         status = "waiting_approval"
+        approval_id = ApprovalStore().create_approval(proposal)
     else:
         status = "active"
 
@@ -56,6 +61,7 @@ def maybe_create_user_goal(text: str, *, source_event_id: int | None = None, met
         "priority_owner": "user",
         "language_interpretation": interpretation or {},
         "policy": policy.to_dict(),
+        "approval_id": approval_id,
     }
     goal_metadata.update(metadata or {})
     goal_id = create_goal(
@@ -78,7 +84,8 @@ def maybe_create_user_goal(text: str, *, source_event_id: int | None = None, met
         source="discord_user_directive",
         priority=0.98,
         status=task_status,
-        payload={"source_event_id": source_event_id, "risk_level": policy.risk_level, "requires_approval": policy.requires_approval},
+        approval_id=approval_id,
+        payload={"source_event_id": source_event_id, "risk_level": policy.risk_level, "requires_approval": policy.requires_approval, "approval_id": approval_id},
     )
     return {
         "id": goal_id,
@@ -89,6 +96,7 @@ def maybe_create_user_goal(text: str, *, source_event_id: int | None = None, met
         "task_kind": task_kind,
         "risk_level": policy.risk_level,
         "requires_approval": policy.requires_approval,
+        "approval_id": approval_id,
         "denied": policy.denied,
         "reason": policy.reason,
     }

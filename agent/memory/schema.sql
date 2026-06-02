@@ -388,6 +388,7 @@ CREATE TABLE IF NOT EXISTS task_queue (
     status TEXT NOT NULL,
     priority REAL DEFAULT 0.5,
     goal_id INTEGER,
+    approval_id INTEGER,
     task_kind TEXT NOT NULL,
     title TEXT NOT NULL,
     source TEXT,
@@ -400,6 +401,7 @@ CREATE TABLE IF NOT EXISTS task_queue (
 CREATE INDEX IF NOT EXISTS idx_task_queue_status ON task_queue(status);
 CREATE INDEX IF NOT EXISTS idx_task_queue_type_status ON task_queue(queue_type, status);
 CREATE INDEX IF NOT EXISTS idx_task_queue_goal ON task_queue(goal_id);
+CREATE INDEX IF NOT EXISTS idx_task_queue_approval ON task_queue(approval_id);
 CREATE INDEX IF NOT EXISTS idx_task_queue_priority ON task_queue(priority);
 
 CREATE TABLE IF NOT EXISTS root_objectives (
@@ -444,4 +446,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR REPLACE INTO schema_meta (key, value)
-VALUES ('schema_version', '0.9.0-alpha');
+VALUES ('schema_version', '0.9.1-alpha');

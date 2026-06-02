@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from agent.config.defaults import now_kst
@@ -11,6 +12,7 @@ QueueType = Literal["user", "autonomous"]
 TaskStatus = Literal["queued", "running", "done", "blocked", "waiting_approval", "skipped"]
 
 OPEN_TASK_STATUSES = ("queued", "running", "waiting_approval")
+MAX_TASK_ATTEMPTS = 3
 
 
 def _decode(row: dict[str, Any]) -> dict[str, Any]:
@@ -52,6 +54,7 @@ def enqueue_task(
     source: str,
     priority: float = 0.5,
     status: TaskStatus = "queued",
+    approval_id: int | None = None,
     payload: dict[str, Any] | None = None,
     dedupe_goal: bool = True,
 ) -> int:
@@ -69,13 +72,13 @@ def enqueue_task(
         cur = conn.execute(
             """
             INSERT INTO task_queue (
-                created_at, updated_at, queue_type, status, priority, goal_id,
+                created_at, updated_at, queue_type, status, priority, goal_id, approval_id,
                 task_kind, title, source, payload_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 ts, ts, queue_type, status, max(0.0, min(1.0, float(priority))),
-                goal_id, task_kind, title[:160], source,
+                goal_id, approval_id, task_kind, title[:160], source,
                 json.dumps(payload or {}, ensure_ascii=False),
             ),
         )
@@ -92,19 +95,22 @@ def task_for_goal(goal_id: int, queue_type: str | None = None) -> dict[str, Any]
 def _claim_where(where_sql: str, params: tuple[Any, ...]) -> dict[str, Any] | None:
     init_db()
     with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             f"""
             SELECT * FROM task_queue
             WHERE {where_sql}
+              AND attempts < ?
             ORDER BY
                 queue_type = 'user' DESC,
                 priority DESC,
                 id ASC
             LIMIT 1
             """,
-            params,
+            (*params, MAX_TASK_ATTEMPTS),
         ).fetchone()
         if not row:
+            conn.commit()
             return None
         task = dict(row)
         ts = now_kst()
@@ -162,17 +168,117 @@ def finish_task(task_id: int, status: TaskStatus, result: dict[str, Any] | None 
 
 def requeue_task(task_id: int, result: dict[str, Any] | None = None) -> bool:
     init_db()
+    payload = result or {}
+    with connect() as conn:
+        row = conn.execute("SELECT attempts FROM task_queue WHERE id = ?", (task_id,)).fetchone()
+        if not row:
+            return False
+        attempts = int(row["attempts"] or 0)
+        if attempts >= MAX_TASK_ATTEMPTS:
+            cur = conn.execute(
+                """
+                UPDATE task_queue
+                SET status = 'blocked', updated_at = ?, completed_at = ?, result_json = ?
+                WHERE id = ?
+                """,
+                (now_kst(), now_kst(), json.dumps({**payload, "reason": "max_attempts_exceeded"}, ensure_ascii=False), task_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        cur = conn.execute(
+            """
+            UPDATE task_queue
+            SET status = 'queued', updated_at = ?, claimed_at = NULL, result_json = ?
+            WHERE id = ?
+            """,
+            (now_kst(), json.dumps(payload, ensure_ascii=False), task_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def resume_tasks_for_approval(approval_id: int) -> int:
+    init_db()
+    ts = now_kst()
     with connect() as conn:
         cur = conn.execute(
             """
             UPDATE task_queue
-            SET status = 'queued', updated_at = ?, result_json = ?
-            WHERE id = ?
+            SET status = 'queued', updated_at = ?, result_json = NULL
+            WHERE approval_id = ? AND status = 'waiting_approval'
             """,
-            (now_kst(), json.dumps(result or {}, ensure_ascii=False), task_id),
+            (ts, approval_id),
         )
         conn.commit()
-        return cur.rowcount > 0
+        count = cur.rowcount
+    if count:
+        log_event("task_queue", "approval_tasks_resumed", str(approval_id), {"approval_id": approval_id, "count": count}, 0.75)
+    return count
+
+
+def block_tasks_for_approval(approval_id: int, reason: str = "approval_rejected") -> int:
+    init_db()
+    ts = now_kst()
+    with connect() as conn:
+        cur = conn.execute(
+            """
+            UPDATE task_queue
+            SET status = 'blocked', updated_at = ?, completed_at = ?, result_json = ?
+            WHERE approval_id = ? AND status = 'waiting_approval'
+            """,
+            (ts, ts, json.dumps({"reason": reason}, ensure_ascii=False), approval_id),
+        )
+        conn.commit()
+        count = cur.rowcount
+    if count:
+        log_event("task_queue", "approval_tasks_blocked", str(approval_id), {"approval_id": approval_id, "count": count, "reason": reason}, 0.75)
+    return count
+
+
+def _parse_time(value: object) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def recover_stale_running(max_age_seconds: int = 1800) -> dict[str, int]:
+    init_db()
+    now = datetime.fromisoformat(now_kst())
+    threshold = timedelta(seconds=max(1, int(max_age_seconds)))
+    recovered = 0
+    blocked = 0
+    checked = 0
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM task_queue WHERE status = 'running'").fetchall()
+    for raw in rows:
+        checked += 1
+        task = dict(raw)
+        claimed = _parse_time(task.get("claimed_at"))
+        if claimed is not None and now - claimed < threshold:
+            continue
+        task_id = int(task["id"])
+        if int(task.get("attempts") or 0) >= MAX_TASK_ATTEMPTS:
+            if finish_task(task_id, "blocked", {"reason": "stale_running_max_attempts"}):
+                blocked += 1
+        elif requeue_task(task_id, {"reason": "stale_running_recovered"}):
+            recovered += 1
+    if recovered or blocked:
+        log_event("task_queue", "task_doctor_recovered", "stale_running", {"checked": checked, "recovered": recovered, "blocked": blocked}, 0.75)
+    return {"checked": checked, "recovered": recovered, "blocked": blocked}
+
+
+def doctor_tasks(max_age_seconds: int = 1800) -> dict[str, Any]:
+    stale = recover_stale_running(max_age_seconds=max_age_seconds)
+    counts = task_status_counts()
+    return {
+        "ok": True,
+        "stale_running": stale,
+        "counts": counts,
+        "max_attempts": MAX_TASK_ATTEMPTS,
+    }
 
 
 def list_tasks(limit: int = 20, status: str | None = None, queue_type: str | None = None) -> list[dict[str, Any]]:

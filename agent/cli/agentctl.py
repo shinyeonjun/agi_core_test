@@ -20,7 +20,7 @@ from agent.core.policy import ActionProposal, PolicyEngine
 from agent.core.self_map import latest_self_map, refresh_self_map, self_map_brief
 from agent.core.state import load_state, save_state
 from agent.core.style import add_style_example, apply_style_feedback, get_active_style_profile, list_style_examples, list_style_feedback, seed_default_style_profile, style_directives
-from agent.core.task_queue import list_tasks as list_queued_tasks, task_status_counts
+from agent.core.task_queue import doctor_tasks, list_tasks as list_queued_tasks, task_status_counts
 from agent.eval.harness import list_eval_runs, list_tasks as list_eval_tasks, run_suite
 from agent.language.engine import get_language_engine, interpret_user_message, language_cache_stats, list_interpretation_logs
 from agent.memory.store import add_memory, list_memories, rebuild_memory_fts, search_memories
@@ -405,6 +405,9 @@ def cmd_tasks(args: argparse.Namespace) -> int:
     if args.tasks_command == "run-user":
         print_json(run_user_task(args.task_id))
         return 0
+    if args.tasks_command == "doctor":
+        print_json(doctor_tasks(max_age_seconds=args.max_age_seconds))
+        return 0
     raise ValueError(f"unknown tasks command: {args.tasks_command}")
 
 
@@ -588,6 +591,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_tasks_counts = tasks_sub.add_parser("counts"); p_tasks_counts.set_defaults(func=cmd_tasks)
     p_tasks_sync = tasks_sub.add_parser("sync"); p_tasks_sync.set_defaults(func=cmd_tasks)
     p_tasks_run_user = tasks_sub.add_parser("run-user"); p_tasks_run_user.add_argument("task_id", type=int); p_tasks_run_user.set_defaults(func=cmd_tasks)
+    p_tasks_doctor = tasks_sub.add_parser("doctor"); p_tasks_doctor.add_argument("--max-age-seconds", type=int, default=1800); p_tasks_doctor.set_defaults(func=cmd_tasks)
     p = sub.add_parser("workspace"); workspace_sub = p.add_subparsers(dest="workspace_command", required=True)
     p_ws_init = workspace_sub.add_parser("init"); p_ws_init.set_defaults(func=cmd_workspace)
     p_ws_report = workspace_sub.add_parser("report"); p_ws_report.add_argument("--title", default="Workspace status report"); p_ws_report.set_defaults(func=cmd_workspace)

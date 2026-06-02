@@ -82,7 +82,7 @@ def test_command_goal_summary_hides_description_and_metadata():
         dedupe=False,
     )
     output = _goal_summary()
-    assert "secret goal summary marker" in output
+    assert "secret goal summary marker" not in output
     assert "description" not in output
     assert "metadata_json" not in output
     assert "DISCORD_BOT_TOKEN" not in output

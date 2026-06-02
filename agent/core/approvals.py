@@ -6,6 +6,7 @@ from typing import Any
 from agent.config.defaults import now_kst
 from agent.core.database import connect, init_db
 from agent.core.policy import ActionProposal
+from agent.core.task_queue import block_tasks_for_approval, resume_tasks_for_approval
 
 
 class ApprovalStore:
@@ -61,7 +62,12 @@ class ApprovalStore:
                 (status, now_kst(), approval_id),
             )
             conn.commit()
-            return cur.rowcount > 0
+            ok = cur.rowcount > 0
+        if ok and status == "approved":
+            resume_tasks_for_approval(approval_id)
+        if ok and status == "rejected":
+            block_tasks_for_approval(approval_id)
+        return ok
 
     def _decode_row(self, row: dict[str, Any]) -> dict[str, Any]:
         raw = row.get("proposed_payload_json")

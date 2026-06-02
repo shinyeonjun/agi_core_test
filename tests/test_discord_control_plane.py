@@ -12,6 +12,13 @@ from agent.core.goals import list_goals
 from agent.core.policy import PolicyEngine
 
 
+MOJIBAKE_MARKERS = ("�", "濡", "紐", "媛", "醫", "뺤", "怨", "寃", "?꾨", "?덉")
+
+
+def assert_no_mojibake(text: str):
+    assert not any(marker in text for marker in MOJIBAKE_MARKERS)
+
+
 def setup_isolated(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_CORE_DB_PATH", str(tmp_path / "agent.db"))
     monkeypatch.setenv("AGENT_CORE_STATE_PATH", str(tmp_path / "state.json"))
@@ -150,6 +157,7 @@ def test_action_update_is_control_room_readable(monkeypatch, tmp_path):
     assert "명령:" not in text
     assert "반환값:" not in text
     assert "['df', '-h', '/']" not in text
+    assert_no_mojibake(text)
 
 
 def test_action_update_explains_blocked_impact(monkeypatch, tmp_path):
@@ -167,6 +175,7 @@ def test_action_update_explains_blocked_impact(monkeypatch, tmp_path):
     assert "위험한 삭제 차단" in text
     assert "영향: 실행 안 됨, 시스템 변경 없음" in text
     assert "결과: 차단" in text
+    assert_no_mojibake(text)
 
 
 
@@ -259,6 +268,7 @@ def test_activity_summary_reports_current_work(monkeypatch, tmp_path):
     assert "secret goal summary marker" not in text
     assert "ssh_key_access_denied" not in text
     assert "completed / rc=0" not in text
+    assert_no_mojibake(text)
 
 
 def test_observation_dashboard_is_activity_summary_source(monkeypatch, tmp_path):
