@@ -3,6 +3,7 @@ import json
 from agent.cli.agentctl import main
 from agent.core.database import init_db
 from agent.core.pipeline import run_talk
+from agent.core.process_table import get_process, list_processes, process_snapshot
 from agent.core.project_execution import classify_failure_reason, get_project_plan, list_project_plans
 from agent.core.task_queue import list_tasks
 from agent.lab.planner import run_user_task
@@ -33,6 +34,10 @@ def test_user_project_request_creates_execution_plan(monkeypatch, tmp_path):
     assert plan is not None
     assert len(plan["steps"]) == 4
     assert all(step["completion_criteria"] for step in plan["steps"])
+    processes = list_processes(limit=5)
+    assert processes[0]["pid"] == f"task:{user_goal['task_id']}"
+    assert processes[0]["plan"]["plan_id"] == user_goal["project_plan_id"]
+    assert processes[0]["plan"]["progress"]["total"] == 4
 
 
 def test_user_task_completion_marks_project_plan_done(monkeypatch, tmp_path):
@@ -50,6 +55,10 @@ def test_user_task_completion_marks_project_plan_done(monkeypatch, tmp_path):
     assert plan["status"] == "done"
     assert all(step["status"] == "done" for step in plan["steps"])
     assert task["status"] == "done"
+    process = get_process(f"task:{task_id}")
+    assert process is not None
+    assert process["state"] == "done"
+    assert process["plan"]["progress"]["ratio"] == 1.0
 
 
 def test_project_cli_lists_and_shows_plans(monkeypatch, tmp_path, capsys):
@@ -65,6 +74,23 @@ def test_project_cli_lists_and_shows_plans(monkeypatch, tmp_path, capsys):
     plan = json.loads(capsys.readouterr().out)
     assert plan["id"] == plan_id
     assert len(plan["steps"]) == 4
+
+
+def test_process_cli_lists_project_tasks(monkeypatch, tmp_path, capsys):
+    setup_isolated(monkeypatch, tmp_path)
+    result = run_talk("FastAPI 프로젝트 구조를 설계하고 초안까지 만들어줘")
+    task_id = result["decision"]["user_directed_goal"]["task_id"]
+
+    assert main(["process", "snapshot", "--limit", "5"]) == 0
+    snapshot = json.loads(capsys.readouterr().out)
+    assert snapshot["items"]
+    assert snapshot["items"][0]["pid"] == f"task:{task_id}"
+    assert snapshot["items"][0]["next"]
+
+    assert main(["process", "show", f"task:{task_id}"]) == 0
+    item = json.loads(capsys.readouterr().out)
+    assert item["task_id"] == task_id
+    assert item["plan"]["progress"]["total"] == 4
 
 
 def test_failure_classifier_labels_common_worker_failures():

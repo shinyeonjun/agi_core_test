@@ -12,7 +12,7 @@ from agent.core.learner import create_reflection
 from agent.core.metrics import collect_metrics
 from agent.core.operating_intelligence import refresh_goal_priorities
 from agent.core.policy import PolicyEngine
-from agent.core.project_execution import complete_project_plan, mark_plan_running, project_plan_brief
+from agent.core.project_execution import block_project_plan, complete_project_plan, mark_plan_running, mark_project_step, mark_project_step_done, project_plan_brief
 from agent.core.state import load_state
 from agent.core.task_lifecycle import record_task_phase
 from agent.core.task_queue import claim_next_task, claim_task, enqueue_task, finish_task, list_tasks, requeue_task, task_status_counts
@@ -259,10 +259,18 @@ def _handle_user_directed_goal(goal: dict[str, Any], drives: dict[str, float], *
     project_plan_id = metadata.get("project_plan_id")
     if project_plan_id is not None:
         mark_plan_running(int(project_plan_id), task_id=task_id)
+        mark_project_step_done(int(project_plan_id), "planning", {"task_id": task_id, "task_kind": task_kind})
     metrics = collect_metrics()
     if task_kind == "code_change":
+        if project_plan_id is not None:
+            mark_project_step(int(project_plan_id), "implementation", "running", {"task_id": task_id})
         result = run_codex_work(user_text, goal_id=int(goal["id"]) if goal.get("id") is not None else None, task_id=task_id)
         if result.get("status") == "codex_work_completed":
+            if project_plan_id is not None:
+                mark_project_step_done(int(project_plan_id), "implementation", result)
+                mark_project_step(int(project_plan_id), "verification", "running", {"task_id": task_id, "source": "codex_worker_report"})
+                mark_project_step_done(int(project_plan_id), "verification", result)
+                mark_project_step(int(project_plan_id), "reporting", "running", {"task_id": task_id})
             mark_goal_done(int(goal["id"]))
             reflection_id = create_reflection(
                 "Codex work worker completed a user-directed code-change task.",
@@ -279,15 +287,23 @@ def _handle_user_directed_goal(goal: dict[str, Any], drives: dict[str, float], *
             "artifact_type": "codex_work_report",
         }
         if project_plan_id is not None:
-            final["project_plan"] = project_plan_brief(complete_project_plan(int(project_plan_id), final))
+            if result.get("status") == "codex_work_completed":
+                mark_project_step_done(int(project_plan_id), "reporting", final)
+                final["project_plan"] = project_plan_brief(complete_project_plan(int(project_plan_id), final))
+            else:
+                final["project_plan"] = project_plan_brief(block_project_plan(int(project_plan_id), final))
         return final
     if task_kind == "project_spec":
+        if project_plan_id is not None:
+            mark_project_step(int(project_plan_id), "implementation", "running", {"task_id": task_id})
         artifact = create_project_spec(
             str(goal.get("title") or "User requested project"),
             user_text,
             ["User-directed priority", "Workspace-only first pass", "No OS mutation without policy approval"],
         )
     else:
+        if project_plan_id is not None:
+            mark_project_step(int(project_plan_id), "implementation", "running", {"task_id": task_id})
         title = {
             "report": "User requested report",
             "improvement_plan": "User requested improvement plan",
@@ -320,6 +336,11 @@ def _handle_user_directed_goal(goal: dict[str, Any], drives: dict[str, float], *
         "reflection_id": reflection_id,
     }
     if project_plan_id is not None:
+        mark_project_step_done(int(project_plan_id), "implementation", result)
+        mark_project_step(int(project_plan_id), "verification", "running", {"artifact_id": artifact.get("id"), "task_id": task_id})
+        mark_project_step_done(int(project_plan_id), "verification", result)
+        mark_project_step(int(project_plan_id), "reporting", "running", {"task_id": task_id})
+        mark_project_step_done(int(project_plan_id), "reporting", result)
         result["project_plan"] = project_plan_brief(complete_project_plan(int(project_plan_id), result))
     log_event("lab", "lab_user_goal_completed", task_kind, result, 0.82)
     return result

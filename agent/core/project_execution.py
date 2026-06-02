@@ -232,6 +232,83 @@ def mark_plan_running(plan_id: int, *, task_id: int | None = None) -> None:
         conn.commit()
 
 
+def mark_project_step(plan_id: int, step_kind: str, status: str, result: dict[str, Any] | None = None) -> dict[str, Any]:
+    if status not in {"pending", "running", "done", "blocked", "skipped"}:
+        raise ValueError(f"invalid project step status: {status}")
+    init_db()
+    ts = now_kst()
+    failure_category = None if status in {"pending", "running", "done", "skipped"} else classify_failure_reason(result)
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, step_index
+            FROM project_execution_steps
+            WHERE plan_id = ? AND task_kind = ?
+            ORDER BY step_index ASC
+            LIMIT 1
+            """,
+            (int(plan_id), step_kind),
+        ).fetchone()
+        if not row:
+            raise ValueError(f"project step not found: {step_kind}")
+        step_index = int(row["step_index"])
+        conn.execute(
+            """
+            UPDATE project_execution_steps
+            SET status = ?, updated_at = ?, failure_category = ?, result_json = ?
+            WHERE id = ?
+            """,
+            (status, ts, failure_category, _json(result or {}), int(row["id"])),
+        )
+        plan_status = "blocked" if status == "blocked" else "running"
+        conn.execute(
+            """
+            UPDATE project_execution_plans
+            SET status = ?, current_step_index = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (plan_status, step_index, ts, int(plan_id)),
+        )
+        conn.commit()
+    plan = get_project_plan(plan_id) or {"id": plan_id, "status": status}
+    log_event("project_execution", f"step_{status}", step_kind, {"plan_id": plan_id, "step_kind": step_kind, "failure_category": failure_category}, 0.74)
+    return plan
+
+
+def mark_project_step_done(plan_id: int, step_kind: str, result: dict[str, Any] | None = None) -> dict[str, Any]:
+    return mark_project_step(plan_id, step_kind, "done", result)
+
+
+def block_project_plan(plan_id: int, result: dict[str, Any]) -> dict[str, Any]:
+    failure_category = classify_failure_reason(result)
+    ts = now_kst()
+    init_db()
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE project_execution_steps
+            SET status = CASE WHEN status = 'done' THEN 'done' ELSE 'blocked' END,
+                updated_at = ?,
+                failure_category = CASE WHEN status = 'done' THEN failure_category ELSE ? END,
+                result_json = CASE WHEN status = 'done' THEN result_json ELSE ? END
+            WHERE plan_id = ?
+            """,
+            (ts, failure_category, _json(result), int(plan_id)),
+        )
+        conn.execute(
+            """
+            UPDATE project_execution_plans
+            SET status = 'blocked', updated_at = ?, result_json = ?
+            WHERE id = ?
+            """,
+            (ts, _json({"status": result.get("status"), "failure_category": failure_category, "task_result": result}), int(plan_id)),
+        )
+        conn.commit()
+    plan = get_project_plan(plan_id) or {"id": plan_id, "status": "blocked"}
+    log_event("project_execution", "plan_blocked", str(plan_id), {"plan_id": plan_id, "failure_category": failure_category}, 0.78)
+    return plan
+
+
 def complete_project_plan(plan_id: int, result: dict[str, Any]) -> dict[str, Any]:
     init_db()
     status = str(result.get("status") or "")
@@ -245,7 +322,10 @@ def complete_project_plan(plan_id: int, result: dict[str, Any]) -> dict[str, Any
             conn.execute(
                 """
                 UPDATE project_execution_steps
-                SET status = ?, updated_at = ?, failure_category = ?, result_json = ?
+                SET status = CASE WHEN status = 'done' THEN 'done' ELSE ? END,
+                    updated_at = ?,
+                    failure_category = CASE WHEN status = 'done' THEN failure_category ELSE ? END,
+                    result_json = CASE WHEN status = 'done' THEN result_json ELSE ? END
                 WHERE id = ?
                 """,
                 (final_status, ts, failure_category, _json(result), int(row["id"])),

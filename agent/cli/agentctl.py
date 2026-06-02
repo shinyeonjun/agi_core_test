@@ -21,6 +21,7 @@ from agent.core.observability import action_failure_breakdown, action_observatio
 from agent.core.operating_intelligence import action_critics, memory_hygiene_candidates, operating_snapshot, ranked_goals, refresh_goal_priorities, skill_candidates
 from agent.core.pipeline import run_talk
 from agent.core.policy import ActionProposal, PolicyEngine
+from agent.core.process_table import get_process, list_processes, process_snapshot
 from agent.core.project_execution import get_project_plan, list_project_plans
 from agent.core.self_map import latest_self_map, refresh_self_map, self_map_brief
 from agent.core.state import load_state, save_state
@@ -469,6 +470,20 @@ def cmd_project(args: argparse.Namespace) -> int:
     raise ValueError(f"unknown project command: {args.project_command}")
 
 
+def cmd_process(args: argparse.Namespace) -> int:
+    if args.process_command == "list":
+        print_json(list_processes(limit=args.limit, state=args.state))
+        return 0
+    if args.process_command == "snapshot":
+        print_json(process_snapshot(limit=args.limit))
+        return 0
+    if args.process_command == "show":
+        item = get_process(args.pid)
+        print_json(item or {"available": False, "pid": args.pid})
+        return 0 if item else 1
+    raise ValueError(f"unknown process command: {args.process_command}")
+
+
 def cmd_capability(args: argparse.Namespace) -> int:
     data = collect_capability_map()
     if getattr(args, "json", False):
@@ -715,6 +730,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("project"); project_sub = p.add_subparsers(dest="project_command", required=True)
     p_project_plans = project_sub.add_parser("plans"); p_project_plans.add_argument("--limit", type=int, default=20); p_project_plans.add_argument("--status"); p_project_plans.set_defaults(func=cmd_project)
     p_project_show = project_sub.add_parser("show"); p_project_show.add_argument("plan_id", type=int); p_project_show.set_defaults(func=cmd_project)
+    p = sub.add_parser("process"); process_sub = p.add_subparsers(dest="process_command", required=True)
+    p_process_list = process_sub.add_parser("list"); p_process_list.add_argument("--limit", type=int, default=20); p_process_list.add_argument("--state"); p_process_list.set_defaults(func=cmd_process)
+    p_process_snapshot = process_sub.add_parser("snapshot"); p_process_snapshot.add_argument("--limit", type=int, default=20); p_process_snapshot.set_defaults(func=cmd_process)
+    p_process_show = process_sub.add_parser("show"); p_process_show.add_argument("pid"); p_process_show.set_defaults(func=cmd_process)
     p = sub.add_parser("capability"); p.add_argument("--json", action="store_true"); p.set_defaults(func=cmd_capability)
     p = sub.add_parser("observe"); observe_sub = p.add_subparsers(dest="observe_command", required=True)
     p_observe_snapshot = observe_sub.add_parser("snapshot"); p_observe_snapshot.add_argument("--limit", type=int, default=10); p_observe_snapshot.set_defaults(func=cmd_observe)

@@ -4,7 +4,7 @@ Digital AGI-oriented Local Stateful Agent Core for Orange Pi 5. This project doe
 
 ## Current Scope
 
-- v0.11-alpha Agent OS kernel for Orange Pi
+- v0.15-alpha Agent OS kernel for Orange Pi
 - Discord conversational control plane
 - Codex-backed language interpretation and rendering with rule fallback
 - Language interpretation cache and redacted interpretation logs
@@ -20,15 +20,17 @@ Digital AGI-oriented Local Stateful Agent Core for Orange Pi 5. This project doe
 - Split task queue for immediate user tasks and scheduled autonomous tasks
 - Task lifecycle tracking with queued/planning/executing/verifying/reporting/learned phases
 - SQLite task leases, idempotency keys, delayed scheduling fields, and task doctor recovery
+- OS-like Core process table for task/project state, blockers, progress, and next actions
+- Staged project worker loop for planning, implementation, verification, and reporting
 - Operating intelligence snapshots for goal priority, action critic, memory hygiene, skill candidates, and next improvements
 - Explicit DB migration status table and `agentctl db migrate/check`
 - systemd unit templates
 
 Version alignment:
 
-- package: `0.11.0a0`
-- schema: `0.11.0-alpha`
-- runtime scope: `v0.11-alpha`
+- package: `0.15.0a0`
+- schema: `0.15.0-alpha`
+- runtime scope: `v0.15-alpha`
 
 ## Basic Commands
 
@@ -53,6 +55,9 @@ agentctl autonomy show
 agentctl action history
 agentctl tasks counts
 agentctl tasks list --queue-type user
+agentctl process snapshot
+agentctl process list
+agentctl project plans
 agentctl intelligence snapshot --persist --refresh
 ```
 
@@ -107,6 +112,19 @@ agentctl tasks doctor
 ```
 
 Task queue rows carry a lease (`locked_until`, `locked_by`), idempotency key, scheduling fields (`not_before`, `due_at`), and retry budget. This keeps user-triggered work and scheduler work separate while still sharing memory, goals, approvals, events, reflections, and operating reviews.
+
+## Core Process Table
+
+`process` is the OS-style runtime view. It merges task queue rows, project execution plans, lifecycle events, approval state, progress, blockers, and next actions into one operator-facing table.
+
+```bash
+agentctl process snapshot
+agentctl process list --state waiting
+agentctl process show task:12
+agentctl process show project:3
+```
+
+Project plans now advance through `planning`, `implementation`, `verification`, and `reporting` stages. This makes a broad user goal visible as a staged process instead of an opaque one-shot result.
 
 ## Operating Intelligence
 

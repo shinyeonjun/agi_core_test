@@ -195,6 +195,15 @@ def _migration_0006_project_execution_plans(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0007_process_table_runtime(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        INSERT INTO schema_meta (key, value) VALUES ('schema_version', '0.15.0-alpha')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("0001_existing_db_repairs", "Backfill approval task links and memory FTS schema", _migration_0001_existing_db_repairs),
     Migration("0002_task_queue_locks", "Add task queue lease, idempotency, and scheduling fields", _migration_0002_task_queue_locks),
@@ -202,6 +211,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0004_memory_intelligence_indexes", "Add memory and reflection indexes for compaction and retrieval", _migration_0004_memory_intelligence_indexes),
     Migration("0005_sparse_memory_vectors", "Add local sparse vector storage for memory reranking", _migration_0005_sparse_memory_vectors),
     Migration("0006_project_execution_plans", "Add project execution plans and step tracking", _migration_0006_project_execution_plans),
+    Migration("0007_process_table_runtime", "Align schema for process table and staged project runtime", _migration_0007_process_table_runtime),
 )
 
 
