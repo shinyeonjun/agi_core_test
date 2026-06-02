@@ -10,6 +10,7 @@ from agent.core.metrics import collect_metrics
 from agent.core.self_map import self_map_brief
 
 ALLOWED_CODEX_WORK_SANDBOXES = {"read-only", "workspace-write"}
+ALLOWED_CODEX_WORK_BACKENDS = {"codex", "lazycodex"}
 
 
 def _status(enabled: bool, *, available: bool = True) -> str:
@@ -22,8 +23,22 @@ def _codex_available() -> bool:
     return shutil.which("codex") is not None
 
 
+def _lazycodex_available() -> bool:
+    if env_bool("AGENT_LAZYCODEX_AVAILABLE_OVERRIDE", False):
+        return True
+    if shutil.which("omo") or shutil.which("lazycodex") or shutil.which("lazycodex-ai"):
+        return True
+    home = os.getenv("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+    return os.path.isdir(os.path.join(home, "plugins", "cache", "sisyphuslabs", "omo"))
+
+
 def codex_worker_enabled() -> bool:
     return env_bool("AGENT_CODEX_WORKER_ENABLED", True)
+
+
+def codex_work_backend() -> str:
+    value = os.getenv("AGENT_CODEX_WORK_BACKEND", "codex").strip().lower()
+    return value or "codex"
 
 
 def codex_work_sandbox() -> str:
@@ -39,6 +54,11 @@ def codex_worker_blockers(profile: str | None = None) -> list[str]:
         blockers.append("codex_worker_disabled")
     if active_profile != "full_device_lab":
         blockers.append("profile_not_full_device_lab")
+    backend = codex_work_backend()
+    if backend not in ALLOWED_CODEX_WORK_BACKENDS:
+        blockers.append("invalid_codex_work_backend")
+    if backend == "lazycodex" and not _lazycodex_available():
+        blockers.append("lazycodex_unavailable")
     sandbox = codex_work_sandbox()
     if sandbox not in ALLOWED_CODEX_WORK_SANDBOXES:
         blockers.append("invalid_codex_work_sandbox")
@@ -90,7 +110,14 @@ def collect_capability_map() -> dict[str, Any]:
                 "status": _status(worker_ready, available=codex_available),
                 "description": "User-triggered code-change worker for repo edits, tests, and implementation reports",
                 "blockers": worker_blockers,
+                "backend": codex_work_backend(),
                 "sandbox": codex_work_sandbox(),
+            },
+            {
+                "name": "lazycodex_work_backend",
+                "status": _status(codex_work_backend() == "lazycodex" and not worker_blockers, available=_lazycodex_available()),
+                "description": "Optional LazyCodex/OMO ultrawork backend for long code tasks, gated by Core policy and worktree isolation",
+                "blockers": worker_blockers if codex_work_backend() == "lazycodex" else [],
             },
         ],
         "approval_required": [
@@ -129,6 +156,7 @@ def capability_summary_lines(capabilities: dict[str, Any] | None = None) -> list
     return [
         f"profile={data.get('profile')}",
         f"codex_work_worker={codex_work.get('status', 'unknown')}",
+        f"worker_backend={codex_work.get('backend', 'codex')}",
         f"eval={data.get('metrics', {}).get('last_eval_result')} / {data.get('metrics', {}).get('last_eval_score')}",
         f"vector_coverage={data.get('metrics', {}).get('memory_vector_coverage')}",
     ]

@@ -74,6 +74,7 @@ def tool_routes(interpretation: dict[str, Any], policy: PolicyDecision, capabili
                 "status": worker.get("status", "unknown"),
                 "risk": policy.risk_level,
                 "score": 0.75 if worker.get("status") == "enabled" else 0.35,
+                "backend": worker.get("backend", "codex"),
                 "blockers": worker.get("blockers", []),
             }
         )

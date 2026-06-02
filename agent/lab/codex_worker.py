@@ -11,9 +11,9 @@ from typing import Any
 from uuid import uuid4
 
 from agent.codex_config import codex_exec_args, codex_exec_config
-from agent.config.defaults import env_bool, project_root
+from agent.config.defaults import env_bool, env_int, project_root, workspace_root
 from agent.core.autonomy import current_profile
-from agent.core.capabilities import ALLOWED_CODEX_WORK_SANDBOXES, codex_work_sandbox, codex_worker_blockers, codex_worker_enabled
+from agent.core.capabilities import ALLOWED_CODEX_WORK_BACKENDS, ALLOWED_CODEX_WORK_SANDBOXES, codex_work_backend, codex_work_sandbox, codex_worker_blockers, codex_worker_enabled
 from agent.core.events import log_event
 from agent.core.policy import PolicyEngine
 from agent.tools.full_device import redact_action_output
@@ -62,6 +62,26 @@ def _git_status(root: Path) -> list[str]:
     return [line[:240] for line in (completed.stdout or "").splitlines()[:80]]
 
 
+def _git(args: list[str], root: Path, *, timeout: int = 20) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def _is_git_repo(root: Path) -> bool:
+    try:
+        completed = _git(["rev-parse", "--is-inside-work-tree"], root, timeout=5)
+    except Exception:
+        return False
+    return completed.returncode == 0 and (completed.stdout or "").strip() == "true"
+
+
 def _changed_path(status_line: str) -> str:
     line = status_line.strip()
     if not line:
@@ -98,6 +118,19 @@ def _blocked_result(reason: str, *, goal_id: int | None, task_id: int | None, **
     return result
 
 
+def _lazycodex_timeout() -> int:
+    return max(30, min(3600, env_int("AGENT_LAZYCODEX_WORK_TIMEOUT", env_int("AGENT_CODEX_WORK_TIMEOUT", 600))))
+
+
+def _lazycodex_mode() -> str:
+    value = os.getenv("AGENT_LAZYCODEX_MODE", "ulw-loop").strip().lower()
+    return value if value in {"ulw-loop", "ultrawork"} else "ulw-loop"
+
+
+def _lazycodex_worktree_enabled() -> bool:
+    return env_bool("AGENT_LAZYCODEX_WORKTREE", True)
+
+
 def _worker_prompt(user_request: str, *, goal_id: int | None, task_id: int | None) -> str:
     return "\n".join(
         [
@@ -121,33 +154,62 @@ def _worker_prompt(user_request: str, *, goal_id: int | None, task_id: int | Non
     )
 
 
-def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: int | None = None) -> dict[str, Any]:
-    root = project_root()
-    blockers = codex_worker_blockers()
-    if blockers:
-        return _blocked_result("codex_worker_not_available", goal_id=goal_id, task_id=task_id, blockers=blockers, sandbox=codex_work_sandbox())
-    if not codex_worker_enabled():
-        return _blocked_result("codex_worker_disabled", goal_id=goal_id, task_id=task_id)
-    if not root.exists():
-        return _blocked_result("project_root_missing", goal_id=goal_id, task_id=task_id, project_root=str(root))
+def _lazycodex_prompt(user_request: str, *, goal_id: int | None, task_id: int | None, worktree: Path) -> str:
+    mode = _lazycodex_mode()
+    trigger = "ulw-loop" if mode == "ulw-loop" else "ultrawork"
+    return "\n".join(
+        [
+            f"{trigger}",
+            "",
+            "You are LazyCodex running as Agent Core's code-work backend.",
+            "Agent Core is the owner, policy gate, memory layer, and Discord control plane. You are only the development worker.",
+            "",
+            "Mission:",
+            "- Finish the requested code work as far as safely possible inside the given git worktree.",
+            "- Plan, implement, verify, and leave observable evidence.",
+            "- Prefer small, scoped changes over broad rewrites.",
+            "",
+            "Core safety boundary:",
+            "- Do not read, print, copy, or store .env files, tokens, passwords, private keys, or SSH keys.",
+            "- Do not modify .env, .ssh, key files, token files, credentials, package manager auth files, or deployment secrets.",
+            "- Do not use sudo, systemd writes, package installation, or external network actions.",
+            "- Do not claim AGI, consciousness, unrestricted autonomy, or policy bypass.",
+            "- If the task needs a forbidden action, stop and report the blocker with evidence.",
+            "",
+            "Verification requirement:",
+            "- Run relevant tests or checks when feasible.",
+            "- If tests cannot run, explain the exact blocker.",
+            "- Completion requires changed-file summary, verification commands, and remaining risks.",
+            "",
+            f"goal_id: {goal_id}",
+            f"task_id: {task_id}",
+            f"worktree: {worktree}",
+            "",
+            "User request:",
+            user_request[:4000],
+            "",
+            "Return a concise Korean report with: plan, changes, tests/evidence, blocked items, remaining risk.",
+        ]
+    )
 
-    sandbox = codex_work_sandbox()
-    if sandbox not in ALLOWED_CODEX_WORK_SANDBOXES:
-        return _blocked_result("invalid_codex_work_sandbox", goal_id=goal_id, task_id=task_id, sandbox=sandbox)
 
-    policy = PolicyEngine(profile="safe").classify_decision(user_request, action_type="codex_work")
-    if policy.denied or policy.requires_approval:
-        return _blocked_result(
-            policy.reason,
-            goal_id=goal_id,
-            task_id=task_id,
-            policy={"risk_level": policy.risk_level, "requires_approval": policy.requires_approval, "denied": policy.denied, "matched_rules": policy.matched_rules},
-        )
+def _create_lazycodex_worktree(root: Path, task_id: int | None) -> tuple[Path, str | None, str | None]:
+    if not _lazycodex_worktree_enabled():
+        return root, None, None
+    if not _is_git_repo(root):
+        raise RuntimeError("git_repo_required_for_lazycodex_worktree")
+    branch = f"codex/lazycodex-task-{task_id or 'manual'}-{uuid4().hex[:8]}"
+    path = workspace_root() / "tasks" / "lazycodex-worktrees" / branch.replace("/", "-")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    completed = _git(["worktree", "add", "-b", branch, str(path), "HEAD"], root, timeout=30)
+    if completed.returncode != 0:
+        raise RuntimeError(f"git_worktree_add_failed:{_redact(completed.stderr, 500)}")
+    return path.resolve(), branch, "created"
 
+
+def _run_codex_exec_backend(root: Path, user_request: str, *, goal_id: int | None, task_id: int | None, sandbox: str) -> dict[str, Any]:
     config = codex_exec_config("WORK", default_reasoning="high", default_timeout=120)
     output_path = Path(tempfile.gettempdir()) / f"agent_core_codex_work_{os.getpid()}_{uuid4().hex}.md"
-    before_status = _git_status(root)
-    start = time.monotonic()
     args = [
         *codex_exec_args(config),
         "--sandbox",
@@ -169,23 +231,133 @@ def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: in
             check=False,
         )
         report = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else (completed.stdout or "").strip()
-        returncode = completed.returncode
-        stderr = completed.stderr or ""
+        return {"returncode": completed.returncode, "report": report, "stderr": completed.stderr or "", "model": config.model, "reasoning_effort": config.reasoning_effort, "timeout_seconds": config.timeout_seconds}
     except subprocess.TimeoutExpired as exc:
         report = exc.stdout if isinstance(exc.stdout, str) else ""
-        returncode = 124
         stderr = exc.stderr if isinstance(exc.stderr, str) else "timeout"
+        return {"returncode": 124, "report": report, "stderr": stderr, "model": config.model, "reasoning_effort": config.reasoning_effort, "timeout_seconds": config.timeout_seconds}
     except Exception as exc:
-        report = ""
-        returncode = 127
-        stderr = type(exc).__name__
+        return {"returncode": 127, "report": "", "stderr": type(exc).__name__, "model": config.model, "reasoning_effort": config.reasoning_effort, "timeout_seconds": config.timeout_seconds}
     finally:
         if output_path.exists():
             output_path.unlink()
 
-    after_status = _git_status(root)
+
+def _run_lazycodex_backend(root: Path, user_request: str, *, goal_id: int | None, task_id: int | None, sandbox: str) -> dict[str, Any]:
+    worktree, branch, worktree_status = _create_lazycodex_worktree(root, task_id)
+    config = codex_exec_config("WORK", default_reasoning="high", default_timeout=120)
+    timeout_seconds = _lazycodex_timeout()
+    output_path = Path(tempfile.gettempdir()) / f"agent_core_lazycodex_work_{os.getpid()}_{uuid4().hex}.md"
+    env = os.environ.copy()
+    env.setdefault("OMO_CODEX_DISABLE_POSTHOG", "1")
+    env.setdefault("OMO_CODEX_SEND_ANONYMOUS_TELEMETRY", "0")
+    args = [
+        *codex_exec_args(config),
+        "--sandbox",
+        sandbox,
+        "--skip-git-repo-check",
+        "--ephemeral",
+        "--output-last-message",
+        str(output_path),
+        _lazycodex_prompt(user_request, goal_id=goal_id, task_id=task_id, worktree=worktree),
+    ]
+    try:
+        completed = subprocess.run(
+            args,
+            cwd=worktree,
+            env=env,
+            text=True,
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        report = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else (completed.stdout or "").strip()
+        return {
+            "returncode": completed.returncode,
+            "report": report,
+            "stderr": completed.stderr or "",
+            "model": config.model,
+            "reasoning_effort": config.reasoning_effort,
+            "timeout_seconds": timeout_seconds,
+            "worktree": str(worktree),
+            "worktree_branch": branch,
+            "worktree_status": worktree_status,
+            "mode": _lazycodex_mode(),
+        }
+    except subprocess.TimeoutExpired as exc:
+        report = exc.stdout if isinstance(exc.stdout, str) else ""
+        stderr = exc.stderr if isinstance(exc.stderr, str) else "timeout"
+        return {
+            "returncode": 124,
+            "report": report,
+            "stderr": stderr,
+            "model": config.model,
+            "reasoning_effort": config.reasoning_effort,
+            "timeout_seconds": timeout_seconds,
+            "worktree": str(worktree),
+            "worktree_branch": branch,
+            "worktree_status": worktree_status,
+            "mode": _lazycodex_mode(),
+        }
+    except Exception as exc:
+        return {
+            "returncode": 127,
+            "report": "",
+            "stderr": type(exc).__name__,
+            "model": config.model,
+            "reasoning_effort": config.reasoning_effort,
+            "timeout_seconds": timeout_seconds,
+            "worktree": str(worktree),
+            "worktree_branch": branch,
+            "worktree_status": worktree_status,
+            "mode": _lazycodex_mode(),
+        }
+    finally:
+        if output_path.exists():
+            output_path.unlink()
+
+
+def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: int | None = None) -> dict[str, Any]:
+    root = project_root()
+    blockers = codex_worker_blockers()
+    if blockers:
+        return _blocked_result("codex_worker_not_available", goal_id=goal_id, task_id=task_id, blockers=blockers, sandbox=codex_work_sandbox())
+    if not codex_worker_enabled():
+        return _blocked_result("codex_worker_disabled", goal_id=goal_id, task_id=task_id)
+    if not root.exists():
+        return _blocked_result("project_root_missing", goal_id=goal_id, task_id=task_id, project_root=str(root))
+
+    sandbox = codex_work_sandbox()
+    if sandbox not in ALLOWED_CODEX_WORK_SANDBOXES:
+        return _blocked_result("invalid_codex_work_sandbox", goal_id=goal_id, task_id=task_id, sandbox=sandbox)
+    backend = codex_work_backend()
+    if backend not in ALLOWED_CODEX_WORK_BACKENDS:
+        return _blocked_result("invalid_codex_work_backend", goal_id=goal_id, task_id=task_id, backend=backend)
+
+    policy = PolicyEngine(profile="safe").classify_decision(user_request, action_type="codex_work")
+    if policy.denied or policy.requires_approval:
+        return _blocked_result(
+            policy.reason,
+            goal_id=goal_id,
+            task_id=task_id,
+            policy={"risk_level": policy.risk_level, "requires_approval": policy.requires_approval, "denied": policy.denied, "matched_rules": policy.matched_rules},
+        )
+
+    before_status = _git_status(root)
+    start = time.monotonic()
+    try:
+        if backend == "lazycodex":
+            backend_result = _run_lazycodex_backend(root, user_request, goal_id=goal_id, task_id=task_id, sandbox=sandbox)
+        else:
+            backend_result = _run_codex_exec_backend(root, user_request, goal_id=goal_id, task_id=task_id, sandbox=sandbox)
+    except Exception as exc:
+        backend_result = {"returncode": 127, "report": "", "stderr": type(exc).__name__, "backend_error": str(exc)[:500]}
+    work_root = Path(str(backend_result.get("worktree") or root)).resolve()
+    after_status = _git_status(work_root)
     duration_ms = int((time.monotonic() - start) * 1000)
     unsafe_files = _unsafe_changed_files(after_status)
+    returncode = int(backend_result.get("returncode", 127))
     status = "codex_work_completed" if returncode == 0 and not unsafe_files else "codex_work_blocked" if unsafe_files else "codex_work_failed"
     result = {
         "status": status,
@@ -193,17 +365,22 @@ def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: in
         "executed": returncode == 0 and not unsafe_files,
         "returncode": returncode,
         "duration_ms": duration_ms,
-        "report": _redact(report),
-        "stderr": _redact(stderr, 1200),
+        "report": _redact(str(backend_result.get("report") or "")),
+        "stderr": _redact(str(backend_result.get("stderr") or ""), 1200),
         "changed_files": after_status,
         "changed_files_before": before_status,
         "unsafe_changed_files": unsafe_files,
-        "model": config.model,
-        "reasoning_effort": config.reasoning_effort,
+        "backend": backend,
+        "model": backend_result.get("model"),
+        "reasoning_effort": backend_result.get("reasoning_effort"),
+        "timeout_seconds": backend_result.get("timeout_seconds"),
         "profile": current_profile(),
         "sandbox": sandbox,
         "policy": {"risk_level": policy.risk_level, "requires_approval": policy.requires_approval, "denied": policy.denied, "matched_rules": policy.matched_rules},
     }
+    for key in ("worktree", "worktree_branch", "worktree_status", "mode", "backend_error"):
+        if backend_result.get(key) is not None:
+            result[key] = backend_result[key]
     artifact = write_text_artifact(
         "reports",
         f"codex-work-{task_id or 'manual'}-{uuid4().hex[:8]}.md",

@@ -382,10 +382,11 @@ def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
         workers = {item.get("name"): item for item in capabilities.get("worker_mediated", []) if isinstance(item, dict)}
         codex_work = workers.get("codex_work_worker") or {}
         worker_status = compact_text(codex_work.get("status") or "unknown")
+        worker_backend = compact_text(codex_work.get("backend") or "codex")
         return "\n".join([
             "냉정하게 말하면, 지금 Core는 대화만 하는 봇은 아니야.",
             "할 수 있는 것: Discord 대화 처리, 기억/목표/작업 큐 관리, 자기 상태 점검, 정책 통과한 로컬 action 실행, 요약 보고.",
-            f"개발 작업: Codex 작업 워커 상태가 `{worker_status}`라서, 활성 상태면 네가 시킨 코드 수정/테스트/리팩터링을 user 작업으로 바로 처리할 수 있어.",
+            f"개발 작업: Codex 작업 워커 상태가 `{worker_status}`이고 backend는 `{worker_backend}`야. 활성 상태면 네가 시킨 코드 수정/테스트/리팩터링을 user 작업으로 처리할 수 있어.",
             "약한 건 자율 루프가 혼자 대형 프로젝트를 끝까지 밀어붙이는 부분이고, 그건 별도 planner/worker를 더 키워야 해.",
         ])
     if intent == "feedback":

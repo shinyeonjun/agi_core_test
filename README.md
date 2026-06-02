@@ -180,3 +180,19 @@ AGENT_CODEX_RENDERER_TIMEOUT=20
 AGENT_CODEX_WORK_MODEL=gpt-5.5
 AGENT_CODEX_WORK_REASONING=medium
 ```
+
+Optional long-running code work can use LazyCodex/OMO as the work backend. Core still owns policy, memory, Discord reporting, and unsafe-diff checks; LazyCodex is only the development worker.
+
+```bash
+# install LazyCodex/OMO Codex Light separately, then enable it:
+AGENT_CODEX_WORK_BACKEND=lazycodex
+AGENT_LAZYCODEX_MODE=ulw-loop
+AGENT_LAZYCODEX_WORK_TIMEOUT=600
+AGENT_LAZYCODEX_WORKTREE=1
+
+# keep OMO telemetry off for Core-managed worker runs:
+OMO_CODEX_DISABLE_POSTHOG=1
+OMO_CODEX_SEND_ANONYMOUS_TELEMETRY=0
+```
+
+LazyCodex work runs in a separate git worktree by default under the agent workspace. It should not be used to bypass Core approvals, secret handling, or destructive-action policy.

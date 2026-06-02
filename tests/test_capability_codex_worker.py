@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from agent.cli.agentctl import main
@@ -143,3 +144,70 @@ def test_codex_worker_marks_unsafe_changed_files_blocked(monkeypatch, tmp_path):
     assert result["status"] == "codex_work_blocked"
     assert result["executed"] is False
     assert result["unsafe_changed_files"] == [".env"]
+
+
+def test_lazycodex_backend_uses_worktree_and_disables_telemetry(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    monkeypatch.setenv("AGENT_CODEX_WORKER_ENABLED", "1")
+    monkeypatch.setenv("AGENT_CODEX_WORK_BACKEND", "lazycodex")
+    monkeypatch.setenv("AGENT_LAZYCODEX_AVAILABLE_OVERRIDE", "1")
+    monkeypatch.setenv("AGENT_LAZYCODEX_WORK_TIMEOUT", "300")
+    monkeypatch.setattr("agent.core.capabilities.shutil.which", lambda name: "codex" if name == "codex" else None)
+    (tmp_path / "repo" / ".git").mkdir()
+    calls = {"codex": None, "worktree": None}
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "rev-parse"]:
+            return SimpleNamespace(returncode=0, stdout="true\n", stderr="")
+        if args[:3] == ["git", "worktree", "add"]:
+            path = args[-2]
+            calls["worktree"] = path
+            Path(path).mkdir(parents=True, exist_ok=True)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if args[:2] == ["git", "status"]:
+            return SimpleNamespace(returncode=0, stdout=" M agent/core/example.py\n", stderr="")
+        assert args[:2] == ["codex", "exec"]
+        calls["codex"] = {"args": args, "cwd": kwargs["cwd"], "env": kwargs["env"], "timeout": kwargs["timeout"]}
+        assert kwargs["env"]["OMO_CODEX_DISABLE_POSTHOG"] == "1"
+        assert kwargs["env"]["OMO_CODEX_SEND_ANONYMOUS_TELEMETRY"] == "0"
+        assert kwargs["timeout"] == 300
+        assert "ulw-loop" in args[-1]
+        assert "Agent Core is the owner" in args[-1]
+        output_path = args[args.index("--output-last-message") + 1]
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write("LazyCodex 작업 완료. 테스트 통과.")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("agent.lab.codex_worker.subprocess.run", fake_run)
+
+    from agent.lab.codex_worker import run_codex_work
+
+    result = run_codex_work("Core worker backend 개선해줘", goal_id=1, task_id=2)
+
+    assert result["status"] == "codex_work_completed"
+    assert result["backend"] == "lazycodex"
+    assert result["mode"] == "ulw-loop"
+    assert result["worktree_branch"].startswith("codex/lazycodex-task-2-")
+    assert calls["codex"]["cwd"] == Path(result["worktree"])
+    assert calls["worktree"] == result["worktree"]
+    assert result["changed_files"] == [" M agent/core/example.py"]
+
+
+def test_lazycodex_backend_blocks_when_unavailable(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    monkeypatch.setenv("AGENT_CODEX_WORKER_ENABLED", "1")
+    monkeypatch.setenv("AGENT_CODEX_WORK_BACKEND", "lazycodex")
+
+    def fake_which(name):
+        return "codex" if name == "codex" else None
+
+    monkeypatch.setattr("agent.core.capabilities.shutil.which", fake_which)
+
+    from agent.lab.codex_worker import run_codex_work
+
+    result = run_codex_work("코드 고쳐줘", goal_id=1, task_id=2)
+
+    assert result["status"] == "codex_work_blocked"
+    assert "lazycodex_unavailable" in result["blockers"]
