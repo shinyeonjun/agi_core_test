@@ -222,6 +222,87 @@ def _migration_0009_pipeline_kernel(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0010_cognitive_growth_algorithms(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS blackboard_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            source TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            content TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'open',
+            confidence REAL DEFAULT 0.5,
+            tags_json TEXT,
+            metadata_json TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_blackboard_status ON blackboard_items(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_blackboard_topic ON blackboard_items(topic)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_blackboard_confidence ON blackboard_items(confidence)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS cognitive_map_elites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            archive_name TEXT NOT NULL,
+            cell_key TEXT NOT NULL,
+            axes_json TEXT NOT NULL,
+            candidate_json TEXT NOT NULL,
+            score REAL DEFAULT 0.0,
+            status TEXT NOT NULL DEFAULT 'active',
+            UNIQUE(archive_name, cell_key)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_map_archive ON cognitive_map_elites(archive_name)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_map_score ON cognitive_map_elites(score)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_map_status ON cognitive_map_elites(status)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS stigmergy_markers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            marker_type TEXT NOT NULL,
+            target_type TEXT NOT NULL,
+            target_id TEXT,
+            intensity REAL DEFAULT 0.5,
+            decay_rate REAL DEFAULT 0.05,
+            status TEXT NOT NULL DEFAULT 'active',
+            reason TEXT NOT NULL,
+            metadata_json TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_stigmergy_status ON stigmergy_markers(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_stigmergy_type ON stigmergy_markers(marker_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_stigmergy_intensity ON stigmergy_markers(intensity)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS cognitive_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            snapshot_type TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            score REAL DEFAULT 0.0,
+            payload_json TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_snapshots_created ON cognitive_snapshots(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_snapshots_type ON cognitive_snapshots(snapshot_type)")
+    conn.execute(
+        """
+        INSERT INTO schema_meta (key, value) VALUES ('schema_version', '0.18.0-alpha')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("0001_existing_db_repairs", "Backfill approval task links and memory FTS schema", _migration_0001_existing_db_repairs),
     Migration("0002_task_queue_locks", "Add task queue lease, idempotency, and scheduling fields", _migration_0002_task_queue_locks),
@@ -232,6 +313,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0007_process_table_runtime", "Align schema for process table and staged project runtime", _migration_0007_process_table_runtime),
     Migration("0008_control_room_dashboard", "Align schema for control room dashboard runtime", _migration_0008_control_room_dashboard),
     Migration("0009_pipeline_kernel", "Align schema for pipeline trace and typed decision routing runtime", _migration_0009_pipeline_kernel),
+    Migration("0010_cognitive_growth_algorithms", "Add blackboard, stigmergy, MAP-Elites, and cognitive snapshot storage", _migration_0010_cognitive_growth_algorithms),
 )
 
 

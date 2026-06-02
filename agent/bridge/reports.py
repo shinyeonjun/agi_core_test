@@ -7,6 +7,7 @@ from agent.bridge.formatter import compact_text, format_action_update, format_da
 from agent.bridge.notifier import post_webhook
 from agent.core.approvals import ApprovalStore
 from agent.core.autonomy import get_autonomy_state
+from agent.core.cognitive_engine import cognitive_growth_snapshot
 from agent.core.cooldown import is_ready, mark
 from agent.core.events import list_events
 from agent.core.goal_generator import list_goal_candidates, meaningful_open_goals
@@ -53,6 +54,17 @@ def _ko_status(value: object) -> str:
         "queued": "대기",
         "done": "완료",
         "waiting_approval": "승인 대기",
+    }
+    raw = compact_text(value)
+    return mapping.get(raw, raw)
+
+
+def _ko_growth_mode(value: object) -> str:
+    mapping = {
+        "serve_user": "사용자 요청 우선",
+        "stabilize": "안정화 우선",
+        "explore": "탐색 우선",
+        "consolidate": "정리/압축 우선",
     }
     raw = compact_text(value)
     return mapping.get(raw, raw)
@@ -204,6 +216,7 @@ def build_observation_dashboard() -> str:
     self_map = self_map_brief(max_age_seconds=300, refresh_if_stale=True, record_event_on_refresh=False)
     task_counts = task_status_counts()
     intelligence = operating_snapshot(persist=False)
+    growth = cognitive_growth_snapshot(persist=False, limit=5)
     recent_tasks = list_tasks(limit=6)
     action_breakdown = action_failure_breakdown(actions)
     last_action = actions[0] if actions else None
@@ -289,6 +302,15 @@ def build_observation_dashboard() -> str:
     skill_items = intelligence.get("skill_candidates") or []
     if skill_items:
         lines.append(f"- skill: 승격 후보 {len(skill_items)}건")
+    inference = growth.get("active_inference") or {}
+    curiosity = growth.get("curiosity") or []
+    map_elites = growth.get("map_elites") or []
+    if inference:
+        lines.append(f"- 성장 루프: {_ko_growth_mode(inference.get('mode'))} / 압력 {inference.get('free_energy')}")
+    if curiosity:
+        lines.append(f"- 호기심: {compact_text(curiosity[0].get('topic'))} / 압력 {curiosity[0].get('pressure')}")
+    if map_elites:
+        lines.append(f"- 다양성 archive: {len(map_elites)}개 셀 유지")
 
     lines.extend(["", "**제안 큐**"])
     if pending_proposals:

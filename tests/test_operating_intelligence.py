@@ -101,3 +101,4 @@ def test_intelligence_cli_and_summary(monkeypatch, tmp_path, capsys):
 
     text = build_activity_summary()
     assert "운영 지능" in text
+    assert "성장 루프" in text

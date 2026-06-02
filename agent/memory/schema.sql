@@ -530,6 +530,66 @@ CREATE INDEX IF NOT EXISTS idx_operating_reviews_created ON operating_reviews(cr
 CREATE INDEX IF NOT EXISTS idx_operating_reviews_type ON operating_reviews(review_type);
 CREATE INDEX IF NOT EXISTS idx_operating_reviews_status ON operating_reviews(status);
 
+CREATE TABLE IF NOT EXISTS blackboard_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    source TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    content TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    confidence REAL DEFAULT 0.5,
+    tags_json TEXT,
+    metadata_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_blackboard_status ON blackboard_items(status);
+CREATE INDEX IF NOT EXISTS idx_blackboard_topic ON blackboard_items(topic);
+CREATE INDEX IF NOT EXISTS idx_blackboard_confidence ON blackboard_items(confidence);
+
+CREATE TABLE IF NOT EXISTS cognitive_map_elites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    archive_name TEXT NOT NULL,
+    cell_key TEXT NOT NULL,
+    axes_json TEXT NOT NULL,
+    candidate_json TEXT NOT NULL,
+    score REAL DEFAULT 0.0,
+    status TEXT NOT NULL DEFAULT 'active',
+    UNIQUE(archive_name, cell_key)
+);
+CREATE INDEX IF NOT EXISTS idx_cognitive_map_archive ON cognitive_map_elites(archive_name);
+CREATE INDEX IF NOT EXISTS idx_cognitive_map_score ON cognitive_map_elites(score);
+CREATE INDEX IF NOT EXISTS idx_cognitive_map_status ON cognitive_map_elites(status);
+
+CREATE TABLE IF NOT EXISTS stigmergy_markers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    marker_type TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id TEXT,
+    intensity REAL DEFAULT 0.5,
+    decay_rate REAL DEFAULT 0.05,
+    status TEXT NOT NULL DEFAULT 'active',
+    reason TEXT NOT NULL,
+    metadata_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_stigmergy_status ON stigmergy_markers(status);
+CREATE INDEX IF NOT EXISTS idx_stigmergy_type ON stigmergy_markers(marker_type);
+CREATE INDEX IF NOT EXISTS idx_stigmergy_intensity ON stigmergy_markers(intensity);
+
+CREATE TABLE IF NOT EXISTS cognitive_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    snapshot_type TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    score REAL DEFAULT 0.0,
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cognitive_snapshots_created ON cognitive_snapshots(created_at);
+CREATE INDEX IF NOT EXISTS idx_cognitive_snapshots_type ON cognitive_snapshots(snapshot_type);
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL,
@@ -542,4 +602,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR REPLACE INTO schema_meta (key, value)
-VALUES ('schema_version', '0.17.0-alpha');
+VALUES ('schema_version', '0.18.0-alpha');

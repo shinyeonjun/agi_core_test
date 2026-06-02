@@ -10,6 +10,7 @@ from agent.bridge.reports import notify_action, notify_activity_summary, notify_
 from agent.core.autonomy import arm_catastrophic_destruction, disarm_catastrophic_destruction, get_autonomy_state, set_autonomy_profile
 from agent.core.approvals import ApprovalStore
 from agent.core.capabilities import collect_capability_map, capability_summary_lines
+from agent.core.cognitive_engine import add_blackboard_item, add_stigmergy_marker, cognitive_growth_snapshot, list_blackboard_items, list_stigmergy_markers
 from agent.core.database import check_migrations, get_schema_version, init_db, migrate_db
 from agent.core.events import list_events, log_event
 from agent.core.goals import cleanup_noise_goals, list_goals, mark_goal_done
@@ -541,6 +542,37 @@ def cmd_intelligence(args: argparse.Namespace) -> int:
     if args.intelligence_command == "maintain":
         print_json(run_memory_intelligence(dry_run=bool(args.dry_run)))
         return 0
+    if args.intelligence_command == "growth":
+        print_json(cognitive_growth_snapshot(persist=bool(args.persist), limit=args.limit))
+        return 0
+    if args.intelligence_command == "blackboard":
+        if args.blackboard_action == "list":
+            print_json({"items": list_blackboard_items(limit=args.limit, status=args.status)})
+            return 0
+        print_json({
+            "id": add_blackboard_item(
+                args.source,
+                args.topic,
+                args.content,
+                confidence=args.confidence,
+                tags=args.tags,
+            )
+        })
+        return 0
+    if args.intelligence_command == "stigmergy":
+        if args.stigmergy_action == "list":
+            print_json({"items": list_stigmergy_markers(limit=args.limit, status=args.status)})
+            return 0
+        print_json({
+            "id": add_stigmergy_marker(
+                args.marker_type,
+                args.target_type,
+                args.target_id,
+                args.reason,
+                intensity=args.intensity,
+            )
+        })
+        return 0
     raise ValueError(f"unknown intelligence command: {args.intelligence_command}")
 
 
@@ -757,6 +789,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_int_memory = intelligence_sub.add_parser("memory"); p_int_memory.add_argument("--limit", type=int, default=20); p_int_memory.set_defaults(func=cmd_intelligence)
     p_int_skills = intelligence_sub.add_parser("skills"); p_int_skills.add_argument("--limit", type=int, default=20); p_int_skills.set_defaults(func=cmd_intelligence)
     p_int_maintain = intelligence_sub.add_parser("maintain"); p_int_maintain.add_argument("--dry-run", action="store_true"); p_int_maintain.set_defaults(func=cmd_intelligence)
+    p_int_growth = intelligence_sub.add_parser("growth"); p_int_growth.add_argument("--persist", action="store_true"); p_int_growth.add_argument("--limit", type=int, default=8); p_int_growth.set_defaults(func=cmd_intelligence)
+    p_int_blackboard = intelligence_sub.add_parser("blackboard"); p_int_blackboard_sub = p_int_blackboard.add_subparsers(dest="blackboard_action", required=True)
+    p_int_blackboard_list = p_int_blackboard_sub.add_parser("list"); p_int_blackboard_list.add_argument("--limit", type=int, default=20); p_int_blackboard_list.add_argument("--status", default="open"); p_int_blackboard_list.set_defaults(func=cmd_intelligence)
+    p_int_blackboard_add = p_int_blackboard_sub.add_parser("add"); p_int_blackboard_add.add_argument("topic"); p_int_blackboard_add.add_argument("content"); p_int_blackboard_add.add_argument("--source", default="agentctl"); p_int_blackboard_add.add_argument("--confidence", type=float, default=0.5); p_int_blackboard_add.add_argument("--tags", nargs="*"); p_int_blackboard_add.set_defaults(func=cmd_intelligence)
+    p_int_stigmergy = intelligence_sub.add_parser("stigmergy"); p_int_stigmergy_sub = p_int_stigmergy.add_subparsers(dest="stigmergy_action", required=True)
+    p_int_stigmergy_list = p_int_stigmergy_sub.add_parser("list"); p_int_stigmergy_list.add_argument("--limit", type=int, default=20); p_int_stigmergy_list.add_argument("--status", default="active"); p_int_stigmergy_list.set_defaults(func=cmd_intelligence)
+    p_int_stigmergy_add = p_int_stigmergy_sub.add_parser("add"); p_int_stigmergy_add.add_argument("marker_type"); p_int_stigmergy_add.add_argument("target_type"); p_int_stigmergy_add.add_argument("reason"); p_int_stigmergy_add.add_argument("--target-id"); p_int_stigmergy_add.add_argument("--intensity", type=float, default=0.5); p_int_stigmergy_add.set_defaults(func=cmd_intelligence)
     p = sub.add_parser("workspace"); workspace_sub = p.add_subparsers(dest="workspace_command", required=True)
     p_ws_init = workspace_sub.add_parser("init"); p_ws_init.set_defaults(func=cmd_workspace)
     p_ws_report = workspace_sub.add_parser("report"); p_ws_report.add_argument("--title", default="Workspace status report"); p_ws_report.set_defaults(func=cmd_workspace)
