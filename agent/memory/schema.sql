@@ -401,7 +401,6 @@ CREATE TABLE IF NOT EXISTS task_queue (
 CREATE INDEX IF NOT EXISTS idx_task_queue_status ON task_queue(status);
 CREATE INDEX IF NOT EXISTS idx_task_queue_type_status ON task_queue(queue_type, status);
 CREATE INDEX IF NOT EXISTS idx_task_queue_goal ON task_queue(goal_id);
-CREATE INDEX IF NOT EXISTS idx_task_queue_approval ON task_queue(approval_id);
 CREATE INDEX IF NOT EXISTS idx_task_queue_priority ON task_queue(priority);
 
 CREATE TABLE IF NOT EXISTS root_objectives (
