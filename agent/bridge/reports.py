@@ -28,7 +28,7 @@ def build_daily_summary() -> str:
     goals = meaningful_open_goals(limit=10)
     content = format_daily_summary(metrics, approvals, actions, goals)
     if self_map:
-        content += "\n\n**\ubab8 \uc0c1\ud0dc**\n" + _line("\ucd5c\uadfc \ud655\uc778", self_map.get("summary"))
+        content += "\n\n**몸 상태**\n" + _line("최근 확인", self_map.get("summary"))
     return content
 
 
@@ -38,18 +38,21 @@ def _line(prefix: str, value: object) -> str:
 
 def _ko_status(value: object) -> str:
     mapping = {
-        "completed": "\uc644\ub8cc",
-        "blocked": "\ucc28\ub2e8",
-        "timeout": "\uc2dc\uac04 \ucd08\uacfc",
-        "running": "\uc9c4\ud589 \uc911",
-        "proposed": "\uc81c\uc548\ub428",
-        "executed": "\uc2e4\ud589\ub428",
-        "rejected": "\ud0c8\ub77d",
-        "dry_run": "\ubbf8\ub9ac\ubcf4\uae30",
-        "candidate": "\ud6c4\ubcf4",
-        "safe": "\uc548\uc804 \ubaa8\ub4dc",
-        "full_device_lab": "\uc7a5\ube44 \uc2e4\ud5d8 \ubaa8\ub4dc",
-        "workspace": "\uc791\uc5c5\uacf5\uac04 \ubaa8\ub4dc",
+        "completed": "완료",
+        "blocked": "차단",
+        "timeout": "시간 초과",
+        "running": "진행 중",
+        "proposed": "제안됨",
+        "executed": "실행됨",
+        "rejected": "탈락",
+        "dry_run": "미리보기",
+        "candidate": "후보",
+        "safe": "안전 모드",
+        "full_device_lab": "장비 실험 모드",
+        "workspace": "작업공간 모드",
+        "queued": "대기",
+        "done": "완료",
+        "waiting_approval": "승인 대기",
     }
     raw = compact_text(value)
     return mapping.get(raw, raw)
@@ -58,37 +61,37 @@ def _ko_status(value: object) -> str:
 def _ko_summary(value: object) -> str:
     raw = compact_text(value)
     mapping = {
-        "rc=0": "\uc815\uc0c1 \uc885\ub8cc",
-        "timeout": "\uc2dc\uac04 \ucd08\uacfc",
+        "rc=0": "정상 종료",
+        "timeout": "시간 초과",
         "command_not_found": "명령 없음",
         "approval_required": "승인 필요",
         "env_access_denied": ".env 접근 차단",
         "secret_access_denied": "민감정보 접근 차단",
-        "ssh_key_access_denied": "SSH \ud0a4 \uc811\uadfc \ucc28\ub2e8",
-        "profile_not_full_device_lab": "\uc2e4\ud589 \ud504\ub85c\ud544\uc774 \uc544\ub2c8\ub77c \ucc28\ub2e8",
-        "root_delete_denied": "\uc704\ud5d8\ud55c \uc0ad\uc81c \ucc28\ub2e8",
-        "remote_script_execution_denied": "\uc6d0\uaca9 \uc2a4\ud06c\ub9bd\ud2b8 \uc2e4\ud589 \ucc28\ub2e8",
+        "ssh_key_access_denied": "SSH 키 접근 차단",
+        "profile_not_full_device_lab": "현재 모드에서 실행 차단",
+        "root_delete_denied": "위험한 삭제 차단",
+        "remote_script_execution_denied": "원격 스크립트 실행 차단",
     }
     return mapping.get(raw, raw.replace("_", " "))
 
 
 def _ko_event(row: dict[str, Any] | None) -> str:
     if not row:
-        return "\uc5c6\uc74c"
+        return "없음"
     key = f"{row.get('source')}/{row.get('event_type')}"
     mapping = {
-        "scheduler/idle_tick": "\uc790\ub3d9 tick \uc2e4\ud589",
-        "lab/lab_tick_skipped": "lab tick\uc774 \uc81c\uc548\ub9cc \uc0dd\uc131",
-        "lab/lab_tick_timer_skipped": "lab timer\uac00 \uc548\uc804 \ubaa8\ub4dc\ub77c \uc2e4\ud589\uc744 \uac74\ub108\ub700",
-        "lab/lab_tick_executed": "lab action 1\uac1c \uc2e4\ud589",
-        "lab/lab_tick_blocked": "lab tick \uc2e4\ud589 \ud6c4\ubcf4 \uc5c6\uc74c",
-        "workspace/workspace_artifact_created": "\uc791\uc5c5\uacf5\uac04 \ud30c\uc77c \uc0dd\uc131",
-        "policy/policy_check": "\uc815\ucc45 \uac80\uc0ac \uc218\ud589",
-        "discord/discord_chat_reply": "\ub300\ud654 \uc751\ub2f5",
-        "discord/action_update_notify_failed": "action \uc5c5\ub370\uc774\ud2b8 \uc54c\ub9bc \uc2e4\ud328",
-        "core/assistant_output": "Core \ub300\ud654 \uc751\ub2f5 \uc0dd\uc131",
-        "core/decision_created": "Core \ud310\ub2e8 \uae30\ub85d \uc0dd\uc131",
-        "learner/reflection_created": "\ud68c\uace0 \uae30\ub85d \uc0dd\uc131",
+        "scheduler/idle_tick": "자동 tick 실행",
+        "lab/lab_tick_skipped": "lab tick 제안 생성",
+        "lab/lab_tick_timer_skipped": "lab timer 실행 건너뜀",
+        "lab/lab_tick_executed": "lab action 실행",
+        "lab/lab_tick_blocked": "lab 실행 후보 없음",
+        "workspace/workspace_artifact_created": "작업공간 파일 생성",
+        "policy/policy_check": "정책 검사 수행",
+        "discord/discord_chat_reply": "대화 응답",
+        "discord/action_update_notify_failed": "action 알림 실패",
+        "core/assistant_output": "Core 대화 응답 생성",
+        "core/decision_created": "Core 판단 기록 생성",
+        "learner/reflection_created": "회고 기록 생성",
     }
     return mapping.get(key, key)
 
@@ -96,10 +99,10 @@ def _ko_event(row: dict[str, Any] | None) -> str:
 def _reflection_summary(value: object) -> str:
     raw = compact_text(value)
     mapping = {
-        "Recorded talk feedback, selected goal, and retrieved context.": "\ub300\ud654 \ud53c\ub4dc\ubc31\uacfc \ubaa9\ud45c/\uae30\uc5b5 \ub9e5\ub77d\uc744 \ud68c\uace0\ub85c \uc800\uc7a5\ud568",
-        "Recorded idle action and cooldown state after tick.": "\uc790\ub3d9 tick \uacb0\uacfc\uc640 \ucfe8\ub2e4\uc6b4 \uc0c1\ud0dc\ub97c \ud68c\uace0\ub85c \uc800\uc7a5\ud568",
-        "Lab tick generated proposals but did not execute because profile is not full_device_lab.": "lab tick\uc774 \uc81c\uc548\ub9cc \ub9cc\ub4e4\uace0 \uc2e4\ud589\uc740 \ud558\uc9c0 \uc54a\uc74c",
-        "Lab tick executed one approved local action and recorded the result.": "lab tick\uc774 \uc2b9\uc778\ub41c \ub85c\uceec action 1\uac1c\ub97c \uc2e4\ud589\ud568",
+        "Recorded talk feedback, selected goal, and retrieved context.": "대화 피드백과 목표/기억 맥락 저장",
+        "Recorded idle action and cooldown state after tick.": "자동 tick 결과와 쿨다운 저장",
+        "Lab tick generated proposals but did not execute because profile is not full_device_lab.": "lab tick이 제안만 만들고 실행은 건너뜀",
+        "Lab tick executed one approved local action and recorded the result.": "lab tick이 승인된 로컬 action 1개 실행",
     }
     return mapping.get(raw, raw)
 
@@ -120,29 +123,29 @@ def _action_label(row: dict[str, Any]) -> str:
     summary = compact_text(row.get("result_summary"))
     command = " ".join(_decode_command(row.get("command_json"))).lower()
     if summary == "profile_not_full_device_lab":
-        return "\uc548\uc804 \ubaa8\ub4dc\uc5d0\uc11c \ub85c\uceec \uc2e4\ud589 \ucc28\ub2e8"
+        return "현재 모드에서 로컬 실행 차단"
     if "df -h" in command or command.startswith("df "):
-        return "\ub514\uc2a4\ud06c \uc0c1\ud0dc \uc810\uac80"
+        return "디스크 상태 확인"
     if command.startswith("free "):
-        return "\uba54\ubaa8\ub9ac \uc0c1\ud0dc \uc810\uac80"
+        return "메모리 상태 확인"
     if "systemctl --failed" in command:
-        return "\uc2e4\ud328\ud55c \uc11c\ube44\uc2a4 \uc810\uac80"
+        return "실패한 서비스 확인"
     if command.startswith("printf "):
-        return "\ud14c\uc2a4\ud2b8 action \uc2e4\ud589"
+        return "테스트 action 실행"
     if row.get("status") == "blocked":
-        return "\uc815\ucc45\uc5d0 \uc758\ud574 action \ucc28\ub2e8"
-    return "\ub85c\uceec action \ucc98\ub9ac"
+        return "정책에 의해 action 차단"
+    return "로컬 action 처리"
 
 
 def _proposal_label(row: dict[str, Any]) -> str:
     reason = compact_text(row.get("reason"))
     mapping = {
-        "profile_not_full_device_lab": "\uc548\uc804 \ubaa8\ub4dc\ub77c \uc2e4\ud589 \ub300\uae30",
-        "system_disk_check": "\ub514\uc2a4\ud06c \uc0c1\ud0dc \uc810\uac80 \ud6c4\ubcf4",
-        "system_memory_check": "\uba54\ubaa8\ub9ac \uc0c1\ud0dc \uc810\uac80 \ud6c4\ubcf4",
-        "system_failed_services_check": "\uc2e4\ud328\ud55c \uc11c\ube44\uc2a4 \uc810\uac80 \ud6c4\ubcf4",
-        "lab_experiment_workspace_report": "\uc791\uc5c5\uacf5\uac04 \ub9ac\ud3ec\ud2b8 \ud6c4\ubcf4",
-        "completed": "\uc2e4\ud589 \uc644\ub8cc",
+        "profile_not_full_device_lab": "안전 모드라 실행 대기",
+        "system_disk_check": "디스크 상태 점검 후보",
+        "system_memory_check": "메모리 상태 점검 후보",
+        "system_failed_services_check": "실패한 서비스 점검 후보",
+        "lab_experiment_workspace_report": "작업공간 리포트 후보",
+        "completed": "실행 완료",
     }
     return mapping.get(reason, reason.replace("_", " "))
 
@@ -156,23 +159,34 @@ def _format_rate(value: object) -> str:
 
 def _state_note(profile: object, autonomy: dict[str, Any]) -> str:
     if autonomy.get("catastrophic_local_destruction_allowed"):
-        return "\uc704\ud5d8 \uc0ad\uc81c arm\uc774 \ucf1c\uc838 \uc788\uc5b4. \ubc14\ub85c \ud655\uc778 \ud544\uc694"
+        return "위험 삭제 arm 켜짐. 바로 확인 필요"
     if profile == "full_device_lab":
-        return "\uc7a5\ube44 \uc2e4\ud5d8 \ubaa8\ub4dc\ub77c lab timer\uac00 \uc2b9\uc778\ub41c \ub85c\uceec action\uc744 \uc2e4\ud589\ud560 \uc218 \uc788\uc5b4"
+        return "승인된 로컬 점검을 자동 실행할 수 있음"
     if profile == "workspace":
-        return "\uc791\uc5c5\uacf5\uac04 \ubaa8\ub4dc\ub77c \ud30c\uc77c/\ud504\ub85c\uc81d\ud2b8 \uc911\uc2ec\uc73c\ub85c \uad00\ucc30 \uc911\uc774\uc57c"
-    return "\uc548\uc804 \ubaa8\ub4dc\ub77c \uc790\ub3d9 \ub85c\uceec \uc2e4\ud589\uc740 \uc7a0\uaca8 \uc788\uc5b4"
-
-
-def _is_noise_goal(goal: dict[str, Any]) -> bool:
-    title = str(goal.get("title") or "").lower()
-    goal_type = str(goal.get("goal_type") or "").lower()
-    return goal_type == "test" or any(token in title for token in ["secret goal summary marker", "answer user input", "apply user negative feedback"])
+        return "작업공간 중심으로 관찰 중"
+    return "자동 로컬 실행은 잠김"
 
 
 def _interesting_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     noisy = {"discord_message", "discord_chat_reply", "webhook_sent", "webhook_missing", "discord_command_output"}
     return [event for event in events if event.get("event_type") not in noisy]
+
+
+def _short_goal_title(value: object) -> str:
+    title = compact_text(value)
+    replacements = {
+        "Generate a read-only Orange Pi health observation report": "오렌지파이 상태 보고서 만들기",
+        "Compact old memories and reflections": "오래된 기억/회고 압축",
+        "Draft a small project candidate from recent Core observations": "최근 관찰로 작은 프로젝트 후보 만들기",
+        "Review recent Core state and cleanup opportunities": "Core 상태와 정리 후보 검토",
+        "Create a workspace experiment report from recent Core activity": "최근 활동 기반 작업공간 리포트 만들기",
+        "Improve action failure critic": "action 실패 원인 분류 개선",
+        "Promote reflection patterns into skills": "반복 회고를 skill로 승격",
+    }
+    for raw, pretty in replacements.items():
+        if title.startswith(raw):
+            return pretty
+    return title
 
 
 def build_observation_dashboard() -> str:
@@ -196,85 +210,79 @@ def build_observation_dashboard() -> str:
     interesting_events = _interesting_events(events)
     last_event = interesting_events[0] if interesting_events else (events[0] if events else None)
     profile = metrics.get("current_autonomy_profile")
+
     lines = [
-        "**Core \uad00\uc81c\ud310**",
-        "\uc624\ub80c\uc9c0\ud30c\uc774\uc5d0\uc11c Core \uad00\ucc30 \ub8e8\ud504\uac00 \ub3cc\uace0 \uc788\uc5b4.",
+        "**Core 관제판**",
+        "오렌지파이에서 Core 루프가 돌고 있어.",
         "",
-        "**\ud55c\ub208\uc5d0**",
-        _line("\ubaa8\ub4dc", f"{_ko_status(profile)} - {_state_note(profile, autonomy)}"),
-        _line("\ucd5c\uadfc \ud3c9\uac00", f"{metrics.get('last_eval_result') or '\uc5c6\uc74c'} / {metrics.get('last_eval_score') if metrics.get('last_eval_score') is not None else '-'}"),
-        _line("\uc2b9\uc778 \ub300\uae30", f"{len(approvals)}\uac74"),
-        _line("\ucd5c\uadfc action", f"#{last_action.get('id')} {_action_label(last_action)} - {_ko_status(last_action.get('status'))} / {_ko_summary(last_action.get('result_summary'))}" if last_action else "\uc5c6\uc74c"),
-        _line("\ucd5c\uadfc event", f"#{last_event.get('id')} {_ko_event(last_event)}" if last_event else "\uc5c6\uc74c"),
+        "**한눈에**",
+        _line("모드", f"{_ko_status(profile)} - {_state_note(profile, autonomy)}"),
+        _line("평가", f"{metrics.get('last_eval_result') or '없음'} / {metrics.get('last_eval_score') if metrics.get('last_eval_score') is not None else '-'}"),
+        _line("승인 대기", f"{len(approvals)}건"),
+        _line("최근 작업", f"#{last_action.get('id')} {_action_label(last_action)} - {_ko_status(last_action.get('status'))}" if last_action else "없음"),
+        _line("최근 이벤트", f"#{last_event.get('id')} {_ko_event(last_event)}" if last_event else "없음"),
     ]
     if self_map:
         services = self_map.get("services") or {}
         active_count = len([state for state in services.values() if state == "active"])
-        lines.append(_line("\ubab8 \uc0c1\ud0dc", self_map.get("summary")))
-        lines.append(_line("\uc0c1\uc8fc \ub8e8\ud504", f"{active_count}\uac1c active / self-map #{self_map.get('id')}"))
+        lines.append(_line("몸 상태", self_map.get("summary")))
+        lines.append(_line("상주 루프", f"{active_count}개 active / self-map #{self_map.get('id')}"))
+
     lines.extend([
         "",
-        "**24\uc2dc\uac04 \uc9c0\ud45c**",
-        _line("tick", f"{metrics.get('tick_count_24h')}\ud68c"),
-        _line("Discord \uba54\uc2dc\uc9c0", f"{metrics.get('discord_messages_24h')}\uac74"),
-        _line("memory vector", f"{metrics.get('memory_vector_count')}개 / coverage {_format_rate(metrics.get('memory_vector_coverage'))}"),
-        _line("action \uc131\uacf5\ub960", f"실행 {_format_rate(metrics.get('action_execution_success_rate_24h'))} / 전체 {_format_rate(metrics.get('action_success_rate_24h'))}"),
-        _line("계획 차단율", _format_rate(metrics.get("action_planned_block_rate_24h"))),
-        _line("\ucc28\ub2e8/\uc2dc\uac04\ucd08\uacfc", f"{metrics.get('action_blocked_count_24h')}\uac74 / {metrics.get('action_timeout_count_24h')}\uac74"),
-        _line("critical \uc815\ucc45 \uac10\uc9c0", f"{metrics.get('policy_critical_count_24h')}\uac74"),
-        _line("\uc0ac\uc6a9\uc790 \ud050", f"queued {task_counts.get('user:queued', 0)} / running {task_counts.get('user:running', 0)}"),
-        _line("\uc790\uc728 \ud050", f"queued {task_counts.get('autonomous:queued', 0)} / running {task_counts.get('autonomous:running', 0)}"),
-        "",
-        "**실패/차단 원인**",
+        "**24시간 지표**",
+        _line("tick", f"{metrics.get('tick_count_24h')}회"),
+        _line("Discord", f"{metrics.get('discord_messages_24h')}건"),
+        _line("action 성공률", f"실행 {_format_rate(metrics.get('action_execution_success_rate_24h'))} / 전체 {_format_rate(metrics.get('action_success_rate_24h'))}"),
+        _line("계획된 차단", _format_rate(metrics.get("action_planned_block_rate_24h"))),
+        _line("차단/시간초과", f"{metrics.get('action_blocked_count_24h')}건 / {metrics.get('action_timeout_count_24h')}건"),
+        _line("사용자 큐", f"대기 {task_counts.get('user:queued', 0)} / 실행 {task_counts.get('user:running', 0)}"),
+        _line("자율 큐", f"대기 {task_counts.get('autonomous:queued', 0)} / 실행 {task_counts.get('autonomous:running', 0)}"),
     ])
+
+    lines.extend(["", "**실패/차단 원인**"])
     if action_breakdown:
         for category, count in sorted(action_breakdown.items()):
             lines.append(f"- {category}: {count}건")
     else:
         lines.append("- 최근 action에는 실패/차단 원인이 없어.")
 
-    lines.extend([
-        "",
-        "**작업 큐 상태**",
-    ])
+    lines.extend(["", "**작업 큐 상태**"])
     if recent_tasks:
-        for task in recent_tasks[:4]:
+        for task in recent_tasks[:3]:
             observed_task = task_observation(task)
             lifecycle = observed_task.get("lifecycle") or {}
             phase = lifecycle.get("last_label") or lifecycle.get("last_phase") or "기록 없음"
-            lines.append(f"- #{observed_task['id']} {compact_text(observed_task['title'])}: {observed_task['waiting_reason']} / phase: {phase} / 다음: {observed_task['next_step']}")
+            lines.append(f"- #{observed_task['id']} {_short_goal_title(observed_task['title'])}: {observed_task['waiting_reason']} / {phase}")
     else:
         lines.append("- 현재 작업 큐가 비어 있어.")
 
-    lines.extend([
-        "",
-        "**\ucd5c\uadfc action**",
-    ])
+    lines.extend(["", "**최근 action**"])
     if actions:
-        for action in actions[:4]:
+        for action in actions[:3]:
             observed_action = action_observation(action)
-            lines.append(f"- #{action.get('id')} {_action_label(action)}: {_ko_status(action.get('status'))} / {observed_action['label']} / {observed_action['summary_label']}")
+            lines.append(f"- #{action.get('id')} {_action_label(action)}: {observed_action['label']} / {observed_action['summary_label']}")
     else:
-        lines.append("- \uc544\uc9c1 \uae30\ub85d\ub41c action\uc774 \uc5c6\uc5b4.")
+        lines.append("- 아직 기록된 action이 없어.")
 
-    lines.extend(["", "**\ubaa9\ud45c \ud6c4\ubcf4**"])
+    lines.extend(["", "**다음 후보**"])
     if goal_candidates:
         for candidate in goal_candidates[:3]:
-            lines.append(f"- #{candidate.get('id')} {compact_text(candidate.get('title'))}: {_ko_status(candidate.get('status'))} / score {compact_text(candidate.get('score'))}")
+            lines.append(f"- #{candidate.get('id')} {_short_goal_title(candidate.get('title'))} ({_ko_status(candidate.get('status'))})")
     else:
-        lines.append("- \uc544\uc9c1 \uc0c8 \ubaa9\ud45c \ud6c4\ubcf4\uac00 \uc5c6\uc5b4.")
+        lines.append("- 새 목표 후보가 없어.")
 
-    lines.extend(["", "**운영 지능**"])
     improvements = intelligence.get("next_improvement_candidates") or []
+    lines.extend(["", "**운영 지능**"])
     if improvements:
         for item in improvements[:3]:
-            lines.append(f"- {compact_text(item.get('title'))}: {compact_text(item.get('reason'))} / priority {compact_text(item.get('priority'))}")
+            lines.append(f"- {_short_goal_title(item.get('title'))}: {compact_text(item.get('reason'))}")
     else:
-        lines.append("- 즉시 개선 후보는 낮게 잡혔어.")
+        lines.append("- 지금 당장 급한 개선 후보는 없어.")
     critics = intelligence.get("action_critics") or []
     if critics:
         top_critic = next((row for row in critics if row.get("category") != "success"), critics[0])
-        lines.append(f"- critic: {compact_text(top_critic.get('label'))} / {compact_text(top_critic.get('recommendation'))}")
+        lines.append(f"- action critic: {compact_text(top_critic.get('label'))} / {compact_text(top_critic.get('recommendation'))}")
     memory_candidates = intelligence.get("memory_hygiene_candidates") or []
     if memory_candidates:
         lines.append(f"- memory: 압축/정리 후보 {len(memory_candidates)}건")
@@ -282,32 +290,31 @@ def build_observation_dashboard() -> str:
     if skill_items:
         lines.append(f"- skill: 승격 후보 {len(skill_items)}건")
 
-    lines.extend(["", "**\uc81c\uc548 \ud050**"])
+    lines.extend(["", "**제안 큐**"])
     if pending_proposals:
         active_counts = {status: count for status, count in proposal_counts.items() if status not in {"executed", "rejected"}}
-        count_text = ", ".join(f"{_ko_status(status)} {count}" for status, count in sorted(active_counts.items())) or "\uc5c6\uc74c"
-        lines.append(f"- \uc0c1\ud0dc \ud569\uacc4: {count_text}")
+        count_text = ", ".join(f"{_ko_status(status)} {count}" for status, count in sorted(active_counts.items())) or "없음"
+        lines.append(f"- 상태 합계: {count_text}")
         for proposal in pending_proposals[:3]:
             lines.append(f"- #{proposal.get('id')} {_proposal_label(proposal)}: {_ko_status(proposal.get('status'))}")
     else:
-        lines.append("- \ud604\uc7ac 처리 대기 중인 action 제안은 없어.")
+        lines.append("- 현재 처리 대기 중인 action 제안은 없어.")
 
-    lines.extend(["", "**\ud559\uc2b5/\ud68c\uace0**"])
+    lines.extend(["", "**학습/회고**"])
     if reflections:
         for reflection in reflections[:2]:
             lines.append(f"- #{reflection.get('id')} {_reflection_summary(reflection.get('summary'))}")
     else:
-        lines.append("- \uc544\uc9c1 \uc0c8 \ud68c\uace0\uac00 \uc5c6\uc5b4.")
+        lines.append("- 아직 새 회고가 없어.")
 
-    lines.extend(["", "**\ub2e4\uc74c\uc5d0 \ubcfc \uac83**"])
-    open_goals = goals
+    lines.extend(["", "**다음에 볼 것**"])
     if approvals:
-        lines.append(f"- \uc2b9\uc778 \ub300\uae30 {len(approvals)}\uac74\ubd80\ud130 \ud655\uc778\ud574\uc918.")
-    if open_goals:
-        for goal in open_goals[:3]:
-            lines.append(f"- #{goal.get('id')} {compact_text(goal.get('title'))} ({_ko_status(goal.get('status'))})")
-    if not approvals and not open_goals:
-        lines.append("- \uc5f4\ub9b0 \ubaa9\ud45c\uac00 \uc5c6\uc5b4. \ub2e4\uc74c \uc9c0\uc2dc\ub97c \uae30\ub2e4\ub9ac\ub294 \uc911\uc774\uc57c.")
+        lines.append(f"- 승인 대기 {len(approvals)}건부터 확인해줘.")
+    if goals:
+        for goal in goals[:3]:
+            lines.append(f"- #{goal.get('id')} {_short_goal_title(goal.get('title'))} ({_ko_status(goal.get('status'))})")
+    if not approvals and not goals:
+        lines.append("- 열린 목표가 없어. 다음 지시를 기다리는 중이야.")
     return "\n".join(lines)
 
 
@@ -336,18 +343,18 @@ def notify_daily_summary(*, dry_run: bool = False) -> dict[str, Any]:
 
 def notify_test_summary(*, dry_run: bool = False) -> dict[str, Any]:
     content = format_update_event(
-        "\uc694\uc57d \ucc44\ub110 \ud14c\uc2a4\ud2b8",
-        "Core \uc694\uc57d \uc6f9\ud6c5\uc774 \uc5f0\uacb0\ub410\ub294\uc9c0 \ud655\uc778\ud558\ub294 \uba54\uc2dc\uc9c0\uc57c.",
-        {"\uc0c1\ud0dc": "\ud14c\uc2a4\ud2b8", "\ubbfc\uac10\uc815\ubcf4": "\uc804\uc1a1 \uc548 \ud568"},
+        "요약 채널 테스트",
+        "Core 요약 웹훅 연결을 확인하는 메시지야.",
+        {"상태": "테스트", "민감정보": "전송 안 함"},
     )
     return post_webhook("summary", content, dry_run=dry_run)
 
 
 def notify_test_update(*, dry_run: bool = False) -> dict[str, Any]:
     content = format_update_event(
-        "\uc5c5\ub370\uc774\ud2b8 \ucc44\ub110 \ud14c\uc2a4\ud2b8",
-        "Core \uc2e4\uc2dc\uac04 \uc5c5\ub370\uc774\ud2b8 \uc6f9\ud6c5\uc774 \uc5f0\uacb0\ub410\ub294\uc9c0 \ud655\uc778\ud558\ub294 \uba54\uc2dc\uc9c0\uc57c.",
-        {"\uc0c1\ud0dc": "\ud14c\uc2a4\ud2b8", "\ub2e4\uc74c": "action/eval/policy \uc774\ubca4\ud2b8"},
+        "업데이트 채널 테스트",
+        "Core 실시간 업데이트 웹훅 연결을 확인하는 메시지야.",
+        {"상태": "테스트", "다음": "action/eval/policy 이벤트"},
     )
     return post_webhook("update", content, dry_run=dry_run)
 

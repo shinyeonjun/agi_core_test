@@ -147,11 +147,11 @@ def action_observation(row: dict[str, Any]) -> dict[str, Any]:
 
 def _action_explanation(category: str, summary: str, command: str) -> str:
     if category == "success":
-        return "명령이 정상 종료됐어."
+        return "정상적으로 끝났어."
     if category == "profile_block":
-        return "현재 자율 모드가 로컬 실행을 허용하지 않아서 막았어."
+        return "현재 모드가 로컬 실행을 허용하지 않아서 막았어."
     if category == "approval_required":
-        return "시스템 변경 가능성이 있어서 사람 승인이 필요해."
+        return "시스템 변경 가능성이 있어서 사람 확인이 필요해."
     if category == "policy_block":
         return f"{summary_label(summary)} 규칙에 걸려 실행하지 않았어."
     if category == "timeout":
@@ -159,9 +159,9 @@ def _action_explanation(category: str, summary: str, command: str) -> str:
     if category == "command_not_found":
         return f"`{command}` 실행 파일이나 명령을 찾지 못했어."
     if category == "command_failed":
-        return "명령은 실행됐지만 0이 아닌 종료 코드로 끝났어."
+        return "명령은 실행됐지만 성공 코드로 끝나지 않았어."
     if category == "running":
-        return "아직 실행 중으로 기록돼 있어."
+        return "아직 실행 중인 작업이야."
     return "아직 분류 규칙이 없는 결과야."
 
 
@@ -169,19 +169,19 @@ def _action_next_step(category: str, summary: str) -> str:
     if category == "success":
         return "후속 조치 없음"
     if category == "profile_block":
-        return "필요하면 full_device_lab 모드와 승인 조건을 확인"
+        return "필요하면 full_device_lab 모드와 승인 조건 확인"
     if category == "approval_required":
         return "#승인 채널에서 승인 또는 거절"
     if category == "policy_block":
-        return "요청 의도와 정책 규칙을 다시 확인"
+        return "요청 의도와 정책 규칙 재확인"
     if category == "timeout":
-        return "timeout 증가, 명령 축소, 재시도 여부 판단"
+        return "시간 제한, 명령 범위, 재시도 여부 확인"
     if category == "command_not_found":
-        return "패키지 설치 여부나 명령 경로 확인"
+        return "패키지 설치 여부 또는 명령 경로 확인"
     if category == "command_failed":
-        return "stderr와 returncode 기준으로 원인 분류"
+        return "실패 원인 분류 후 다음 조치 결정"
     if category == "running":
-        return "tasks doctor 또는 action 상태 확인"
+        return "오래 멈추면 tasks doctor 확인"
     return "분류 규칙 추가 검토"
 
 
@@ -218,37 +218,37 @@ def task_observation(task: dict[str, Any]) -> dict[str, Any]:
 
 def _task_waiting_reason(status: str, queue_type: str, approval_id: object, reason: str) -> str:
     if status == "queued" and queue_type == "user":
-        return "사용자 작업 큐에서 즉시 처리 worker를 기다리는 중"
+        return "사용자 요청 큐에서 즉시 처리 대기"
     if status == "queued" and queue_type == "autonomous":
-        return "자율 스케줄러 실행 주기를 기다리는 중"
+        return "자율 스케줄러 주기 대기"
     if status == "waiting_approval":
-        return f"승인 #{approval_id} 대기 중" if approval_id else "사람 승인 대기 중"
+        return f"승인 #{approval_id} 대기" if approval_id else "사람 승인 대기"
     if status == "running":
-        return "worker가 실행 중으로 claim한 상태"
+        return "worker가 실행 중"
     if status == "blocked":
         return summary_label(reason) if reason else "차단됨"
     if status == "done":
         return "완료됨"
     if status == "skipped":
         return summary_label(reason) if reason else "이번 주기에서 건너뜀"
-    return "상태 설명 규칙 없음"
+    return "상태 설명 없음"
 
 
 def _task_next_step(status: str, queue_type: str, approval_id: object, reason: str) -> str:
     if status == "queued" and queue_type == "user":
-        return "대화 트리거나 agentctl tasks run-user로 처리"
+        return "사용자 worker가 바로 처리"
     if status == "queued" and queue_type == "autonomous":
         return "lab tick 주기에서 처리"
     if status == "waiting_approval":
         return f"!approve {approval_id} 또는 !reject {approval_id}" if approval_id else "승인 항목 확인"
     if status == "running":
-        return "오래 멈춰 있으면 agentctl tasks doctor 실행"
+        return "오래 멈추면 agentctl tasks doctor 실행"
     if status == "blocked":
-        return "reason을 보고 재시도/폐기/승인 요청 판단"
+        return "차단 이유를 보고 재시도 여부 판단"
     if status == "done":
         return "후속 조치 없음"
     if status == "skipped":
-        return "조건 충족 후 재큐잉 여부 확인"
+        return "조건 충족 뒤 재큐 여부 확인"
     return "상태 분류 추가"
 
 
@@ -272,7 +272,7 @@ def decision_trace(decision: dict[str, Any]) -> dict[str, Any]:
         ],
         "guards": [
             "민감정보 원문은 renderer/summary에 전달하지 않음",
-            "정책상 거부/승인 필요 작업은 실행하지 않음",
+            "정책상 거절/승인 필요 작업은 실행하지 않음",
         ],
         "next_step": _decision_next_step(policy, user_goal),
     }
