@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from agent.core.cooldown import is_ready, mark
+from agent.core.cognitive_engine import cognitive_growth_snapshot
+from agent.core.cognitive_pipeline import maybe_enqueue_growth_task
 from agent.core.drives import compute_drives
 from agent.core.events import log_event, mark_events_processed
 from agent.core.goals import count_open_goals, create_goal, mark_goal_done
@@ -20,6 +22,7 @@ def run_idle_policy() -> dict[str, object]:
     workspace_artifact_id = None
     self_map_id = None
     memory_intelligence_result = None
+    cognitive_growth_result = None
     skipped_reason = None
     self_map_ready, self_map_wait = is_ready("self_map_refresh", 1800)
     if self_map_ready:
@@ -60,6 +63,23 @@ def run_idle_policy() -> dict[str, object]:
             log_event("memory", "memory_intelligence_failed", type(exc).__name__, {"error": str(exc)[:300]}, 0.65)
     elif skipped_reason is None:
         skipped_reason = f"cooldown:memory_intelligence:{memory_wait}s"
+    growth_ready, growth_wait = is_ready("cognitive_growth_snapshot", 600)
+    if growth_ready:
+        try:
+            growth_snapshot = cognitive_growth_snapshot(persist=True, limit=5)
+            growth_task = maybe_enqueue_growth_task(growth_snapshot)
+            cognitive_growth_result = {
+                "snapshot_id": growth_snapshot.get("snapshot_id"),
+                "mode": (growth_snapshot.get("active_inference") or {}).get("mode"),
+                "free_energy": (growth_snapshot.get("active_inference") or {}).get("free_energy"),
+                "top_curiosity": (growth_snapshot.get("curiosity") or [{}])[0].get("topic"),
+                "task": growth_task,
+            }
+            mark("cognitive_growth_snapshot", 600, cognitive_growth_result)
+        except Exception as exc:  # pragma: no cover - defensive timer boundary
+            log_event("cognition", "cognitive_growth_failed", type(exc).__name__, {"error": str(exc)[:300]}, 0.65)
+    elif skipped_reason is None:
+        skipped_reason = f"cooldown:cognitive_growth_snapshot:{growth_wait}s"
     return {
         "drives": drives,
         "open_goals": open_goals,
@@ -67,6 +87,7 @@ def run_idle_policy() -> dict[str, object]:
         "workspace_artifact_id": workspace_artifact_id,
         "self_map_id": self_map_id,
         "memory_intelligence": memory_intelligence_result,
+        "cognitive_growth": cognitive_growth_result,
         "processed_events": processed,
         "skipped_reason": skipped_reason,
     }

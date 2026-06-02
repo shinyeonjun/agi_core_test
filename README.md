@@ -28,6 +28,7 @@ Digital AGI-oriented Local Stateful Agent Core for Orange Pi 5. This project doe
 - Shared failure taxonomy with recovery hints for project worker and decision reporting
 - Operating intelligence snapshots for goal priority, action critic, memory hygiene, skill candidates, and next improvements
 - Cognitive growth algorithms for curiosity, utility/novelty scoring, HTN planning, case memory, Bayesian confidence, MAP-Elites, blackboard, active-inference-lite, and stigmergy markers
+- Cognitive growth pipeline that turns high-pressure growth signals into safe autonomous queue tasks while user tasks keep priority
 - Explicit DB migration status table and `agentctl db migrate/check`
 - systemd unit templates
 
