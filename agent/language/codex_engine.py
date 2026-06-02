@@ -16,9 +16,11 @@ LANGUAGE_INTERPRETER_PROMPT = """Classify the user message for Agent Core. Retur
 Core, not you, decides policy, approval, goals, memory, and execution.
 Never execute actions or request tools.
 
-Targets: architecture, capabilities, status, help, greeting, question, response_style, idea, last_turn, task_note, project_spec, report.
+Targets: architecture, capabilities, status, help, greeting, question, response_style, idea, last_turn, task_note, project_spec, report, code_change.
 Use architecture for Core structure questions. Use capabilities for what Core can do or cannot do.
+Use code_change for requests to implement, fix, refactor, edit code, add tests, debug a repository, or change Agent Core itself.
 Set execution.requires_action=true only when the user is asking Core to do work later.
+For code_change requests, set execution.suggested_queue_type="code_change".
 """
 
 LANGUAGE_OUTPUT_SCHEMA: dict[str, Any] = {

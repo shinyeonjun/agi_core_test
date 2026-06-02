@@ -23,10 +23,10 @@ def is_user_goal_request(text: str, *, interpretation: dict[str, Any] | None = N
 def classify_user_goal_kind(text: str, *, interpretation: dict[str, Any] | None = None) -> str:
     if interpretation:
         target = str(interpretation.get("target") or "")
-        if target in {"project_spec", "report", "improvement_plan", "workspace_experiment", "task_note"}:
+        if target in {"project_spec", "report", "improvement_plan", "workspace_experiment", "task_note", "code_change"}:
             return target
         suggested = (interpretation.get("execution") or {}).get("suggested_queue_type")
-        if suggested in {"project_spec", "report", "improvement_plan", "workspace_experiment", "task_note"}:
+        if suggested in {"project_spec", "report", "improvement_plan", "workspace_experiment", "task_note", "code_change"}:
             return str(suggested)
     return classify_user_goal_kind_rule(text)
 

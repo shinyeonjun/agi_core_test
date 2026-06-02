@@ -4,6 +4,7 @@ from typing import Any
 
 import os
 
+from agent.core.capabilities import collect_capability_map
 from agent.config.defaults import now_kst
 from agent.core.drives import compute_drives
 from agent.core.goals import create_goal
@@ -29,6 +30,7 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
     drives = compute_drives()
     metrics = collect_metrics()
     runtime_self_map = self_map_brief()
+    capability_map = collect_capability_map()
     policy = PolicyEngine().classify_decision(user_message, action_type="user_message")
     skills = retrieve_skills(user_message, tags=["talk", "core"], limit=3)
     selected_goal = user_goal or {"id": answer_goal_id, "title": "Answer user input", "goal_type": "answer_user"}
@@ -55,6 +57,7 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
         "drive_scores": drives,
         "metrics": metrics,
         "runtime_self_map": runtime_self_map,
+        "capability_map": capability_map,
         "policy_summary": {"risk_level": policy.risk_level, "requires_approval": policy.requires_approval, "denied": policy.denied, "reason": policy.reason, "matched_rules": policy.matched_rules},
         "core_judgment": "Core stored the input as an event and used memory, skill, goal, and state to build a verifiable response.",
         "confidence": 0.82,

@@ -18,6 +18,7 @@ from agent.core.task_queue import claim_next_task, claim_task, enqueue_task, fin
 from agent.lab.proposals import create_action_proposal, has_recent_goal_command, list_action_proposals, normalize_command, proposal_status_counts, update_action_proposal_status
 from agent.tools.action_log import list_action_runs
 from agent.tools.full_device import run_action
+from agent.lab.codex_worker import run_codex_work
 from agent.workspace.executor import create_project_spec, create_status_report, write_text_artifact
 
 
@@ -255,6 +256,24 @@ def _handle_user_directed_goal(goal: dict[str, Any], drives: dict[str, float]) -
     task_kind = str(metadata.get("task_kind") or "task_note")
     user_text = str(metadata.get("raw_user_text") or goal.get("description") or goal.get("title") or "")
     metrics = collect_metrics()
+    if task_kind == "code_change":
+        result = run_codex_work(user_text, goal_id=int(goal["id"]) if goal.get("id") is not None else None)
+        if result.get("status") == "codex_work_completed":
+            mark_goal_done(int(goal["id"]))
+            reflection_id = create_reflection(
+                "Codex work worker completed a user-directed code-change task.",
+                goal_id=goal.get("id"),
+                learned={"artifact_id": result.get("artifact_id"), "task_kind": task_kind, "returncode": result.get("returncode")},
+                confidence=0.82,
+            )
+            result["reflection_id"] = reflection_id
+        return {
+            **result,
+            "profile": current_profile(),
+            "goal_id": goal.get("id"),
+            "task_kind": task_kind,
+            "artifact_type": "codex_work_report",
+        }
     if task_kind == "project_spec":
         artifact = create_project_spec(
             str(goal.get("title") or "User requested project"),
@@ -352,7 +371,7 @@ def _handle_artifact_goal(goal: dict[str, Any], drives: dict[str, float]) -> dic
 
 
 def _finish_claimed_task(task: dict[str, Any], status: str, result: dict[str, Any]) -> dict[str, Any]:
-    finish_status = "done" if status in {"user_goal_completed", "artifact_created", "completed", "done"} else "blocked" if status in {"blocked", "failed", "timeout"} else "skipped"
+    finish_status = "done" if status in {"user_goal_completed", "artifact_created", "completed", "done", "codex_work_completed"} else "blocked" if status in {"blocked", "failed", "timeout", "codex_work_failed"} else "skipped"
     result["task_id"] = int(task["id"])
     result["queue_type"] = task.get("queue_type")
     finish_task(int(task["id"]), finish_status, result)

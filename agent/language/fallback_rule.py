@@ -56,6 +56,12 @@ def detect_feedback_rule(user_text: str) -> str:
 
 def classify_user_goal_kind_rule(text: str) -> str:
     lowered = text.lower()
+    if any(token in lowered for token in [
+        "code", "repo", "repository", "bug", "fix", "refactor", "test", "pytest",
+        "implement", "develop", "edit", "patch", "코드", "레포", "버그", "수정",
+        "구현", "개발", "리팩터", "리팩토", "테스트", "고쳐",
+    ]):
+        return "code_change"
     if any(token in lowered for token in ["fastapi", "api", "프로젝트", "앱", "서비스", "봇", "사이트"]):
         return "project_spec"
     if any(token in lowered for token in ["보고서", "정리", "요약", "조사", "분석", "리포트"]):

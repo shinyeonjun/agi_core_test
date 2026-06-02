@@ -9,6 +9,7 @@ from agent import __version__
 from agent.bridge.reports import notify_action, notify_activity_summary, notify_daily_summary, notify_observation_dashboard, notify_test_summary, notify_test_update
 from agent.core.autonomy import arm_catastrophic_destruction, disarm_catastrophic_destruction, get_autonomy_state, set_autonomy_profile
 from agent.core.approvals import ApprovalStore
+from agent.core.capabilities import collect_capability_map, capability_summary_lines
 from agent.core.database import check_migrations, get_schema_version, init_db, migrate_db
 from agent.core.events import list_events, log_event
 from agent.core.goals import cleanup_noise_goals, list_goals, mark_goal_done
@@ -456,6 +457,18 @@ def cmd_tasks(args: argparse.Namespace) -> int:
     raise ValueError(f"unknown tasks command: {args.tasks_command}")
 
 
+def cmd_capability(args: argparse.Namespace) -> int:
+    data = collect_capability_map()
+    if getattr(args, "json", False):
+        print_json(data)
+    else:
+        for line in capability_summary_lines(data):
+            print(line)
+        print("direct=" + ",".join(f"{item['name']}:{item['status']}" for item in data.get("direct", [])))
+        print("workers=" + ",".join(f"{item['name']}:{item['status']}" for item in data.get("worker_mediated", [])))
+    return 0
+
+
 def cmd_observe(args: argparse.Namespace) -> int:
     if args.observe_command == "snapshot":
         print_json(observability_snapshot(args.limit))
@@ -687,6 +700,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_tasks_run_user = tasks_sub.add_parser("run-user"); p_tasks_run_user.add_argument("task_id", type=int); p_tasks_run_user.set_defaults(func=cmd_tasks)
     p_tasks_doctor = tasks_sub.add_parser("doctor"); p_tasks_doctor.add_argument("--max-age-seconds", type=int, default=1800); p_tasks_doctor.set_defaults(func=cmd_tasks)
     p_tasks_lifecycle = tasks_sub.add_parser("lifecycle"); p_tasks_lifecycle.add_argument("task_id", type=int); p_tasks_lifecycle.add_argument("--limit", type=int, default=50); p_tasks_lifecycle.set_defaults(func=cmd_tasks)
+    p = sub.add_parser("capability"); p.add_argument("--json", action="store_true"); p.set_defaults(func=cmd_capability)
     p = sub.add_parser("observe"); observe_sub = p.add_subparsers(dest="observe_command", required=True)
     p_observe_snapshot = observe_sub.add_parser("snapshot"); p_observe_snapshot.add_argument("--limit", type=int, default=10); p_observe_snapshot.set_defaults(func=cmd_observe)
     p_observe_actions = observe_sub.add_parser("actions"); p_observe_actions.add_argument("--limit", type=int, default=10); p_observe_actions.set_defaults(func=cmd_observe)
