@@ -21,7 +21,7 @@ Digital AGI-oriented Local Stateful Agent Core for Orange Pi 5. This project doe
 - Task lifecycle tracking with queued/planning/executing/verifying/reporting/learned phases
 - SQLite task leases, idempotency keys, delayed scheduling fields, and task doctor recovery
 - OS-like Core process table for task/project state, blockers, progress, and next actions
-- Control Room Dashboard for process table, goals, approvals, actions, self-map, memory, vectors, metrics, and safety posture
+- Redacted control snapshot for Discord/CLI reporting across process table, goals, approvals, actions, self-map, memory, vectors, metrics, and safety posture
 - Staged project worker loop for planning, implementation, verification, and reporting
 - Operating intelligence snapshots for goal priority, action critic, memory hygiene, skill candidates, and next improvements
 - Explicit DB migration status table and `agentctl db migrate/check`
@@ -58,8 +58,7 @@ agentctl tasks counts
 agentctl tasks list --queue-type user
 agentctl process snapshot
 agentctl process list
-agentctl dashboard snapshot
-agentctl dashboard serve --host 127.0.0.1 --port 8765
+agentctl control snapshot
 agentctl project plans
 agentctl intelligence snapshot --persist --refresh
 ```
@@ -129,29 +128,14 @@ agentctl process show project:3
 
 Project plans now advance through `planning`, `implementation`, `verification`, and `reporting` stages. This makes a broad user goal visible as a staged process instead of an opaque one-shot result.
 
-## Control Room Dashboard
+## Control Snapshot
 
-The dashboard is a local operator view for the Core. It serves a redacted snapshot of process table, user/autonomous queues, goals, approvals, recent actions, events, memory/vector health, skill candidates, self-map, eval status, and capability posture.
+`agentctl control snapshot` returns a redacted operator snapshot for Discord and CLI workflows. It summarizes process table, user/autonomous queues, goals, approvals, recent actions, events, memory/vector health, skill candidates, self-map, eval status, and capability posture.
 
-It does not expose raw stdout/stderr, approval payload JSON, `.env` values, tokens, private keys, passwords, or webhook URLs.
-
-```bash
-agentctl dashboard snapshot
-agentctl dashboard serve --host 127.0.0.1 --port 8765
-```
-
-For Orange Pi systemd use:
+It does not expose raw stdout/stderr, approval payload JSON, `.env` values, tokens, private keys, passwords, or webhook URLs. There is no bundled web UI; Discord is the primary control surface.
 
 ```bash
-sudo cp deploy/agent-core-dashboard.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now agent-core-dashboard.service
-```
-
-Default binding is `127.0.0.1`. From a laptop, open it through an SSH tunnel:
-
-```bash
-ssh -L 8765:127.0.0.1:8765 ubuntu@orangepi5
+agentctl control snapshot
 ```
 
 ## Operating Intelligence
@@ -166,7 +150,7 @@ agentctl intelligence memory
 agentctl intelligence skills
 ```
 
-The Discord observation dashboard includes the same high-level signals in Korean so the summary channel reads like a control room instead of raw logs.
+The Discord observation summary includes the same high-level signals in Korean so the summary channel reads like a control room instead of raw logs.
 
 ## Database Migrations
 

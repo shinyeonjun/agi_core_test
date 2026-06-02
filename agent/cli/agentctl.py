@@ -28,8 +28,7 @@ from agent.core.state import load_state, save_state
 from agent.core.style import add_style_example, apply_style_feedback, get_active_style_profile, list_style_examples, list_style_feedback, seed_default_style_profile, style_directives
 from agent.core.task_lifecycle import list_task_lifecycle, task_lifecycle_summary
 from agent.core.task_queue import doctor_tasks, list_tasks as list_queued_tasks, task_status_counts
-from agent.dashboard.snapshot import dashboard_snapshot
-from agent.dashboard.server import run_server as run_dashboard_server
+from agent.core.control_snapshot import control_snapshot
 from agent.eval.harness import list_eval_runs, list_tasks as list_eval_tasks, run_suite
 from agent.language.engine import get_language_engine, interpret_user_message, language_cache_stats, list_interpretation_logs
 from agent.memory.store import add_memory, list_memories, rebuild_memory_fts, search_memories
@@ -486,14 +485,11 @@ def cmd_process(args: argparse.Namespace) -> int:
     raise ValueError(f"unknown process command: {args.process_command}")
 
 
-def cmd_dashboard(args: argparse.Namespace) -> int:
-    if args.dashboard_command == "snapshot":
-        print_json(dashboard_snapshot(limit=args.limit))
+def cmd_control(args: argparse.Namespace) -> int:
+    if args.control_command == "snapshot":
+        print_json(control_snapshot(limit=args.limit))
         return 0
-    if args.dashboard_command == "serve":
-        run_dashboard_server(host=args.host, port=args.port)
-        return 0
-    raise ValueError(f"unknown dashboard command: {args.dashboard_command}")
+    raise ValueError(f"unknown control command: {args.control_command}")
 
 
 def cmd_capability(args: argparse.Namespace) -> int:
@@ -746,9 +742,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_process_list = process_sub.add_parser("list"); p_process_list.add_argument("--limit", type=int, default=20); p_process_list.add_argument("--state"); p_process_list.set_defaults(func=cmd_process)
     p_process_snapshot = process_sub.add_parser("snapshot"); p_process_snapshot.add_argument("--limit", type=int, default=20); p_process_snapshot.set_defaults(func=cmd_process)
     p_process_show = process_sub.add_parser("show"); p_process_show.add_argument("pid"); p_process_show.set_defaults(func=cmd_process)
-    p = sub.add_parser("dashboard"); dashboard_sub = p.add_subparsers(dest="dashboard_command", required=True)
-    p_dashboard_snapshot = dashboard_sub.add_parser("snapshot"); p_dashboard_snapshot.add_argument("--limit", type=int, default=12); p_dashboard_snapshot.set_defaults(func=cmd_dashboard)
-    p_dashboard_serve = dashboard_sub.add_parser("serve"); p_dashboard_serve.add_argument("--host", default="127.0.0.1"); p_dashboard_serve.add_argument("--port", type=int, default=8765); p_dashboard_serve.set_defaults(func=cmd_dashboard)
+    p = sub.add_parser("control"); control_sub = p.add_subparsers(dest="control_command", required=True)
+    p_control_snapshot = control_sub.add_parser("snapshot"); p_control_snapshot.add_argument("--limit", type=int, default=12); p_control_snapshot.set_defaults(func=cmd_control)
     p = sub.add_parser("capability"); p.add_argument("--json", action="store_true"); p.set_defaults(func=cmd_capability)
     p = sub.add_parser("observe"); observe_sub = p.add_subparsers(dest="observe_command", required=True)
     p_observe_snapshot = observe_sub.add_parser("snapshot"); p_observe_snapshot.add_argument("--limit", type=int, default=10); p_observe_snapshot.set_defaults(func=cmd_observe)

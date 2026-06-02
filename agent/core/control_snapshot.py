@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from agent import __version__
-from agent.config.defaults import KST, env_int, now_kst, project_root
+from agent.config.defaults import KST, now_kst, project_root
 from agent.core.approvals import ApprovalStore
 from agent.core.capabilities import collect_capability_map
 from agent.core.database import get_schema_version, init_db
@@ -256,9 +256,9 @@ def _safe_skill_candidates(limit: int) -> list[dict[str, Any]]:
 
 
 
-def dashboard_snapshot(*, limit: int | None = None) -> dict[str, Any]:
+def control_snapshot(*, limit: int | None = None) -> dict[str, Any]:
     init_db()
-    item_limit = limit or env_int("AGENT_DASHBOARD_ITEM_LIMIT", 12)
+    item_limit = limit or 12
     metrics = collect_metrics()
     processes = process_snapshot(limit=item_limit)
     state = load_state()
@@ -266,7 +266,7 @@ def dashboard_snapshot(*, limit: int | None = None) -> dict[str, Any]:
     vector = vector_status()
     self_map = self_map_brief(max_age_seconds=600, refresh_if_stale=False)
     return {
-        "kind": "agent_core_dashboard_snapshot",
+        "kind": "agent_core_control_snapshot",
         "created_at": now_kst(),
         "version": __version__,
         "schema_version": get_schema_version(),

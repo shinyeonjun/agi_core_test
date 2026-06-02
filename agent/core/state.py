@@ -11,7 +11,7 @@ from agent.config.defaults import ensure_runtime_dirs, now_kst, state_path
 DEFAULT_STATE: dict[str, Any] = {
     "version": "0.16",
     "mode": "idle",
-    "current_focus": "agent_core_v0_16_control_room_dashboard",
+    "current_focus": "agent_core_v0_16_discord_control_snapshot",
     "last_user_interaction_at": None,
     "last_idle_tick_at": None,
     "autonomous_level": 2,
@@ -76,7 +76,7 @@ def load_state() -> dict[str, Any]:
         merged["version"] = "0.16"
         changed = True
     if merged.get("current_focus") in {"agent_core_v0_1", "agent_core_v0_6", "agent_core_v0_7_workspace_autonomy", "agent_core_v0_11_operating_intelligence", "agent_core_v0_12_memory_intelligence", "agent_core_v0_13_local_sparse_vectors", "agent_core_v0_14_project_execution_loop", "agent_core_v0_15_process_table_project_worker"}:
-        merged["current_focus"] = "agent_core_v0_16_control_room_dashboard"
+        merged["current_focus"] = "agent_core_v0_16_discord_control_snapshot"
         changed = True
     if changed:
         save_state(merged)
