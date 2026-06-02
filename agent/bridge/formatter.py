@@ -325,11 +325,20 @@ def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
             "\uc774\uac74 \ub2f5\ubcc0 \ubc29\uc2dd\uc5d0\ub9cc \uc801\uc6a9\ub418\uace0, \uc2e4\ud589/\uc815\ucc45 \ud310\ub2e8\uc740 \ubc14\uafb8\uc9c0 \uc54a\uc544.",
         ])
     if user_goal and task_result:
-        if task_result.get("status") in {"user_goal_completed", "artifact_created", "completed", "done"}:
+        if task_result.get("status") in {"user_goal_completed", "artifact_created", "completed", "done", "codex_work_completed"}:
+            result_label = compact_text(task_result.get("artifact_type") or task_result.get("status"))
+            report = compact_text(task_result.get("report"), "")
+            report_line = f"\n요약: {report[:700]}" if report else ""
             return "\n".join([
                 f"\uc644\ub8cc\ud588\uc5b4. \uc791\uc5c5 #{compact_text(task_result.get('task_id'))}\ub97c \ucc98\ub9ac\ud588\uace0, \ubaa9\ud45c #{compact_text(user_goal.get('id'))}\ub3c4 \uc815\ub9ac\ud588\uc5b4.",
-                f"\uacb0\uacfc: {compact_text(task_result.get('artifact_type') or task_result.get('status'))}",
+                f"\uacb0\uacfc: {result_label}{report_line}",
                 "\uc774 \uc791\uc5c5\uc740 \ub300\ud654 \ud2b8\ub9ac\uac70\ub85c \ubc14\ub85c \ucc98\ub9ac\ud588\uace0, \uc790\uc728 \uc2a4\ucf00\uc904\ub7ec\uc640\ub294 \ubd84\ub9ac\ub418\uc5b4 \uc788\uc5b4.",
+            ])
+        if task_result.get("status") in {"codex_work_blocked", "codex_work_failed"}:
+            return "\n".join([
+                f"\uc791\uc5c5 #{compact_text(task_result.get('task_id'))}\ub294 \ubc14\ub85c \uc2e4\ud589\ud558\uc9c0 \uc54a\uc558\uc5b4.",
+                f"\uc774\uc720: {compact_text(task_result.get('reason') or task_result.get('status'))}",
+                f"\uc0c1\ud0dc: {compact_text(task_result.get('status'))}",
             ])
         if task_result.get("status") == "skipped":
             return "\n".join([

@@ -233,7 +233,16 @@ def test_policy_expanded_credential_files_denied():
         assert proposal.denied_reason in {"env_access_denied", "secret_access_denied"}, command
 
 
-def test_policy_full_device_lab_allows_local_os_mutation():
+def test_policy_full_device_lab_requires_approval_for_local_os_mutation_by_default():
+    proposal = PolicyEngine(profile="full_device_lab").classify_text("apt install nginx")
+    assert proposal.risk_level == "high"
+    assert proposal.requires_approval is True
+    assert proposal.denied_reason is None
+    assert "full_device_lab_local_mutation_allowed" not in proposal.payload["matched_rules"]
+
+
+def test_policy_full_device_lab_env_allowlist_can_auto_allow_local_rule(monkeypatch):
+    monkeypatch.setenv("AGENT_FULL_DEVICE_AUTO_ALLOW_RULES", "apt_write")
     proposal = PolicyEngine(profile="full_device_lab").classify_text("apt install nginx")
     assert proposal.risk_level == "high"
     assert proposal.requires_approval is False

@@ -5,7 +5,7 @@ from typing import Any, Literal
 import json
 import re
 
-from agent.config.defaults import now_kst
+from agent.config.defaults import env_csv, now_kst
 from agent.core.database import connect, init_db
 
 RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
@@ -215,7 +215,9 @@ class PolicyEngine:
             "file_write",
             "installer",
         }
-        if any(rule in local_mutation_rules for rule in matched):
+        allowed_local_rules = env_csv("AGENT_FULL_DEVICE_AUTO_ALLOW_RULES")
+        matched_local_rules = {rule for rule in matched if rule in local_mutation_rules}
+        if matched_local_rules and matched_local_rules.issubset(allowed_local_rules):
             if "full_device_lab_local_mutation_allowed" not in matched:
                 matched.append("full_device_lab_local_mutation_allowed")
             return risk_level, False, None, matched

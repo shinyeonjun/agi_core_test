@@ -251,13 +251,13 @@ def _artifact_content(title: str, goal: dict[str, Any], metrics: dict[str, Any],
     ])
 
 
-def _handle_user_directed_goal(goal: dict[str, Any], drives: dict[str, float]) -> dict[str, Any]:
+def _handle_user_directed_goal(goal: dict[str, Any], drives: dict[str, float], *, task_id: int | None = None) -> dict[str, Any]:
     metadata = goal_metadata(goal)
     task_kind = str(metadata.get("task_kind") or "task_note")
     user_text = str(metadata.get("raw_user_text") or goal.get("description") or goal.get("title") or "")
     metrics = collect_metrics()
     if task_kind == "code_change":
-        result = run_codex_work(user_text, goal_id=int(goal["id"]) if goal.get("id") is not None else None)
+        result = run_codex_work(user_text, goal_id=int(goal["id"]) if goal.get("id") is not None else None, task_id=task_id)
         if result.get("status") == "codex_work_completed":
             mark_goal_done(int(goal["id"]))
             reflection_id = create_reflection(
@@ -316,14 +316,14 @@ def _handle_user_directed_goal(goal: dict[str, Any], drives: dict[str, float]) -
     return result
 
 
-def _handle_artifact_goal(goal: dict[str, Any], drives: dict[str, float]) -> dict[str, Any] | None:
+def _handle_artifact_goal(goal: dict[str, Any], drives: dict[str, float], *, task_id: int | None = None) -> dict[str, Any] | None:
     kind = str(goal.get("goal_type") or "")
     if kind in SHELL_PLANNED_GOAL_TYPES:
         return None
     if goal.get("status") not in {"active", "proposed"}:
         return None
     if kind == "user_directed":
-        return _handle_user_directed_goal(goal, drives)
+        return _handle_user_directed_goal(goal, drives, task_id=task_id)
     metrics = collect_metrics()
     if kind == "workspace_experiment":
         artifact = create_status_report("Workspace experiment report", metrics=metrics, drives=drives)
@@ -371,7 +371,7 @@ def _handle_artifact_goal(goal: dict[str, Any], drives: dict[str, float]) -> dic
 
 
 def _finish_claimed_task(task: dict[str, Any], status: str, result: dict[str, Any]) -> dict[str, Any]:
-    finish_status = "done" if status in {"user_goal_completed", "artifact_created", "completed", "done", "codex_work_completed"} else "blocked" if status in {"blocked", "failed", "timeout", "codex_work_failed"} else "skipped"
+    finish_status = "done" if status in {"user_goal_completed", "artifact_created", "completed", "done", "codex_work_completed"} else "blocked" if status in {"blocked", "failed", "timeout", "codex_work_failed", "codex_work_blocked"} else "skipped"
     result["task_id"] = int(task["id"])
     result["queue_type"] = task.get("queue_type")
     finish_task(int(task["id"]), finish_status, result)
@@ -397,12 +397,15 @@ def _process_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
         return result
 
     drives = compute_drives()
-    artifact_result = _handle_artifact_goal(goal, drives)
+    artifact_result = _handle_artifact_goal(goal, drives, task_id=task_id)
     if artifact_result:
+        artifact_status = str(artifact_result.get("status") or "artifact_created")
+        executing_status = "codex_work_completed" if artifact_status == "codex_work_completed" else "blocked" if artifact_status == "codex_work_blocked" else "artifact_created"
+        verifying_status = "passed" if artifact_status in {"codex_work_completed", "artifact_created", "user_goal_completed"} else "blocked"
         record_task_phase(
             task_id,
             "executing",
-            "artifact_created",
+            executing_status,
             "워크스페이스 산출물을 생성함",
             queue_type=queue_type,
             metadata={"artifact_id": artifact_result.get("artifact_id"), "goal_id": goal.get("id")},
@@ -410,10 +413,10 @@ def _process_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
         record_task_phase(
             task_id,
             "verifying",
-            "passed",
+            verifying_status,
             "산출물 생성과 목표 완료 상태를 확인함",
             queue_type=queue_type,
-            metadata={"status": artifact_result.get("status"), "goal_id": goal.get("id")},
+            metadata={"status": artifact_status, "goal_id": goal.get("id")},
         )
         record_task_phase(
             task_id,

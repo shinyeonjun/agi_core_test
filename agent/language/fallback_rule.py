@@ -30,11 +30,46 @@ STYLE_FEEDBACK_PATTERNS: tuple[tuple[str, re.Pattern[str], dict[str, Any], str],
     ("no_emoji", re.compile(r"(이모지|emoji).*(쓰지|빼|싫)", re.IGNORECASE), {"emoji": False}, "negative"),
 )
 
+CLEAN_CODE_CHANGE_TOKENS = (
+    "코드", "레포", "저장소", "버그", "수정", "리팩토링", "리팩터링", "테스트",
+    "pytest", "구현", "개발", "패치", "고쳐", "고쳐줘", "디벨롭",
+)
+CLEAN_PROJECT_SPEC_TOKENS = ("fastapi", "api", "프로젝트", "서비스", "봇", "앱", "사이트")
+CLEAN_REPORT_TOKENS = ("보고서", "정리", "요약", "조사", "분석", "리포트")
+CLEAN_EXPERIMENT_TOKENS = ("실험", "검증", "테스트해")
+CLEAN_CAPABILITY_TOKENS = ("뭐 할 수", "뭘 할 수", "가능한", "능력", "할수있는", "할 수 있는")
+CLEAN_ARCHITECTURE_TOKENS = ("코어", "구조", "구성", "아키텍처", "어떻게 이루어", "어떻게 되어")
+CLEAN_STATUS_TOKENS = ("상태", "뭐 하고", "뭐 하는", "뭐해", "살아", "정상", "체크", "확인")
+CLEAN_HELP_TOKENS = ("도움", "명령", "help", "사용법", "기능")
+CLEAN_GREETING_TOKENS = {"ㅎㅇ", "하이", "안녕", "안녕하세요", "헬로", "ㅇㅇ", "hi", "hello", "hey"}
+
+
+def _contains_any(text: str, tokens: tuple[str, ...]) -> bool:
+    return any(token in text for token in tokens)
+
 
 def detect_style_feedback_rule(text: str) -> dict[str, Any] | None:
     cleaned = text.strip()
     if not cleaned:
         return None
+    lowered = cleaned.lower()
+    normalized_lower = lowered.replace(" ", "")
+    if _contains_any(lowered, CLEAN_CAPABILITY_TOKENS) or _contains_any(normalized_lower, ("할수있는", "뭐할수", "뭘할수")):
+        return None
+    if "말투" in cleaned and any(token in cleaned for token in ("좋음", "좋아", "괜찮", "계속", "기억")):
+        return {"feedback_type": "positive_style", "sentiment": "positive", "extracted_preference": {"positive_signal": True}}
+    if "말투" in cleaned and any(token in cleaned for token in ("별로", "싫", "이상", "장황", "너무")):
+        return {"feedback_type": "negative_style", "sentiment": "negative", "extracted_preference": {"avoid": ["unwanted response style"]}}
+    if "ai같" in lowered or "ai 같" in lowered:
+        return {
+            "feedback_type": "too_ai_like",
+            "sentiment": "negative",
+            "extracted_preference": {"avoid": ["AI-like praise", "overly polite filler"], "tone": "natural_blunt"},
+        }
+    if any(token in cleaned for token in ("짧게", "간단히", "줄여", "너무 길")):
+        return {"feedback_type": "shorter", "sentiment": "neutral", "extracted_preference": {"detail_level": "shorter"}}
+    if any(token in cleaned for token in ("냉정", "직설", "팩트", "비판")):
+        return {"feedback_type": "colder", "sentiment": "neutral", "extracted_preference": {"tone": "calm_blunt", "structure": "findings_first"}}
     for feedback_type, pattern, extracted, sentiment in STYLE_FEEDBACK_PATTERNS:
         if pattern.search(cleaned):
             return {
@@ -56,6 +91,14 @@ def detect_feedback_rule(user_text: str) -> str:
 
 def classify_user_goal_kind_rule(text: str) -> str:
     lowered = text.lower()
+    if _contains_any(lowered, CLEAN_CODE_CHANGE_TOKENS):
+        return "code_change"
+    if _contains_any(lowered, CLEAN_PROJECT_SPEC_TOKENS):
+        return "project_spec"
+    if _contains_any(lowered, CLEAN_REPORT_TOKENS):
+        return "report"
+    if _contains_any(lowered, CLEAN_EXPERIMENT_TOKENS):
+        return "workspace_experiment"
     if any(token in lowered for token in [
         "code", "repo", "repository", "bug", "fix", "refactor", "test", "pytest",
         "implement", "develop", "edit", "patch", "코드", "레포", "버그", "수정",
@@ -82,12 +125,25 @@ def is_task_request_rule(text: str) -> bool:
     if any(pattern.search(cleaned) for pattern in NON_TASK_PATTERNS):
         return False
     lowered = cleaned.lower()
+    if _contains_any(lowered, CLEAN_CODE_CHANGE_TOKENS + CLEAN_PROJECT_SPEC_TOKENS + CLEAN_REPORT_TOKENS + CLEAN_EXPERIMENT_TOKENS):
+        return True
     return any(keyword in lowered for keyword in TASK_KEYWORDS)
 
 
 def _chat_target(text: str) -> str | None:
     lowered = text.strip().lower()
     normalized = text.replace(" ", "")
+    normalized_lower = lowered.replace(" ", "")
+    if lowered in CLEAN_GREETING_TOKENS or any(lowered.startswith(token) for token in ("ㅎㅇ", "안녕")):
+        return "greeting"
+    if _contains_any(lowered, CLEAN_STATUS_TOKENS) or _contains_any(normalized_lower, ("뭐하고", "뭐하는", "뭐해", "하고있", "하는중")):
+        return "status"
+    if _contains_any(lowered, CLEAN_CAPABILITY_TOKENS):
+        return "capabilities"
+    if _contains_any(lowered, CLEAN_ARCHITECTURE_TOKENS):
+        return "architecture"
+    if _contains_any(lowered, CLEAN_HELP_TOKENS):
+        return "help"
     if lowered in {"hi", "hello", "hey", "ㅎㅇ", "하이", "안녕", "안녕하세요", "헬로", "ㅇㅇ"} or lowered.startswith(("ㅎㅇ", "안녕")):
         return "greeting"
     if any(token in text for token in ["상태", "뭐 하고", "뭐 하는", "뭐해", "살아", "정상", "체크", "확인"]) or any(token in normalized for token in ["뭐하고", "뭐하는", "뭐해", "하고있", "하는중"]):

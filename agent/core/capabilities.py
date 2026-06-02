@@ -9,6 +9,8 @@ from agent.core.autonomy import current_profile
 from agent.core.metrics import collect_metrics
 from agent.core.self_map import self_map_brief
 
+ALLOWED_CODEX_WORK_SANDBOXES = {"read-only", "workspace-write"}
+
 
 def _status(enabled: bool, *, available: bool = True) -> str:
     if not available:
@@ -24,13 +26,37 @@ def codex_worker_enabled() -> bool:
     return env_bool("AGENT_CODEX_WORKER_ENABLED", True)
 
 
+def codex_work_sandbox() -> str:
+    return os.getenv("AGENT_CODEX_WORK_SANDBOX", "workspace-write").strip() or "workspace-write"
+
+
+def codex_worker_blockers(profile: str | None = None) -> list[str]:
+    active_profile = profile or current_profile()
+    blockers: list[str] = []
+    if not _codex_available():
+        blockers.append("codex_cli_unavailable")
+    if not codex_worker_enabled():
+        blockers.append("codex_worker_disabled")
+    if active_profile != "full_device_lab":
+        blockers.append("profile_not_full_device_lab")
+    sandbox = codex_work_sandbox()
+    if sandbox not in ALLOWED_CODEX_WORK_SANDBOXES:
+        blockers.append("invalid_codex_work_sandbox")
+    return blockers
+
+
+def codex_worker_available(profile: str | None = None) -> bool:
+    return not codex_worker_blockers(profile)
+
+
 def collect_capability_map() -> dict[str, Any]:
     profile = current_profile()
     metrics = collect_metrics()
     runtime = self_map_brief(max_age_seconds=300, refresh_if_stale=False)
     codex_available = _codex_available()
     worker_enabled = codex_worker_enabled()
-    full_device = profile == "full_device_lab"
+    worker_blockers = codex_worker_blockers(profile)
+    worker_ready = not worker_blockers
     return {
         "created_at": now_kst(),
         "profile": profile,
@@ -56,8 +82,10 @@ def collect_capability_map() -> dict[str, Any]:
             },
             {
                 "name": "codex_work_worker",
-                "status": _status(worker_enabled and full_device, available=codex_available),
+                "status": _status(worker_ready, available=codex_available),
                 "description": "User-triggered code-change worker for repo edits, tests, and implementation reports",
+                "blockers": worker_blockers,
+                "sandbox": codex_work_sandbox(),
             },
         ],
         "approval_required": [

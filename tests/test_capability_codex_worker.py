@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 from agent.cli.agentctl import main
+from agent.core.autonomy import set_autonomy_profile
 from agent.core.capabilities import collect_capability_map
 from agent.core.database import init_db
 from agent.core.decision import build_talk_decision
@@ -43,8 +44,10 @@ def test_capability_cli(monkeypatch, tmp_path, capsys):
 
 def test_code_change_user_task_runs_codex_worker(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
     monkeypatch.setenv("AGENT_CODEX_WORKER_ENABLED", "1")
     monkeypatch.setenv("AGENT_CODEX_WORK_TIMEOUT", "9")
+    monkeypatch.setattr("agent.core.capabilities.shutil.which", lambda name: "codex" if name == "codex" else None)
     (tmp_path / "repo" / ".git").mkdir()
 
     def fake_run(args, **kwargs):
@@ -52,6 +55,8 @@ def test_code_change_user_task_runs_codex_worker(monkeypatch, tmp_path):
             return SimpleNamespace(returncode=0, stdout=" M agent/core/example.py\n", stderr="")
         assert args[:2] == ["codex", "exec"]
         assert "--output-last-message" in args
+        assert "--ephemeral" in args
+        assert args[args.index("--sandbox") + 1] == "workspace-write"
         output_path = args[args.index("--output-last-message") + 1]
         with open(output_path, "w", encoding="utf-8") as handle:
             handle.write("수정 완료. 테스트는 생략했어.")
@@ -75,5 +80,66 @@ def test_code_change_user_task_runs_codex_worker(monkeypatch, tmp_path):
 
     assert result["status"] == "codex_work_completed"
     assert result["artifact_type"] == "codex_work_report"
+    assert result["task_id"] == task_id
     assert task["status"] == "done"
     assert goal["status"] == "done"
+
+
+def test_codex_worker_blocks_safe_profile(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("safe")
+    monkeypatch.setenv("AGENT_CODEX_WORKER_ENABLED", "1")
+    monkeypatch.setattr("agent.core.capabilities.shutil.which", lambda name: "codex" if name == "codex" else None)
+
+    from agent.lab.codex_worker import run_codex_work
+
+    result = run_codex_work("코드 고쳐줘", goal_id=1, task_id=2)
+
+    assert result["status"] == "codex_work_blocked"
+    assert "profile_not_full_device_lab" in result["blockers"]
+    assert result["executed"] is False
+
+
+def test_codex_worker_blocks_invalid_sandbox(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    monkeypatch.setenv("AGENT_CODEX_WORKER_ENABLED", "1")
+    monkeypatch.setenv("AGENT_CODEX_WORK_SANDBOX", "danger-full-access")
+    monkeypatch.setattr("agent.core.capabilities.shutil.which", lambda name: "codex" if name == "codex" else None)
+
+    from agent.lab.codex_worker import run_codex_work
+
+    result = run_codex_work("코드 고쳐줘", goal_id=1, task_id=2)
+
+    assert result["status"] == "codex_work_blocked"
+    assert result["reason"] == "codex_worker_not_available"
+    assert "invalid_codex_work_sandbox" in result["blockers"]
+
+
+def test_codex_worker_marks_unsafe_changed_files_blocked(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    monkeypatch.setenv("AGENT_CODEX_WORKER_ENABLED", "1")
+    monkeypatch.setattr("agent.core.capabilities.shutil.which", lambda name: "codex" if name == "codex" else None)
+    (tmp_path / "repo" / ".git").mkdir()
+    calls = {"status": 0}
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "status"]:
+            calls["status"] += 1
+            stdout = "" if calls["status"] == 1 else " M .env\n"
+            return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+        output_path = args[args.index("--output-last-message") + 1]
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write("수정 완료.")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("agent.lab.codex_worker.subprocess.run", fake_run)
+
+    from agent.lab.codex_worker import run_codex_work
+
+    result = run_codex_work("코드 고쳐줘", goal_id=1, task_id=2)
+
+    assert result["status"] == "codex_work_blocked"
+    assert result["executed"] is False
+    assert result["unsafe_changed_files"] == [".env"]
