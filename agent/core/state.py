@@ -75,7 +75,7 @@ def load_state() -> dict[str, Any]:
     if merged.get("version") in {"0.1", "0.6", "0.7", "0.8", "0.10", "0.11", "0.12", "0.13", "0.14", "0.15"}:
         merged["version"] = "0.16"
         changed = True
-    if merged.get("current_focus") in {"agent_core_v0_1", "agent_core_v0_6", "agent_core_v0_7_workspace_autonomy", "agent_core_v0_11_operating_intelligence", "agent_core_v0_12_memory_intelligence", "agent_core_v0_13_local_sparse_vectors", "agent_core_v0_14_project_execution_loop", "agent_core_v0_15_process_table_project_worker"}:
+    if merged.get("current_focus") in {"agent_core_v0_1", "agent_core_v0_6", "agent_core_v0_7_workspace_autonomy", "agent_core_v0_11_operating_intelligence", "agent_core_v0_12_memory_intelligence", "agent_core_v0_13_local_sparse_vectors", "agent_core_v0_14_project_execution_loop", "agent_core_v0_15_process_table_project_worker", "agent_core_v0_16_control_room_dashboard"}:
         merged["current_focus"] = "agent_core_v0_16_discord_control_snapshot"
         changed = True
     if changed:
