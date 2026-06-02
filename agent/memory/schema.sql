@@ -296,22 +296,22 @@ CREATE INDEX IF NOT EXISTS idx_decisions_goal ON decisions(selected_goal_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     title,
     content,
-    tags,
+    tags_json,
     content='memories',
     content_rowid='id'
 );
 CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-  INSERT INTO memories_fts(rowid, title, content, tags)
+  INSERT INTO memories_fts(rowid, title, content, tags_json)
   VALUES (new.id, new.title, new.content, COALESCE(new.tags_json, ''));
 END;
 CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-  INSERT INTO memories_fts(memories_fts, rowid, title, content, tags)
+  INSERT INTO memories_fts(memories_fts, rowid, title, content, tags_json)
   VALUES('delete', old.id, old.title, old.content, COALESCE(old.tags_json, ''));
 END;
 CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-  INSERT INTO memories_fts(memories_fts, rowid, title, content, tags)
+  INSERT INTO memories_fts(memories_fts, rowid, title, content, tags_json)
   VALUES('delete', old.id, old.title, old.content, COALESCE(old.tags_json, ''));
-  INSERT INTO memories_fts(rowid, title, content, tags)
+  INSERT INTO memories_fts(rowid, title, content, tags_json)
   VALUES (new.id, new.title, new.content, COALESCE(new.tags_json, ''));
 END;
 

@@ -35,3 +35,14 @@ def test_korean_memory_search_uses_unicode_terms():
     memory_id = add_memory("digital agi korean", "Core remembers \ub514\uc9c0\ud138 AGI context.", tags=["digital_agi", "core"])
     results = search_memories("\ub514\uc9c0\ud138 AGI")
     assert any(row["id"] == memory_id for row in results)
+
+
+def test_memory_fts_can_update_usage_after_search():
+    init_db()
+    memory_id = add_memory("fts usage", "digital agi core memory", tags=["digital_agi", "core"])
+
+    first = search_memories("digital agi core", limit=5)
+    second = search_memories("digital agi core", limit=5)
+
+    assert any(row["id"] == memory_id for row in first)
+    assert any(row["id"] == memory_id for row in second)
