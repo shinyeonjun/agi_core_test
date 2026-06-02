@@ -236,7 +236,9 @@ def build_observation_dashboard() -> str:
     if recent_tasks:
         for task in recent_tasks[:4]:
             observed_task = task_observation(task)
-            lines.append(f"- #{observed_task['id']} {compact_text(observed_task['title'])}: {observed_task['waiting_reason']} / 다음: {observed_task['next_step']}")
+            lifecycle = observed_task.get("lifecycle") or {}
+            phase = lifecycle.get("last_label") or lifecycle.get("last_phase") or "기록 없음"
+            lines.append(f"- #{observed_task['id']} {compact_text(observed_task['title'])}: {observed_task['waiting_reason']} / phase: {phase} / 다음: {observed_task['next_step']}")
     else:
         lines.append("- 현재 작업 큐가 비어 있어.")
 

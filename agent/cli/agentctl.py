@@ -21,6 +21,7 @@ from agent.core.policy import ActionProposal, PolicyEngine
 from agent.core.self_map import latest_self_map, refresh_self_map, self_map_brief
 from agent.core.state import load_state, save_state
 from agent.core.style import add_style_example, apply_style_feedback, get_active_style_profile, list_style_examples, list_style_feedback, seed_default_style_profile, style_directives
+from agent.core.task_lifecycle import list_task_lifecycle, task_lifecycle_summary
 from agent.core.task_queue import doctor_tasks, list_tasks as list_queued_tasks, task_status_counts
 from agent.eval.harness import list_eval_runs, list_tasks as list_eval_tasks, run_suite
 from agent.language.engine import get_language_engine, interpret_user_message, language_cache_stats, list_interpretation_logs
@@ -409,6 +410,13 @@ def cmd_tasks(args: argparse.Namespace) -> int:
     if args.tasks_command == "doctor":
         print_json(doctor_tasks(max_age_seconds=args.max_age_seconds))
         return 0
+    if args.tasks_command == "lifecycle":
+        task = next((row for row in list_queued_tasks(200) if int(row.get("id", -1)) == int(args.task_id)), None)
+        if task:
+            print_json(task_lifecycle_summary(task, limit=args.limit))
+        else:
+            print_json({"task_id": args.task_id, "events": list_task_lifecycle(args.task_id, limit=args.limit), "available": False})
+        return 0
     raise ValueError(f"unknown tasks command: {args.tasks_command}")
 
 
@@ -610,6 +618,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_tasks_sync = tasks_sub.add_parser("sync"); p_tasks_sync.set_defaults(func=cmd_tasks)
     p_tasks_run_user = tasks_sub.add_parser("run-user"); p_tasks_run_user.add_argument("task_id", type=int); p_tasks_run_user.set_defaults(func=cmd_tasks)
     p_tasks_doctor = tasks_sub.add_parser("doctor"); p_tasks_doctor.add_argument("--max-age-seconds", type=int, default=1800); p_tasks_doctor.set_defaults(func=cmd_tasks)
+    p_tasks_lifecycle = tasks_sub.add_parser("lifecycle"); p_tasks_lifecycle.add_argument("task_id", type=int); p_tasks_lifecycle.add_argument("--limit", type=int, default=50); p_tasks_lifecycle.set_defaults(func=cmd_tasks)
     p = sub.add_parser("observe"); observe_sub = p.add_subparsers(dest="observe_command", required=True)
     p_observe_snapshot = observe_sub.add_parser("snapshot"); p_observe_snapshot.add_argument("--limit", type=int, default=10); p_observe_snapshot.set_defaults(func=cmd_observe)
     p_observe_actions = observe_sub.add_parser("actions"); p_observe_actions.add_argument("--limit", type=int, default=10); p_observe_actions.set_defaults(func=cmd_observe)

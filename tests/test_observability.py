@@ -8,6 +8,7 @@ from agent.core.database import init_db
 from agent.core.decision import build_talk_decision
 from agent.core.goals import create_goal
 from agent.core.observability import action_failure_breakdown, action_observation, task_observation
+from agent.core.task_lifecycle import record_task_phase
 from agent.core.task_queue import enqueue_task, list_tasks
 from agent.renderer.codex_renderer import sanitize_decision_for_renderer
 from agent.tools.action_log import get_action_run, list_action_runs
@@ -68,11 +69,13 @@ def test_task_observation_explains_queue_waiting(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     goal_id = create_goal("Autonomous check", "check", goal_type="autonomous", status="active", priority=0.5, dedupe=False)
     task_id = enqueue_task("autonomous", goal_id=goal_id, task_kind="system_check", title="Autonomous check", source="test")
+    record_task_phase(task_id, "planning", "started", "checking context", queue_type="autonomous")
     task = next(row for row in list_tasks(limit=5) if row["id"] == task_id)
     observed = task_observation(task)
 
     assert "자율 스케줄러" in observed["waiting_reason"]
     assert "lab tick" in observed["next_step"]
+    assert observed["lifecycle"]["last_phase"] == "planning"
 
 
 def test_decision_trace_is_recorded_and_renderer_safe(monkeypatch, tmp_path):
@@ -105,6 +108,7 @@ def test_observe_cli_outputs_actions_tasks_and_snapshot(monkeypatch, tmp_path, c
     assert main(["observe", "snapshot", "--limit", "5"]) == 0
     snapshot = json.loads(capsys.readouterr().out)
     assert "action_failure_breakdown" in snapshot
+    assert "task_lifecycle_events" in snapshot
 
 
 def test_activity_summary_contains_observability_sections(monkeypatch, tmp_path):

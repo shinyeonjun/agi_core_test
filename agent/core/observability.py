@@ -5,6 +5,7 @@ from collections import Counter
 from typing import Any
 
 from agent.core.decisions import list_decisions
+from agent.core.task_lifecycle import latest_task_lifecycle_events, task_lifecycle_summary
 from agent.core.task_queue import list_tasks
 from agent.tools.action_log import list_action_runs
 
@@ -195,6 +196,7 @@ def task_observation(task: dict[str, Any]) -> dict[str, Any]:
     queue_type = str(task.get("queue_type") or "")
     result = task.get("result") if isinstance(task.get("result"), dict) else decode_json_value(task.get("result_json"), fallback={})
     reason = str((result or {}).get("reason") or "")
+    lifecycle = task_lifecycle_summary(task, limit=20)
     return {
         "id": task.get("id"),
         "queue_type": queue_type,
@@ -204,6 +206,13 @@ def task_observation(task: dict[str, Any]) -> dict[str, Any]:
         "approval_id": task.get("approval_id"),
         "waiting_reason": _task_waiting_reason(status, queue_type, task.get("approval_id"), reason),
         "next_step": _task_next_step(status, queue_type, task.get("approval_id"), reason),
+        "lifecycle": {
+            "completed_phases": lifecycle["completed_phases"],
+            "missing_phases": lifecycle["missing_phases"],
+            "last_phase": lifecycle["last_phase"],
+            "last_label": lifecycle["last_label"],
+            "last_summary": lifecycle["last_summary"],
+        },
     }
 
 
@@ -295,5 +304,6 @@ def observability_snapshot(limit: int = 10) -> dict[str, Any]:
         "actions": [action_observation(row) for row in actions],
         "action_failure_breakdown": action_failure_breakdown(actions),
         "tasks": [task_observation(row) for row in tasks],
+        "task_lifecycle_events": latest_task_lifecycle_events(limit),
         "decision_traces": latest_decision_traces(min(5, limit)),
     }

@@ -403,6 +403,20 @@ CREATE INDEX IF NOT EXISTS idx_task_queue_type_status ON task_queue(queue_type, 
 CREATE INDEX IF NOT EXISTS idx_task_queue_goal ON task_queue(goal_id);
 CREATE INDEX IF NOT EXISTS idx_task_queue_priority ON task_queue(priority);
 
+CREATE TABLE IF NOT EXISTS task_lifecycle_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    task_id INTEGER NOT NULL,
+    queue_type TEXT,
+    phase TEXT NOT NULL,
+    status TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    metadata_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_task_lifecycle_task ON task_lifecycle_events(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_lifecycle_phase ON task_lifecycle_events(phase);
+CREATE INDEX IF NOT EXISTS idx_task_lifecycle_created ON task_lifecycle_events(created_at);
+
 CREATE TABLE IF NOT EXISTS root_objectives (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
@@ -445,4 +459,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR REPLACE INTO schema_meta (key, value)
-VALUES ('schema_version', '0.9.1-alpha');
+VALUES ('schema_version', '0.10.0-alpha');

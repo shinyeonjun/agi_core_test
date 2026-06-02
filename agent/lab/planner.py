@@ -12,6 +12,7 @@ from agent.core.learner import create_reflection
 from agent.core.metrics import collect_metrics
 from agent.core.policy import PolicyEngine
 from agent.core.state import load_state
+from agent.core.task_lifecycle import record_task_phase
 from agent.core.task_queue import claim_next_task, claim_task, enqueue_task, finish_task, list_tasks, requeue_task, task_status_counts
 from agent.lab.proposals import create_action_proposal, has_recent_goal_command, list_action_proposals, normalize_command, proposal_status_counts, update_action_proposal_status
 from agent.tools.action_log import list_action_runs
@@ -350,22 +351,57 @@ def _handle_artifact_goal(goal: dict[str, Any], drives: dict[str, float]) -> dic
 
 def _finish_claimed_task(task: dict[str, Any], status: str, result: dict[str, Any]) -> dict[str, Any]:
     finish_status = "done" if status in {"user_goal_completed", "artifact_created", "completed", "done"} else "blocked" if status in {"blocked", "failed", "timeout"} else "skipped"
-    finish_task(int(task["id"]), finish_status, result)
     result["task_id"] = int(task["id"])
     result["queue_type"] = task.get("queue_type")
+    finish_task(int(task["id"]), finish_status, result)
     return result
 
 
 def _process_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
+    task_id = int(task["id"])
+    queue_type = str(task.get("queue_type") or "")
+    record_task_phase(
+        task_id,
+        "planning",
+        "started",
+        "작업 목표와 실행 방식을 확인하는 중",
+        queue_type=queue_type,
+        metadata={"goal_id": task.get("goal_id"), "task_kind": task.get("task_kind")},
+    )
     goal = _goal_from_task(task)
     if not goal:
         result = {"status": "blocked", "executed": False, "reason": "goal_not_found", "task_id": task.get("id")}
+        record_task_phase(task_id, "verifying", "failed", "연결된 목표를 찾지 못함", queue_type=queue_type, metadata=result)
         finish_task(int(task["id"]), "blocked", result)
         return result
 
     drives = compute_drives()
     artifact_result = _handle_artifact_goal(goal, drives)
     if artifact_result:
+        record_task_phase(
+            task_id,
+            "executing",
+            "artifact_created",
+            "워크스페이스 산출물을 생성함",
+            queue_type=queue_type,
+            metadata={"artifact_id": artifact_result.get("artifact_id"), "goal_id": goal.get("id")},
+        )
+        record_task_phase(
+            task_id,
+            "verifying",
+            "passed",
+            "산출물 생성과 목표 완료 상태를 확인함",
+            queue_type=queue_type,
+            metadata={"status": artifact_result.get("status"), "goal_id": goal.get("id")},
+        )
+        record_task_phase(
+            task_id,
+            "learned",
+            "recorded",
+            "작업 결과를 reflection으로 남김",
+            queue_type=queue_type,
+            metadata={"reflection_id": artifact_result.get("reflection_id")},
+        )
         return _finish_claimed_task(task, str(artifact_result.get("status")), artifact_result)
 
     proposals = plan_action_proposals(goal, limit=1)
@@ -379,6 +415,7 @@ def _process_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
             "proposal_id": proposals[0]["id"] if proposals else None,
             "goal_id": goal.get("id"),
         }
+        record_task_phase(task_id, "verifying", "requeued", "현재 모드에서 실행할 수 없어 재대기", queue_type=queue_type, metadata=result)
         requeue_task(int(task["id"]), result)
         log_event("lab", "task_requeued", result["reason"], result, 0.55)
         return {**result, "task_id": int(task["id"]), "queue_type": task.get("queue_type")}
@@ -392,19 +429,45 @@ def _process_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
             confidence=0.72,
         )
         result = {"status": "blocked", "executed": False, "reason": "no_approved_proposal", "profile": profile, "goal_id": goal.get("id"), "reflection_id": reflection_id}
+        record_task_phase(task_id, "verifying", "blocked", "정책을 통과한 실행안이 없어 차단함", queue_type=queue_type, metadata={"proposals": len(proposals), "goal_id": goal.get("id")})
+        record_task_phase(task_id, "learned", "recorded", "차단 사유를 reflection으로 남김", queue_type=queue_type, metadata={"reflection_id": reflection_id})
         return _finish_claimed_task(task, "blocked", result)
 
+    record_task_phase(
+        task_id,
+        "executing",
+        "started",
+        "승인된 로컬 action을 실행함",
+        queue_type=queue_type,
+        metadata={"proposal_id": approved["id"], "goal_id": goal.get("id"), "risk_level": approved.get("risk_level")},
+    )
     action_result = run_action(approved["command"], cwd=approved.get("cwd"), goal_id=approved.get("goal_id"))
     proposal_status = "executed" if action_result.get("executed") else "blocked"
     update_action_proposal_status(int(approved["id"]), proposal_status, str(action_result.get("reason") or action_result.get("status")))
     goal_done = False
     if action_result.get("executed") and approved.get("metadata", {}).get("step"):
         goal_done = _persist_goal_step(goal, str(approved["metadata"]["step"]))
+    record_task_phase(
+        task_id,
+        "verifying",
+        "passed" if action_result.get("executed") else "blocked",
+        "action 결과와 목표 진행 상태를 확인함",
+        queue_type=queue_type,
+        metadata={"action_id": action_result.get("id"), "status": action_result.get("status"), "goal_done": goal_done},
+    )
     reflection_id = create_reflection(
         "Task worker executed one approved local action and recorded the result.",
         goal_id=approved.get("goal_id"),
         learned={"queue_type": task.get("queue_type"), "task_id": task.get("id"), "proposal_id": approved["id"], "action_id": action_result.get("id"), "status": action_result.get("status")},
         confidence=0.8,
+    )
+    record_task_phase(
+        task_id,
+        "learned",
+        "recorded",
+        "action 실행 결과를 reflection으로 남김",
+        queue_type=queue_type,
+        metadata={"reflection_id": reflection_id, "action_id": action_result.get("id")},
     )
     result = {
         "status": action_result.get("status"),

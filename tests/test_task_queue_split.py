@@ -9,6 +9,7 @@ from agent.core.autonomy import set_autonomy_profile
 from agent.core.database import connect, init_db
 from agent.core.goals import create_goal, list_goals
 from agent.core.pipeline import run_talk
+from agent.core.task_lifecycle import list_task_lifecycle, task_lifecycle_summary
 from agent.core.task_queue import claim_task, doctor_tasks, enqueue_task, list_tasks, task_status_counts
 from agent.lab.planner import run_lab_tick, run_lab_tick_if_enabled, run_user_task, sync_open_goals_to_tasks
 
@@ -78,6 +79,27 @@ def test_user_worker_processes_specific_user_task(monkeypatch, tmp_path):
     assert result["status"] == "user_goal_completed"
     assert task["status"] == "done"
     assert result["artifact_id"] is not None
+    phases = [row["phase"] for row in list_task_lifecycle(task_id)]
+    assert "queued" in phases
+    assert "planning" in phases
+    assert "executing" in phases
+    assert "verifying" in phases
+    assert "reporting" in phases
+    assert "learned" in phases
+
+
+def test_task_lifecycle_summary_explains_last_phase(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    goal_id = create_goal("Lifecycle task", "note", goal_type="user_directed", status="active", priority=0.98, metadata={"priority_owner": "user", "task_kind": "task_note", "raw_user_text": "note"}, dedupe=False)
+    task_id = enqueue_task("user", goal_id=goal_id, task_kind="task_note", title="Lifecycle task", source="test", priority=0.98)
+
+    run_user_task(task_id)
+    task = next(row for row in list_tasks(limit=10, queue_type="user") if row["id"] == task_id)
+    summary = task_lifecycle_summary(task)
+
+    assert summary["last_phase"] in {"reporting", "learned"}
+    assert "queued" in summary["completed_phases"]
+    assert summary["events"]
 
 
 def test_autonomous_generation_ignores_open_user_goal(monkeypatch, tmp_path):
@@ -104,6 +126,12 @@ def test_tasks_cli(monkeypatch, tmp_path, capsys):
     assert main(["tasks", "list", "--queue-type", "user"]) == 0
     rows = json.loads(capsys.readouterr().out)
     assert rows[0]["queue_type"] == "user"
+
+    task_id = rows[0]["id"]
+    assert main(["tasks", "lifecycle", str(task_id)]) == 0
+    lifecycle = json.loads(capsys.readouterr().out)
+    assert lifecycle["task_id"] == task_id
+    assert lifecycle["completed_phases"] == ["queued"]
 
 
 def test_approval_resume_moves_user_task_to_queue(monkeypatch, tmp_path):

@@ -7,6 +7,7 @@ from typing import Any, Literal
 from agent.config.defaults import now_kst
 from agent.core.database import connect, init_db
 from agent.core.events import log_event
+from agent.core.task_lifecycle import record_task_phase
 
 QueueType = Literal["user", "autonomous"]
 TaskStatus = Literal["queued", "running", "done", "blocked", "waiting_approval", "skipped"]
@@ -85,6 +86,14 @@ def enqueue_task(
         conn.commit()
         task_id = int(cur.lastrowid)
     log_event("task_queue", "task_enqueued", f"{queue_type}:{task_kind}", {"task_id": task_id, "goal_id": goal_id, "status": status}, 0.7 if queue_type == "user" else 0.55)
+    record_task_phase(
+        task_id,
+        "queued",
+        status,
+        "사용자 작업 큐에 등록됨" if queue_type == "user" else "자율 작업 큐에 등록됨",
+        queue_type=queue_type,
+        metadata={"goal_id": goal_id, "task_kind": task_kind, "source": source},
+    )
     return task_id
 
 
@@ -126,6 +135,14 @@ def _claim_where(where_sql: str, params: tuple[Any, ...]) -> dict[str, Any] | No
     task["status"] = "running"
     task["claimed_at"] = ts
     task["attempts"] = int(task.get("attempts") or 0) + 1
+    record_task_phase(
+        int(task["id"]),
+        "planning",
+        "claimed",
+        "작업자가 큐에서 작업을 가져옴",
+        queue_type=task.get("queue_type"),
+        metadata={"attempts": task["attempts"], "goal_id": task.get("goal_id")},
+    )
     return _decode(task)
 
 
@@ -163,6 +180,14 @@ def finish_task(task_id: int, status: TaskStatus, result: dict[str, Any] | None 
         ok = cur.rowcount > 0
     if ok:
         log_event("task_queue", f"task_{status}", str(task_id), {"task_id": task_id, "result": result or {}}, 0.7)
+        record_task_phase(
+            task_id,
+            "reporting",
+            status,
+            "작업 결과를 큐에 기록함",
+            queue_type=(result or {}).get("queue_type"),
+            metadata={"result_status": (result or {}).get("status"), "reason": (result or {}).get("reason")},
+        )
     return ok
 
 
@@ -184,7 +209,10 @@ def requeue_task(task_id: int, result: dict[str, Any] | None = None) -> bool:
                 (now_kst(), now_kst(), json.dumps({**payload, "reason": "max_attempts_exceeded"}, ensure_ascii=False), task_id),
             )
             conn.commit()
-            return cur.rowcount > 0
+            ok = cur.rowcount > 0
+            if ok:
+                record_task_phase(task_id, "reporting", "blocked", "최대 재시도 초과로 작업 차단", metadata=payload)
+            return ok
         cur = conn.execute(
             """
             UPDATE task_queue
@@ -194,7 +222,10 @@ def requeue_task(task_id: int, result: dict[str, Any] | None = None) -> bool:
             (now_kst(), json.dumps(payload, ensure_ascii=False), task_id),
         )
         conn.commit()
-        return cur.rowcount > 0
+        ok = cur.rowcount > 0
+    if ok:
+        record_task_phase(task_id, "queued", "requeued", "작업을 다시 큐에 넣음", metadata=payload)
+    return ok
 
 
 def resume_tasks_for_approval(approval_id: int) -> int:
