@@ -10,7 +10,7 @@ from agent.core.metrics import collect_metrics
 from agent.core.self_map import self_map_brief
 
 ALLOWED_CODEX_WORK_SANDBOXES = {"read-only", "workspace-write"}
-ALLOWED_CODEX_WORK_BACKENDS = {"codex", "lazycodex"}
+ALLOWED_CODEX_WORK_BACKENDS = {"codex", "native_loop"}
 
 
 def _status(enabled: bool, *, available: bool = True) -> str:
@@ -21,15 +21,6 @@ def _status(enabled: bool, *, available: bool = True) -> str:
 
 def _codex_available() -> bool:
     return shutil.which("codex") is not None
-
-
-def _lazycodex_available() -> bool:
-    if env_bool("AGENT_LAZYCODEX_AVAILABLE_OVERRIDE", False):
-        return True
-    if shutil.which("omo") or shutil.which("lazycodex") or shutil.which("lazycodex-ai"):
-        return True
-    home = os.getenv("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
-    return os.path.isdir(os.path.join(home, "plugins", "cache", "sisyphuslabs", "omo"))
 
 
 def codex_worker_enabled() -> bool:
@@ -57,8 +48,6 @@ def codex_worker_blockers(profile: str | None = None) -> list[str]:
     backend = codex_work_backend()
     if backend not in ALLOWED_CODEX_WORK_BACKENDS:
         blockers.append("invalid_codex_work_backend")
-    if backend == "lazycodex" and not _lazycodex_available():
-        blockers.append("lazycodex_unavailable")
     sandbox = codex_work_sandbox()
     if sandbox not in ALLOWED_CODEX_WORK_SANDBOXES:
         blockers.append("invalid_codex_work_sandbox")
@@ -114,10 +103,10 @@ def collect_capability_map() -> dict[str, Any]:
                 "sandbox": codex_work_sandbox(),
             },
             {
-                "name": "lazycodex_work_backend",
-                "status": _status(codex_work_backend() == "lazycodex" and not worker_blockers, available=_lazycodex_available()),
-                "description": "Optional LazyCodex/OMO ultrawork backend for long code tasks, gated by Core policy and worktree isolation",
-                "blockers": worker_blockers if codex_work_backend() == "lazycodex" else [],
+                "name": "native_work_loop_backend",
+                "status": _status(codex_work_backend() == "native_loop" and not worker_blockers, available=codex_available),
+                "description": "Core-owned code work loop with worktree isolation, evidence, verification, retry, and user-task reporting",
+                "blockers": worker_blockers if codex_work_backend() == "native_loop" else [],
             },
         ],
         "approval_required": [

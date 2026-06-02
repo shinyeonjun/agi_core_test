@@ -181,18 +181,15 @@ AGENT_CODEX_WORK_MODEL=gpt-5.5
 AGENT_CODEX_WORK_REASONING=medium
 ```
 
-Optional long-running code work can use LazyCodex/OMO as the work backend. Core still owns policy, memory, Discord reporting, and unsafe-diff checks; LazyCodex is only the development worker.
+Optional long-running code work can use Core's native work loop as the work backend. Core owns policy, memory, Discord reporting, unsafe-diff checks, worktree isolation, evidence collection, verification, and retry.
 
 ```bash
-# install LazyCodex/OMO Codex Light separately, then enable it:
-AGENT_CODEX_WORK_BACKEND=lazycodex
-AGENT_LAZYCODEX_MODE=ulw-loop
-AGENT_LAZYCODEX_WORK_TIMEOUT=600
-AGENT_LAZYCODEX_WORKTREE=1
-
-# keep OMO telemetry off for Core-managed worker runs:
-OMO_CODEX_DISABLE_POSTHOG=1
-OMO_CODEX_SEND_ANONYMOUS_TELEMETRY=0
+# user-triggered code work runs through a Core-owned loop:
+AGENT_CODEX_WORK_BACKEND=native_loop
+AGENT_WORK_LOOP_TIMEOUT=600
+AGENT_WORK_LOOP_ITERATIONS=2
+AGENT_WORK_LOOP_WORKTREE=1
+AGENT_WORK_LOOP_VERIFY_COMMANDS="python -m pytest -q"
 ```
 
-LazyCodex work runs in a separate git worktree by default under the agent workspace. It should not be used to bypass Core approvals, secret handling, or destructive-action policy.
+Native work-loop runs use a separate git worktree by default under the agent workspace. This keeps user-triggered code work separate from autonomous study/self-improvement loops while still writing evidence, changed-file summaries, verification output, and a Discord-facing report.

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 import time
@@ -118,17 +119,26 @@ def _blocked_result(reason: str, *, goal_id: int | None, task_id: int | None, **
     return result
 
 
-def _lazycodex_timeout() -> int:
-    return max(30, min(3600, env_int("AGENT_LAZYCODEX_WORK_TIMEOUT", env_int("AGENT_CODEX_WORK_TIMEOUT", 600))))
+def _work_loop_timeout() -> int:
+    return max(30, min(3600, env_int("AGENT_WORK_LOOP_TIMEOUT", env_int("AGENT_CODEX_WORK_TIMEOUT", 600))))
 
 
-def _lazycodex_mode() -> str:
-    value = os.getenv("AGENT_LAZYCODEX_MODE", "ulw-loop").strip().lower()
-    return value if value in {"ulw-loop", "ultrawork"} else "ulw-loop"
+def _work_loop_iterations() -> int:
+    return max(1, min(5, env_int("AGENT_WORK_LOOP_ITERATIONS", 2)))
 
 
-def _lazycodex_worktree_enabled() -> bool:
-    return env_bool("AGENT_LAZYCODEX_WORKTREE", True)
+def _work_loop_worktree_enabled() -> bool:
+    return env_bool("AGENT_WORK_LOOP_WORKTREE", True)
+
+
+def _work_loop_verify_commands() -> list[str]:
+    value = os.getenv("AGENT_WORK_LOOP_VERIFY_COMMANDS")
+    if value is None:
+        return ["python -m pytest -q"]
+    stripped = value.strip()
+    if stripped.lower() in {"", "0", "false", "off", "none", "skip"}:
+        return []
+    return [part.strip() for part in stripped.split(";") if part.strip()]
 
 
 def _worker_prompt(user_request: str, *, goal_id: int | None, task_id: int | None) -> str:
@@ -154,19 +164,28 @@ def _worker_prompt(user_request: str, *, goal_id: int | None, task_id: int | Non
     )
 
 
-def _lazycodex_prompt(user_request: str, *, goal_id: int | None, task_id: int | None, worktree: Path) -> str:
-    mode = _lazycodex_mode()
-    trigger = "ulw-loop" if mode == "ulw-loop" else "ultrawork"
+def _native_loop_prompt(
+    user_request: str,
+    *,
+    goal_id: int | None,
+    task_id: int | None,
+    worktree: Path,
+    iteration: int,
+    max_iterations: int,
+    previous_evidence: list[dict[str, Any]],
+) -> str:
+    previous = json.dumps(previous_evidence[-6:], ensure_ascii=False, indent=2) if previous_evidence else "[]"
     return "\n".join(
         [
-            f"{trigger}",
+            "Core Native Work Loop",
             "",
-            "You are LazyCodex running as Agent Core's code-work backend.",
-            "Agent Core is the owner, policy gate, memory layer, and Discord control plane. You are only the development worker.",
+            "You are Agent Core's code-work executor. Core owns policy, memory, Discord reporting, task queues, and final safety checks.",
+            "This is a user-triggered work run. Autonomous study/self-improvement loops are separate and must not be mixed into this response.",
             "",
             "Mission:",
-            "- Finish the requested code work as far as safely possible inside the given git worktree.",
-            "- Plan, implement, verify, and leave observable evidence.",
+            "- Finish the requested code work as far as safely possible inside the given repository/worktree.",
+            "- Plan, implement, verify, and leave observable evidence for Core.",
+            "- If verification fails, use the previous evidence to make one focused repair pass.",
             "- Prefer small, scoped changes over broad rewrites.",
             "",
             "Core safety boundary:",
@@ -177,13 +196,17 @@ def _lazycodex_prompt(user_request: str, *, goal_id: int | None, task_id: int | 
             "- If the task needs a forbidden action, stop and report the blocker with evidence.",
             "",
             "Verification requirement:",
-            "- Run relevant tests or checks when feasible.",
-            "- If tests cannot run, explain the exact blocker.",
+            "- Run relevant tests or checks when feasible, but Core may run its own verification after your pass.",
+            "- If tests cannot run, explain the exact blocker and what should be run next.",
             "- Completion requires changed-file summary, verification commands, and remaining risks.",
             "",
             f"goal_id: {goal_id}",
             f"task_id: {task_id}",
             f"worktree: {worktree}",
+            f"iteration: {iteration}/{max_iterations}",
+            "",
+            "Previous Core evidence:",
+            previous,
             "",
             "User request:",
             user_request[:4000],
@@ -193,13 +216,13 @@ def _lazycodex_prompt(user_request: str, *, goal_id: int | None, task_id: int | 
     )
 
 
-def _create_lazycodex_worktree(root: Path, task_id: int | None) -> tuple[Path, str | None, str | None]:
-    if not _lazycodex_worktree_enabled():
+def _create_native_worktree(root: Path, task_id: int | None) -> tuple[Path, str | None, str | None]:
+    if not _work_loop_worktree_enabled():
         return root, None, None
     if not _is_git_repo(root):
-        raise RuntimeError("git_repo_required_for_lazycodex_worktree")
-    branch = f"codex/lazycodex-task-{task_id or 'manual'}-{uuid4().hex[:8]}"
-    path = workspace_root() / "tasks" / "lazycodex-worktrees" / branch.replace("/", "-")
+        raise RuntimeError("git_repo_required_for_native_work_loop")
+    branch = f"codex/native-loop-task-{task_id or 'manual'}-{uuid4().hex[:8]}"
+    path = workspace_root() / "tasks" / "native-worktrees" / branch.replace("/", "-")
     path.parent.mkdir(parents=True, exist_ok=True)
     completed = _git(["worktree", "add", "-b", branch, str(path), "HEAD"], root, timeout=30)
     if completed.returncode != 0:
@@ -243,79 +266,141 @@ def _run_codex_exec_backend(root: Path, user_request: str, *, goal_id: int | Non
             output_path.unlink()
 
 
-def _run_lazycodex_backend(root: Path, user_request: str, *, goal_id: int | None, task_id: int | None, sandbox: str) -> dict[str, Any]:
-    worktree, branch, worktree_status = _create_lazycodex_worktree(root, task_id)
-    config = codex_exec_config("WORK", default_reasoning="high", default_timeout=120)
-    timeout_seconds = _lazycodex_timeout()
-    output_path = Path(tempfile.gettempdir()) / f"agent_core_lazycodex_work_{os.getpid()}_{uuid4().hex}.md"
-    env = os.environ.copy()
-    env.setdefault("OMO_CODEX_DISABLE_POSTHOG", "1")
-    env.setdefault("OMO_CODEX_SEND_ANONYMOUS_TELEMETRY", "0")
-    args = [
-        *codex_exec_args(config),
-        "--sandbox",
-        sandbox,
-        "--skip-git-repo-check",
-        "--ephemeral",
-        "--output-last-message",
-        str(output_path),
-        _lazycodex_prompt(user_request, goal_id=goal_id, task_id=task_id, worktree=worktree),
-    ]
+def _run_verification_command(root: Path, command: str, *, timeout: int) -> dict[str, Any]:
+    try:
+        args = shlex.split(command)
+    except ValueError as exc:
+        return {"command": command, "returncode": 127, "stdout": "", "stderr": f"parse_error:{type(exc).__name__}"}
+    if not args:
+        return {"command": command, "returncode": 0, "stdout": "", "stderr": "skipped_empty_command"}
     try:
         completed = subprocess.run(
             args,
-            cwd=worktree,
-            env=env,
+            cwd=root,
             text=True,
             capture_output=True,
             stdin=subprocess.DEVNULL,
-            timeout=timeout_seconds,
+            timeout=timeout,
             check=False,
         )
-        report = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else (completed.stdout or "").strip()
         return {
+            "command": command,
             "returncode": completed.returncode,
-            "report": report,
-            "stderr": completed.stderr or "",
-            "model": config.model,
-            "reasoning_effort": config.reasoning_effort,
-            "timeout_seconds": timeout_seconds,
-            "worktree": str(worktree),
-            "worktree_branch": branch,
-            "worktree_status": worktree_status,
-            "mode": _lazycodex_mode(),
+            "stdout": _redact(completed.stdout or "", 1600),
+            "stderr": _redact(completed.stderr or "", 1600),
         }
     except subprocess.TimeoutExpired as exc:
-        report = exc.stdout if isinstance(exc.stdout, str) else ""
-        stderr = exc.stderr if isinstance(exc.stderr, str) else "timeout"
         return {
+            "command": command,
             "returncode": 124,
-            "report": report,
-            "stderr": stderr,
-            "model": config.model,
-            "reasoning_effort": config.reasoning_effort,
-            "timeout_seconds": timeout_seconds,
-            "worktree": str(worktree),
-            "worktree_branch": branch,
-            "worktree_status": worktree_status,
-            "mode": _lazycodex_mode(),
+            "stdout": _redact(exc.stdout if isinstance(exc.stdout, str) else "", 1600),
+            "stderr": _redact(exc.stderr if isinstance(exc.stderr, str) else "timeout", 1600),
         }
     except Exception as exc:
-        return {
-            "returncode": 127,
-            "report": "",
-            "stderr": type(exc).__name__,
-            "model": config.model,
-            "reasoning_effort": config.reasoning_effort,
-            "timeout_seconds": timeout_seconds,
-            "worktree": str(worktree),
-            "worktree_branch": branch,
-            "worktree_status": worktree_status,
-            "mode": _lazycodex_mode(),
+        return {"command": command, "returncode": 127, "stdout": "", "stderr": type(exc).__name__}
+
+
+def _run_native_loop_backend(root: Path, user_request: str, *, goal_id: int | None, task_id: int | None, sandbox: str) -> dict[str, Any]:
+    worktree, branch, worktree_status = _create_native_worktree(root, task_id)
+    config = codex_exec_config("WORK", default_reasoning="high", default_timeout=120)
+    timeout_seconds = _work_loop_timeout()
+    max_iterations = _work_loop_iterations()
+    verify_commands = _work_loop_verify_commands()
+    evidence: list[dict[str, Any]] = []
+    last_report = ""
+    last_stderr = ""
+    last_returncode = 127
+    completed_successfully = False
+
+    for iteration in range(1, max_iterations + 1):
+        output_path = Path(tempfile.gettempdir()) / f"agent_core_native_work_{os.getpid()}_{uuid4().hex}.md"
+        args = [
+            *codex_exec_args(config),
+            "--sandbox",
+            sandbox,
+            "--skip-git-repo-check",
+            "--ephemeral",
+            "--output-last-message",
+            str(output_path),
+            _native_loop_prompt(
+                user_request,
+                goal_id=goal_id,
+                task_id=task_id,
+                worktree=worktree,
+                iteration=iteration,
+                max_iterations=max_iterations,
+                previous_evidence=evidence,
+            ),
+        ]
+        started = time.monotonic()
+        try:
+            completed = subprocess.run(
+                args,
+                cwd=worktree,
+                text=True,
+                capture_output=True,
+                stdin=subprocess.DEVNULL,
+                timeout=timeout_seconds,
+                check=False,
+            )
+            last_report = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else (completed.stdout or "").strip()
+            last_stderr = completed.stderr or ""
+            last_returncode = completed.returncode
+        except subprocess.TimeoutExpired as exc:
+            last_report = exc.stdout if isinstance(exc.stdout, str) else ""
+            last_stderr = exc.stderr if isinstance(exc.stderr, str) else "timeout"
+            last_returncode = 124
+        except Exception as exc:
+            last_report = ""
+            last_stderr = type(exc).__name__
+            last_returncode = 127
+        finally:
+            if output_path.exists():
+                output_path.unlink()
+
+        status_lines = _git_status(worktree)
+        unsafe_files = _unsafe_changed_files(status_lines)
+        verification = [
+            _run_verification_command(worktree, command, timeout=max(30, min(300, timeout_seconds // 2)))
+            for command in verify_commands
+        ]
+        verification_failed = any(item.get("returncode") not in {0, None} for item in verification)
+        iteration_evidence = {
+            "phase": "iteration",
+            "iteration": iteration,
+            "codex_returncode": last_returncode,
+            "duration_ms": int((time.monotonic() - started) * 1000),
+            "changed_files": status_lines,
+            "unsafe_changed_files": unsafe_files,
+            "verification": verification,
         }
-    finally:
-        if output_path.exists():
-            output_path.unlink()
+        evidence.append(iteration_evidence)
+        if unsafe_files:
+            last_returncode = 126
+            break
+        if last_returncode == 0 and not verification_failed:
+            completed_successfully = True
+            break
+        if last_returncode == 0 and verification_failed:
+            last_returncode = 125
+
+    return {
+        "returncode": 0 if completed_successfully else last_returncode,
+        "report": last_report,
+        "stderr": last_stderr,
+        "model": config.model,
+        "reasoning_effort": config.reasoning_effort,
+        "timeout_seconds": timeout_seconds,
+        "worktree": str(worktree),
+        "worktree_branch": branch,
+        "worktree_status": worktree_status,
+        "mode": "native_loop",
+        "iterations_used": len(evidence),
+        "max_iterations": max_iterations,
+        "verification_commands": verify_commands,
+        "evidence_ledger": evidence,
+        "integration_status": "worktree_pending_review" if branch else "direct_workspace_changes",
+    }
 
 
 def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: int | None = None) -> dict[str, Any]:
@@ -347,8 +432,8 @@ def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: in
     before_status = _git_status(root)
     start = time.monotonic()
     try:
-        if backend == "lazycodex":
-            backend_result = _run_lazycodex_backend(root, user_request, goal_id=goal_id, task_id=task_id, sandbox=sandbox)
+        if backend == "native_loop":
+            backend_result = _run_native_loop_backend(root, user_request, goal_id=goal_id, task_id=task_id, sandbox=sandbox)
         else:
             backend_result = _run_codex_exec_backend(root, user_request, goal_id=goal_id, task_id=task_id, sandbox=sandbox)
     except Exception as exc:
@@ -378,7 +463,7 @@ def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: in
         "sandbox": sandbox,
         "policy": {"risk_level": policy.risk_level, "requires_approval": policy.requires_approval, "denied": policy.denied, "matched_rules": policy.matched_rules},
     }
-    for key in ("worktree", "worktree_branch", "worktree_status", "mode", "backend_error"):
+    for key in ("worktree", "worktree_branch", "worktree_status", "mode", "backend_error", "iterations_used", "max_iterations", "verification_commands", "evidence_ledger", "integration_status"):
         if backend_result.get(key) is not None:
             result[key] = backend_result[key]
     artifact = write_text_artifact(

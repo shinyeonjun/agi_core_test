@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 from agent.cli.agentctl import main
 from agent.core.autonomy import set_autonomy_profile
-from agent.core.capabilities import collect_capability_map
 from agent.core.database import init_db
 from agent.core.decision import build_talk_decision
 from agent.core.goals import create_goal, list_goals
@@ -146,16 +145,16 @@ def test_codex_worker_marks_unsafe_changed_files_blocked(monkeypatch, tmp_path):
     assert result["unsafe_changed_files"] == [".env"]
 
 
-def test_lazycodex_backend_uses_worktree_and_disables_telemetry(monkeypatch, tmp_path):
+def test_native_loop_backend_uses_worktree_and_verification(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     set_autonomy_profile("full_device_lab")
     monkeypatch.setenv("AGENT_CODEX_WORKER_ENABLED", "1")
-    monkeypatch.setenv("AGENT_CODEX_WORK_BACKEND", "lazycodex")
-    monkeypatch.setenv("AGENT_LAZYCODEX_AVAILABLE_OVERRIDE", "1")
-    monkeypatch.setenv("AGENT_LAZYCODEX_WORK_TIMEOUT", "300")
+    monkeypatch.setenv("AGENT_CODEX_WORK_BACKEND", "native_loop")
+    monkeypatch.setenv("AGENT_WORK_LOOP_TIMEOUT", "300")
+    monkeypatch.setenv("AGENT_WORK_LOOP_VERIFY_COMMANDS", "python -m pytest -q")
     monkeypatch.setattr("agent.core.capabilities.shutil.which", lambda name: "codex" if name == "codex" else None)
     (tmp_path / "repo" / ".git").mkdir()
-    calls = {"codex": None, "worktree": None}
+    calls = {"codex": None, "worktree": None, "verify": None}
 
     def fake_run(args, **kwargs):
         if args[:2] == ["git", "rev-parse"]:
@@ -167,16 +166,17 @@ def test_lazycodex_backend_uses_worktree_and_disables_telemetry(monkeypatch, tmp
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if args[:2] == ["git", "status"]:
             return SimpleNamespace(returncode=0, stdout=" M agent/core/example.py\n", stderr="")
+        if args[:4] == ["python", "-m", "pytest", "-q"]:
+            calls["verify"] = {"args": args, "cwd": kwargs["cwd"], "timeout": kwargs["timeout"]}
+            return SimpleNamespace(returncode=0, stdout="1 passed\n", stderr="")
         assert args[:2] == ["codex", "exec"]
-        calls["codex"] = {"args": args, "cwd": kwargs["cwd"], "env": kwargs["env"], "timeout": kwargs["timeout"]}
-        assert kwargs["env"]["OMO_CODEX_DISABLE_POSTHOG"] == "1"
-        assert kwargs["env"]["OMO_CODEX_SEND_ANONYMOUS_TELEMETRY"] == "0"
+        calls["codex"] = {"args": args, "cwd": kwargs["cwd"], "timeout": kwargs["timeout"]}
         assert kwargs["timeout"] == 300
-        assert "ulw-loop" in args[-1]
-        assert "Agent Core is the owner" in args[-1]
+        assert "Core Native Work Loop" in args[-1]
+        assert "Autonomous study/self-improvement loops are separate" in args[-1]
         output_path = args[args.index("--output-last-message") + 1]
         with open(output_path, "w", encoding="utf-8") as handle:
-            handle.write("LazyCodex 작업 완료. 테스트 통과.")
+            handle.write("네이티브 작업 루프 완료. 테스트 통과.")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr("agent.lab.codex_worker.subprocess.run", fake_run)
@@ -186,28 +186,61 @@ def test_lazycodex_backend_uses_worktree_and_disables_telemetry(monkeypatch, tmp
     result = run_codex_work("Core worker backend 개선해줘", goal_id=1, task_id=2)
 
     assert result["status"] == "codex_work_completed"
-    assert result["backend"] == "lazycodex"
-    assert result["mode"] == "ulw-loop"
-    assert result["worktree_branch"].startswith("codex/lazycodex-task-2-")
+    assert result["backend"] == "native_loop"
+    assert result["mode"] == "native_loop"
+    assert result["worktree_branch"].startswith("codex/native-loop-task-2-")
     assert calls["codex"]["cwd"] == Path(result["worktree"])
+    assert calls["verify"]["cwd"] == Path(result["worktree"])
     assert calls["worktree"] == result["worktree"]
     assert result["changed_files"] == [" M agent/core/example.py"]
+    assert result["iterations_used"] == 1
+    assert result["verification_commands"] == ["python -m pytest -q"]
+    assert result["integration_status"] == "worktree_pending_review"
+    assert result["evidence_ledger"][0]["verification"][0]["returncode"] == 0
 
 
-def test_lazycodex_backend_blocks_when_unavailable(monkeypatch, tmp_path):
+def test_native_loop_retries_after_failed_verification(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     set_autonomy_profile("full_device_lab")
     monkeypatch.setenv("AGENT_CODEX_WORKER_ENABLED", "1")
-    monkeypatch.setenv("AGENT_CODEX_WORK_BACKEND", "lazycodex")
+    monkeypatch.setenv("AGENT_CODEX_WORK_BACKEND", "native_loop")
+    monkeypatch.setenv("AGENT_WORK_LOOP_ITERATIONS", "2")
+    monkeypatch.setenv("AGENT_WORK_LOOP_VERIFY_COMMANDS", "python -m pytest -q")
+    monkeypatch.setattr("agent.core.capabilities.shutil.which", lambda name: "codex" if name == "codex" else None)
+    (tmp_path / "repo" / ".git").mkdir()
+    calls = {"codex": 0, "verify": 0}
 
-    def fake_which(name):
-        return "codex" if name == "codex" else None
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "rev-parse"]:
+            return SimpleNamespace(returncode=0, stdout="true\n", stderr="")
+        if args[:3] == ["git", "worktree", "add"]:
+            Path(args[-2]).mkdir(parents=True, exist_ok=True)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if args[:2] == ["git", "status"]:
+            return SimpleNamespace(returncode=0, stdout=" M agent/core/example.py\n", stderr="")
+        if args[:4] == ["python", "-m", "pytest", "-q"]:
+            calls["verify"] += 1
+            if calls["verify"] == 1:
+                return SimpleNamespace(returncode=1, stdout="", stderr="failed")
+            return SimpleNamespace(returncode=0, stdout="1 passed\n", stderr="")
+        assert args[:2] == ["codex", "exec"]
+        calls["codex"] += 1
+        if calls["codex"] == 2:
+            assert '"returncode": 1' in args[-1]
+        output_path = args[args.index("--output-last-message") + 1]
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write(f"iteration {calls['codex']} report")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("agent.core.capabilities.shutil.which", fake_which)
+    monkeypatch.setattr("agent.lab.codex_worker.subprocess.run", fake_run)
 
     from agent.lab.codex_worker import run_codex_work
 
-    result = run_codex_work("코드 고쳐줘", goal_id=1, task_id=2)
+    result = run_codex_work("테스트 실패까지 고쳐줘", goal_id=1, task_id=2)
 
-    assert result["status"] == "codex_work_blocked"
-    assert "lazycodex_unavailable" in result["blockers"]
+    assert result["status"] == "codex_work_completed"
+    assert calls["codex"] == 2
+    assert calls["verify"] == 2
+    assert result["iterations_used"] == 2
+    assert result["evidence_ledger"][0]["verification"][0]["returncode"] == 1
+    assert result["evidence_ledger"][1]["verification"][0]["returncode"] == 0
