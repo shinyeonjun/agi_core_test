@@ -7,11 +7,13 @@ from agent.renderer.fallback_renderer import render
 from agent.renderer.validator import validate_codex_output, validate_output
 
 
-def test_fallback_renderer_contains_contract_tokens():
+def test_fallback_renderer_is_safe_failure_message():
     decision = {"version": "0.17", "selected_goal": {"id": 1, "title": "Answer user input"}, "drive_scores": {"completion": 0.2}, "policy_summary": {"risk_level": "low", "requires_approval": False}, "relevant_memories": [], "relevant_skills": [], "renderer": "fallback"}
     text = render(decision)
-    assert "v0.17" in text
-    assert "Core" in text
+    assert "답변 렌더러" in text
+    assert "selected_goal" not in text
+    assert "drive_scores" not in text
+    assert "fallback renderer" not in text
 
 
 def test_validator_rejects_agi_claim():

@@ -95,7 +95,8 @@ def test_route_chat_hides_fallback_renderer():
     output = "\n".join(route_discord_event(event, config()))
     assert "fallback renderer" not in output
     assert "goal:" not in output
-    assert "\uc751" in output
+    assert "답변 렌더러" in output
+    assert "지어내진" in output
 
 
 def test_format_chat_reply_prefers_core_renderer_text():
@@ -127,4 +128,4 @@ def test_format_chat_reply_rejects_internal_renderer_text():
 
     assert "selected_goal_id" not in output
     assert "user_goal_created" not in output
-    assert "질문" in output
+    assert "답변 생성" in output

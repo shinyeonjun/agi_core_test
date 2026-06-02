@@ -20,7 +20,7 @@ def test_state_and_memory_smoke():
 def test_talk_pipeline_creates_v017_output(monkeypatch):
     monkeypatch.setenv("AGENT_LANGUAGE_ENGINE", "rule")
     result = run_talk("Core next step?")
-    assert "v0.17" in result["text"]
+    assert "답변 렌더러" in result["text"]
     assert result["decision"]["version"] == "0.17"
     assert result["validation"]["ok"] is True
     assert result["decision"]["decision_schema"]["kind"] == "talk_response"

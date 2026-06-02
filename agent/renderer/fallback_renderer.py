@@ -4,41 +4,12 @@ from typing import Any
 
 
 def render(decision: dict[str, Any]) -> str:
-    memories = decision.get("relevant_memories") or decision.get("selected_memories", [])
-    drives = decision.get("drive_scores", {})
-    top_drive = max(drives.items(), key=lambda item: item[1])[0] if drives else "unknown"
     policy = decision.get("policy_summary", {})
-    skills = decision.get("relevant_skills", [])
-    version = str(decision.get("version", "v0.17"))
-    if not version.startswith("v"):
-        version = f"v{version}"
-    goal = decision.get("selected_goal") or {"id": decision.get("selected_goal_id"), "title": "unknown"}
-    lines = [
-        f"{version} Core fallback renderer response.",
-        "Core saved the input as an event and used memory/skill/goal/state for this answer.",
-        "",
-        f"- goal: #{goal.get('id')} {goal.get('title')}",
-        f"- renderer: {decision.get('renderer', 'fallback')}",
-        f"- top_drive: {top_drive}",
-        f"- policy: {policy.get('risk_level', decision.get('risk_level'))}, approval={policy.get('requires_approval', False)}",
-        f"- related_memories: {len(memories)}",
-        f"- related_skills: {len(skills)}",
-        "",
-    ]
-    if memories:
-        lines.append("Relevant memories:")
-        for memory in memories[:3]:
-            score = memory.get("score")
-            suffix = f" score={score}" if score is not None else ""
-            lines.append(f"- #{memory['id']} {memory['title']}{suffix}")
-        lines.append("")
-    if skills:
-        lines.append("Relevant skills:")
-        for skill in skills[:3]:
-            lines.append(f"- {skill['name']} confidence={skill.get('confidence')}")
-        lines.append("")
     if policy.get("denied"):
-        lines.append("The request matched a risky pattern, so Core separated it into policy/approval flow and did not execute it.")
-    else:
-        lines.append("This Core is a stateful digital-agent runtime. It does not claim AGI; it grows testable components for memory, goals, policy, reflection, skills, and evaluation.")
-    return "\n".join(lines)
+        reason = policy.get("reason") or "정책 차단"
+        return f"그 요청은 실행하지 않았어.\n이유: {reason}"
+    user_goal = decision.get("user_directed_goal") or {}
+    if user_goal:
+        goal_id = user_goal.get("id") or "-"
+        return f"요청은 Core 작업 흐름에 넣어뒀어.\n목표: #{goal_id}"
+    return "지금 답변 렌더러가 안정적으로 끝나지 않았어.\n근거 없이 지어내진 않을게. 같은 질문을 한 번만 다시 보내줘."

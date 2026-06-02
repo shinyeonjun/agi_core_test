@@ -256,22 +256,6 @@ def format_update_event(title: str, detail: str, fields: dict[str, Any] | None =
     return "\n".join(lines)
 
 
-def _looks_like_greeting(text: str) -> bool:
-    lowered = text.strip().lower()
-    return lowered in {"hi", "hello", "hey", "ㅎㅇ", "하이", "안녕", "안녕하세요", "헬로", "ㅇㅇ"} or lowered.startswith(("ㅎㅇ", "안녕"))
-
-
-def _asks_for_status(text: str) -> bool:
-    normalized = text.replace(" ", "")
-    return any(token in text for token in ["상태", "뭐 하고", "뭐 하는", "뭐해", "살아", "정상", "체크", "확인"]) or any(
-        token in normalized for token in ["뭐하고", "뭐하는", "뭐해", "하고있", "하는중"]
-    )
-
-
-def _asks_for_help(text: str) -> bool:
-    return any(token in text.lower() for token in ["도움", "명령", "help", "뭐 할", "사용법", "기능"])
-
-
 def _core_chat_text(core_result: dict[str, Any]) -> str | None:
     text = compact_text(core_result.get("text"), "").strip()
     if not text:
@@ -303,11 +287,6 @@ def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
     user_goal = decision.get("user_directed_goal") or {}
     task_result = core_result.get("task_result") or {}
     style_feedback = decision.get("style_feedback") or {}
-    interpretation = decision.get("language_interpretation") or {}
-    intent = interpretation.get("intent")
-    target = interpretation.get("target")
-    sentiment = interpretation.get("sentiment")
-    text = redact_discord_content(user_text).strip()
 
     if style_feedback:
         feedback_type = compact_text(style_feedback.get("feedback_type"))
@@ -323,31 +302,7 @@ def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
     rendered = _core_chat_text(core_result)
     if rendered:
         return rendered
-    if target == "capabilities":
-        return _capability_reply(decision)
-    if intent == "feedback":
-        if sentiment == "positive":
-            return "좋아. 그 방향이 맞다는 피드백으로 기억해둘게."
-        if sentiment == "negative":
-            return "오케이. 방금 건 별로였다는 피드백으로 남기고 다음 답변에서 조정할게."
-    if intent == "brainstorm":
-        return "아이디어 검토로 이해했어. 장점, 걸리는 점, 다음 실험 단위로 나눠서 볼게."
-    if target == "greeting" or _looks_like_greeting(text):
-        return "응, 여기 있어. 편하게 말해줘."
-    if target == "help" or _asks_for_help(text):
-        return "그냥 자연어로 말하면 돼. 작업은 #대화, 승인은 #승인, 보고는 #요약, 실시간 로그는 #업데이트로 나눠서 처리할게."
-    if target == "architecture":
-        return "Core는 LanguageEngine, PolicyEngine, 기억, 목표, 실행, 평가, Discord 관제로 나뉘어 굴러가. 지금은 언어 판단은 Codex가 맡고, Core는 상태와 실행 경계를 관리하는 구조야."
-    if target == "status" or _asks_for_status(text):
-        metrics = decision.get("metrics") or {}
-        profile = metrics.get("current_autonomy_profile") or decision.get("autonomy_profile") or "safe"
-        eval_result = metrics.get("last_eval_result") or "unknown"
-        return f"지금은 Discord 대화 채널을 듣고, 오렌지파이에서 tick 루프가 돌고 있어.\n모드: `{profile}`\n최근 평가: `{eval_result}`\n자세한 건 `!state`로 볼 수 있어."
-    if target == "question" or text.endswith("?") or text.endswith("？"):
-        return "질문으로 이해했어. 조금만 더 구체적으로 말해주면 그 기준으로 바로 답할게."
-    if len(text) <= 20:
-        return "응, 들었어. 다음에 뭘 하면 될지 바로 말해줘."
-    return "좋아, 이해했어. 이건 작업 방향으로 받아서 Core에 반영할게."
+    return _renderer_unavailable_reply(decision)
 
 
 def _format_task_result(user_goal: dict[str, Any], task_result: dict[str, Any]) -> str:
@@ -373,21 +328,9 @@ def _format_user_goal(user_goal: dict[str, Any]) -> str:
     return f"좋아. 목표 #{user_goal.get('id')}로 등록했어. 사용자 요청이라 자율 작업보다 먼저 볼게."
 
 
-def _capability_reply(decision: dict[str, Any]) -> str:
-    capabilities = decision.get("capability_map") or {}
-    workers = {item.get("name"): item for item in capabilities.get("worker_mediated", []) if isinstance(item, dict)}
-    codex_work = workers.get("codex_work_worker") or {}
-    worker_status = compact_text(codex_work.get("status") or "unknown")
-    worker_backend = compact_text(codex_work.get("backend") or "codex")
-    return "\n".join([
-        "냉정하게 지금 할 수 있는 건 이 정도야.",
-        "- Discord 대화 받고 목표/작업으로 분류하기",
-        "- 기억, 목표, 회고, 평가 결과 쌓기",
-        "- 정책 안에서 오렌지파이 상태 점검하기",
-        "- 승인 필요한 일은 멈추고 대기시키기",
-        f"- 개발 작업 worker: `{worker_status}` / backend `{worker_backend}`",
-        "약한 건 장기 계획을 끝까지 밀어붙이는 힘이라 worker 루프를 계속 키워야 해.",
-    ])
+def _renderer_unavailable_reply(decision: dict[str, Any]) -> str:
+    renderer = compact_text(decision.get("renderer") or "chat_renderer")
+    return f"지금 `{renderer}` 답변 생성이 안정적으로 끝나지 않았어.\n내용을 지어내서 말하진 않을게. 같은 질문을 한 번만 다시 보내줘."
 
 
 def _is_noise_title(value: object) -> bool:

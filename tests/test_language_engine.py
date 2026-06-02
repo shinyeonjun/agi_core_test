@@ -208,7 +208,7 @@ def test_discord_uses_language_interpretation_for_feedback(monkeypatch, tmp_path
 
     output = "\n".join(route_discord_event(event, control_config()))
 
-    assert "피드백" in output
+    assert "답변 렌더러" in output
     assert "fallback renderer" not in output
 
 
