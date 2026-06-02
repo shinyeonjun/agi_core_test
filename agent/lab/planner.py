@@ -39,6 +39,7 @@ ARTIFACT_ONLY_GOAL_TYPES = {
     "skill_review",
     "memory_cleanup",
 }
+SHELL_PLANNED_GOAL_TYPES = {"system_observation", "lab_experiment"}
 
 
 def _goal_kind(goal: dict[str, Any] | None, drives: dict[str, float]) -> str:
@@ -179,11 +180,8 @@ def build_action_proposals(goal: dict[str, Any] | None, drives: dict[str, float]
             "reason": "lab_experiment_workspace_report",
             "metadata": {"planner": "rule_based", "goal_type": kind, "state_focus": state.get("current_focus")},
         }]
-    return [
-        {"goal_id": goal_id, "command": "df -h /", "cwd": cwd, "reason": "system_disk_check", "metadata": {"planner": "rule_based", "goal_type": kind}},
-        {"goal_id": goal_id, "command": "free -h", "cwd": cwd, "reason": "system_memory_check", "metadata": {"planner": "rule_based", "goal_type": kind}},
-        {"goal_id": goal_id, "command": "systemctl --failed --no-pager", "cwd": cwd, "reason": "system_failed_services_check", "metadata": {"planner": "rule_based", "goal_type": kind}},
-    ]
+    log_event("lab", "unknown_goal_shell_fallback_suppressed", kind, {"goal_id": goal_id, "goal_type": kind}, 0.55)
+    return []
 
 
 def plan_action_proposals(goal: dict[str, Any] | None = None, *, limit: int = 3) -> list[dict[str, Any]]:
@@ -301,7 +299,7 @@ def _handle_user_directed_goal(goal: dict[str, Any], drives: dict[str, float]) -
 
 def _handle_artifact_goal(goal: dict[str, Any], drives: dict[str, float]) -> dict[str, Any] | None:
     kind = str(goal.get("goal_type") or "")
-    if kind not in ARTIFACT_ONLY_GOAL_TYPES:
+    if kind in SHELL_PLANNED_GOAL_TYPES:
         return None
     if goal.get("status") not in {"active", "proposed"}:
         return None
@@ -323,13 +321,15 @@ def _handle_artifact_goal(goal: dict[str, Any], drives: dict[str, float]) -> dic
             "skill_review": "Core skill review note",
             "memory_cleanup": "Memory cleanup review",
         }
+        artifact_type = kind if kind in ARTIFACT_ONLY_GOAL_TYPES else "goal_review"
+        title = titles.get(kind, "Unsupported goal review")
         artifact = write_text_artifact(
             "reports",
-            f"lab-{kind}-{goal.get('id')}.md",
-            _artifact_content(titles.get(kind, "Lab artifact"), goal, metrics, drives),
-            kind,
-            titles.get(kind, "Lab artifact"),
-            {"source": "lab_planner", "goal_id": goal.get("id"), "goal_type": kind},
+            f"lab-{artifact_type}-{goal.get('id')}.md",
+            _artifact_content(title, goal, metrics, drives),
+            artifact_type,
+            title,
+            {"source": "lab_planner", "goal_id": goal.get("id"), "goal_type": kind, "unknown_goal_review": kind not in ARTIFACT_ONLY_GOAL_TYPES},
         )
     mark_goal_done(int(goal["id"]))
     reflection_id = create_reflection(

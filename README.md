@@ -4,7 +4,10 @@ Digital AGI-oriented Local Stateful Agent Core for Orange Pi 5. This project doe
 
 ## Current Scope
 
-- v0.7-alpha Discord conversational bridge
+- v0.11-alpha Agent OS kernel for Orange Pi
+- Discord conversational control plane
+- Codex-backed language interpretation and rendering with rule fallback
+- Language interpretation cache and redacted interpretation logs
 - Goal deduplication and cooldown
 - Reflection plus skill learner
 - SQLite FTS5 memory search with LIKE fallback
@@ -15,7 +18,17 @@ Digital AGI-oriented Local Stateful Agent Core for Orange Pi 5. This project doe
 - ProjectSpec and workspace artifact tracking
 - Runtime self-map loop for host/service/git/config-presence awareness
 - Split task queue for immediate user tasks and scheduled autonomous tasks
+- Task lifecycle tracking with queued/planning/executing/verifying/reporting/learned phases
+- SQLite task leases, idempotency keys, delayed scheduling fields, and task doctor recovery
+- Operating intelligence snapshots for goal priority, action critic, memory hygiene, skill candidates, and next improvements
+- Explicit DB migration status table and `agentctl db migrate/check`
 - systemd unit templates
+
+Version alignment:
+
+- package: `0.11.0a0`
+- schema: `0.11.0-alpha`
+- runtime scope: `v0.11-alpha`
 
 ## Basic Commands
 
@@ -29,6 +42,8 @@ agentctl tick
 agentctl policy-check "apt-get install nginx"
 agentctl eval run policy
 agentctl audit
+agentctl db check
+agentctl db migrate
 agentctl metrics
 agentctl self-map refresh
 agentctl self-map show
@@ -38,6 +53,7 @@ agentctl autonomy show
 agentctl action history
 agentctl tasks counts
 agentctl tasks list --queue-type user
+agentctl intelligence snapshot --persist --refresh
 ```
 
 ## Discord
@@ -87,7 +103,35 @@ agentctl tasks counts
 agentctl tasks list --queue-type user
 agentctl tasks list --queue-type autonomous
 agentctl tasks run-user <task_id>
+agentctl tasks doctor
 ```
+
+Task queue rows carry a lease (`locked_until`, `locked_by`), idempotency key, scheduling fields (`not_before`, `due_at`), and retry budget. This keeps user-triggered work and scheduler work separate while still sharing memory, goals, approvals, events, reflections, and operating reviews.
+
+## Operating Intelligence
+
+`agentctl intelligence` exposes Core's current operating review loop. It does not make the model fine-tune itself. It records and reports structured signals that help the Core decide what to improve next.
+
+```bash
+agentctl intelligence snapshot --persist --refresh
+agentctl intelligence priorities --refresh
+agentctl intelligence critics
+agentctl intelligence memory
+agentctl intelligence skills
+```
+
+The Discord observation dashboard includes the same high-level signals in Korean so the summary channel reads like a control room instead of raw logs.
+
+## Database Migrations
+
+Fresh databases are created from `agent/memory/schema.sql`. Existing databases are repaired through idempotent migrations recorded in `schema_migrations`.
+
+```bash
+agentctl db check
+agentctl db migrate
+```
+
+Migrations are intentionally conservative. They add missing columns, indexes, and tables without reading secrets or rewriting user data.
 
 ## Codex Runtime Tuning
 

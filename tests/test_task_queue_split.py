@@ -10,7 +10,7 @@ from agent.core.database import connect, init_db
 from agent.core.goals import create_goal, list_goals
 from agent.core.pipeline import run_talk
 from agent.core.task_lifecycle import list_task_lifecycle, task_lifecycle_summary
-from agent.core.task_queue import claim_task, doctor_tasks, enqueue_task, list_tasks, task_status_counts
+from agent.core.task_queue import claim_task, doctor_tasks, enqueue_task, finish_task, list_tasks, task_status_counts
 from agent.lab.planner import run_lab_tick, run_lab_tick_if_enabled, run_user_task, sync_open_goals_to_tasks
 
 
@@ -171,7 +171,7 @@ def test_task_doctor_recovers_stale_running_task(monkeypatch, tmp_path):
     assert claim_task(task_id)["status"] == "running"
     old = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(timespec="seconds")
     with connect() as conn:
-        conn.execute("UPDATE task_queue SET claimed_at = ? WHERE id = ?", (old, task_id))
+        conn.execute("UPDATE task_queue SET claimed_at = ?, locked_until = ? WHERE id = ?", (old, old, task_id))
         conn.commit()
 
     result = doctor_tasks(max_age_seconds=60)
@@ -179,3 +179,30 @@ def test_task_doctor_recovers_stale_running_task(monkeypatch, tmp_path):
 
     assert result["stale_running"]["recovered"] == 1
     assert task["status"] == "queued"
+
+
+def test_task_claim_sets_and_clears_lease(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    goal_id = create_goal("Lease task", "lease", goal_type="user_directed", status="active", priority=0.9, metadata={"priority_owner": "user", "task_kind": "task_note"}, dedupe=False)
+    task_id = enqueue_task("user", goal_id=goal_id, task_kind="task_note", title="Lease task", source="test", priority=0.9)
+
+    claimed = claim_task(task_id)
+
+    assert claimed["locked_until"] is not None
+    assert claimed["locked_by"] is not None
+    task = next(row for row in list_tasks(limit=5, queue_type="user") if row["id"] == task_id)
+    assert task["status"] == "running"
+
+    finish_task(task_id, "done", {"status": "done"})
+    finished = next(row for row in list_tasks(limit=5, queue_type="user") if row["id"] == task_id)
+    assert finished["locked_until"] is None
+    assert finished["locked_by"] is None
+
+
+def test_task_idempotency_key_reuses_existing_task(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    first = enqueue_task("user", goal_id=None, task_kind="task_note", title="Same task", source="test", idempotency_key="same-key")
+    second = enqueue_task("user", goal_id=None, task_kind="task_note", title="Same task duplicate", source="test", idempotency_key="same-key")
+
+    assert second == first
+    assert len(list_tasks(limit=10, queue_type="user")) == 1

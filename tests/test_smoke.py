@@ -9,7 +9,7 @@ def test_state_and_memory_smoke():
     init_db()
     assert get_schema_version() == "0.11.0-alpha"
     state = load_state()
-    assert state["version"] == "0.7"
+    assert state["version"] == "0.11"
     memory_id = add_memory("test memory", "Core smoke test memory", tags=["test", "core"])
     assert memory_id > 0
     results = search_memories("smoke")
@@ -17,11 +17,11 @@ def test_state_and_memory_smoke():
     assert "score" in results[0]
 
 
-def test_talk_pipeline_creates_v08_output(monkeypatch):
+def test_talk_pipeline_creates_v011_output(monkeypatch):
     monkeypatch.setenv("AGENT_LANGUAGE_ENGINE", "rule")
     result = run_talk("Core next step?")
-    assert "v0.8" in result["text"]
-    assert result["decision"]["version"] == "0.8"
+    assert "v0.11" in result["text"]
+    assert result["decision"]["version"] == "0.11"
     assert result["validation"]["ok"] is True
 
 

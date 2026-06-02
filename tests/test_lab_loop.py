@@ -273,6 +273,18 @@ def test_memory_cleanup_creates_no_shell_action(monkeypatch, tmp_path):
     assert list_action_runs(5) == []
 
 
+def test_unknown_goal_type_creates_review_artifact_without_shell(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    create_goal("Review strange goal", "unknown should not run shell", goal_type="strange_new_goal", status="proposed", dedupe=False)
+
+    result = run_lab_tick()
+
+    assert result["status"] == "artifact_created"
+    assert result["artifact_type"] == "goal_review"
+    assert list_action_runs(5) == []
+
+
 def test_duplicate_recent_action_is_rejected_for_same_goal(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     set_autonomy_profile("full_device_lab")

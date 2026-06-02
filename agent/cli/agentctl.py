@@ -9,7 +9,7 @@ from agent import __version__
 from agent.bridge.reports import notify_action, notify_activity_summary, notify_daily_summary, notify_observation_dashboard, notify_test_summary, notify_test_update
 from agent.core.autonomy import arm_catastrophic_destruction, disarm_catastrophic_destruction, get_autonomy_state, set_autonomy_profile
 from agent.core.approvals import ApprovalStore
-from agent.core.database import get_schema_version, init_db
+from agent.core.database import check_migrations, get_schema_version, init_db, migrate_db
 from agent.core.events import list_events, log_event
 from agent.core.goals import cleanup_noise_goals, list_goals, mark_goal_done
 from agent.core.goal_generator import add_root_objective, generate_goal_candidates, list_goal_candidates, list_root_objectives, seed_default_objectives, set_objective_enabled
@@ -55,6 +55,16 @@ def cmd_init(_args: argparse.Namespace) -> int:
 def cmd_state(_args: argparse.Namespace) -> int:
     print_json(load_state())
     return 0
+
+
+def cmd_db(args: argparse.Namespace) -> int:
+    if args.db_command == "migrate":
+        print_json(migrate_db())
+        return 0
+    if args.db_command == "check":
+        print_json(check_migrations())
+        return 0
+    raise ValueError(f"unknown db command: {args.db_command}")
 
 
 def cmd_talk(args: argparse.Namespace) -> int:
@@ -551,6 +561,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("init"); p.set_defaults(func=cmd_init)
+    p = sub.add_parser("db"); db_sub = p.add_subparsers(dest="db_command", required=True)
+    p_db_migrate = db_sub.add_parser("migrate"); p_db_migrate.set_defaults(func=cmd_db)
+    p_db_check = db_sub.add_parser("check"); p_db_check.set_defaults(func=cmd_db)
     p = sub.add_parser("state"); p.set_defaults(func=cmd_state)
     p = sub.add_parser("talk"); p.add_argument("message"); p.set_defaults(func=cmd_talk)
     p = sub.add_parser("tick"); p.set_defaults(func=cmd_tick)

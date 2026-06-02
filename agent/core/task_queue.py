@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
+import socket
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
-from agent.config.defaults import now_kst
+from agent.config.defaults import KST, env_int, now_kst
 from agent.core.database import connect, init_db
 from agent.core.events import log_event
 from agent.core.task_lifecycle import record_task_phase
@@ -14,6 +16,22 @@ TaskStatus = Literal["queued", "running", "done", "blocked", "waiting_approval",
 
 OPEN_TASK_STATUSES = ("queued", "running", "waiting_approval")
 MAX_TASK_ATTEMPTS = 3
+
+
+def _worker_id() -> str:
+    return f"{socket.gethostname()}:{os.getpid()}"
+
+
+def _task_lock_seconds() -> int:
+    return max(30, env_int("AGENT_TASK_LOCK_SECONDS", 1800))
+
+
+def _now_dt() -> datetime:
+    return datetime.now(KST)
+
+
+def _future_kst(seconds: int) -> str:
+    return (_now_dt() + timedelta(seconds=max(1, int(seconds)))).isoformat(timespec="seconds")
 
 
 def _decode(row: dict[str, Any]) -> dict[str, Any]:
@@ -46,6 +64,15 @@ def _existing_open_task(goal_id: int | None, queue_type: str | None = None) -> d
     return _decode(dict(row)) if row else None
 
 
+def _existing_idempotent_task(idempotency_key: str | None) -> dict[str, Any] | None:
+    if not idempotency_key:
+        return None
+    init_db()
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM task_queue WHERE idempotency_key = ? ORDER BY id DESC LIMIT 1", (idempotency_key,)).fetchone()
+    return _decode(dict(row)) if row else None
+
+
 def enqueue_task(
     queue_type: QueueType,
     *,
@@ -58,6 +85,10 @@ def enqueue_task(
     approval_id: int | None = None,
     payload: dict[str, Any] | None = None,
     dedupe_goal: bool = True,
+    idempotency_key: str | None = None,
+    not_before: str | None = None,
+    due_at: str | None = None,
+    max_attempts: int = MAX_TASK_ATTEMPTS,
 ) -> int:
     if queue_type not in {"user", "autonomous"}:
         raise ValueError(f"invalid queue_type: {queue_type}")
@@ -67,6 +98,9 @@ def enqueue_task(
         existing = _existing_open_task(goal_id, queue_type)
         if existing:
             return int(existing["id"])
+    existing_idempotent = _existing_idempotent_task(idempotency_key)
+    if existing_idempotent:
+        return int(existing_idempotent["id"])
     init_db()
     ts = now_kst()
     with connect() as conn:
@@ -74,13 +108,14 @@ def enqueue_task(
             """
             INSERT INTO task_queue (
                 created_at, updated_at, queue_type, status, priority, goal_id, approval_id,
-                task_kind, title, source, payload_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                task_kind, title, source, payload_json, max_attempts, idempotency_key, not_before, due_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 ts, ts, queue_type, status, max(0.0, min(1.0, float(priority))),
                 goal_id, approval_id, task_kind, title[:160], source,
                 json.dumps(payload or {}, ensure_ascii=False),
+                max(1, int(max_attempts)), idempotency_key, not_before, due_at,
             ),
         )
         conn.commit()
@@ -103,37 +138,43 @@ def task_for_goal(goal_id: int, queue_type: str | None = None) -> dict[str, Any]
 
 def _claim_where(where_sql: str, params: tuple[Any, ...]) -> dict[str, Any] | None:
     init_db()
+    ts = now_kst()
+    lock_until = _future_kst(_task_lock_seconds())
+    locked_by = _worker_id()
     with connect() as conn:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             f"""
             SELECT * FROM task_queue
             WHERE {where_sql}
-              AND attempts < ?
+              AND attempts < COALESCE(max_attempts, ?)
+              AND (not_before IS NULL OR not_before <= ?)
+              AND (locked_until IS NULL OR locked_until <= ?)
             ORDER BY
                 queue_type = 'user' DESC,
                 priority DESC,
                 id ASC
             LIMIT 1
             """,
-            (*params, MAX_TASK_ATTEMPTS),
+            (*params, MAX_TASK_ATTEMPTS, ts, ts),
         ).fetchone()
         if not row:
             conn.commit()
             return None
         task = dict(row)
-        ts = now_kst()
         conn.execute(
             """
             UPDATE task_queue
-            SET status = 'running', updated_at = ?, claimed_at = ?, attempts = attempts + 1
+            SET status = 'running', updated_at = ?, claimed_at = ?, locked_until = ?, locked_by = ?, attempts = attempts + 1
             WHERE id = ? AND status = 'queued'
             """,
-            (ts, ts, task["id"]),
+            (ts, ts, lock_until, locked_by, task["id"]),
         )
         conn.commit()
     task["status"] = "running"
     task["claimed_at"] = ts
+    task["locked_until"] = lock_until
+    task["locked_by"] = locked_by
     task["attempts"] = int(task.get("attempts") or 0) + 1
     record_task_phase(
         int(task["id"]),
@@ -171,7 +212,7 @@ def finish_task(task_id: int, status: TaskStatus, result: dict[str, Any] | None 
         cur = conn.execute(
             """
             UPDATE task_queue
-            SET status = ?, updated_at = ?, completed_at = ?, result_json = ?
+            SET status = ?, updated_at = ?, completed_at = ?, locked_until = NULL, locked_by = NULL, result_json = ?
             WHERE id = ?
             """,
             (status, ts, completed_at, json.dumps(result or {}, ensure_ascii=False), task_id),
@@ -203,7 +244,7 @@ def requeue_task(task_id: int, result: dict[str, Any] | None = None) -> bool:
             cur = conn.execute(
                 """
                 UPDATE task_queue
-                SET status = 'blocked', updated_at = ?, completed_at = ?, result_json = ?
+                SET status = 'blocked', updated_at = ?, completed_at = ?, locked_until = NULL, locked_by = NULL, result_json = ?
                 WHERE id = ?
                 """,
                 (now_kst(), now_kst(), json.dumps({**payload, "reason": "max_attempts_exceeded"}, ensure_ascii=False), task_id),
@@ -216,7 +257,7 @@ def requeue_task(task_id: int, result: dict[str, Any] | None = None) -> bool:
         cur = conn.execute(
             """
             UPDATE task_queue
-            SET status = 'queued', updated_at = ?, claimed_at = NULL, result_json = ?
+            SET status = 'queued', updated_at = ?, claimed_at = NULL, locked_until = NULL, locked_by = NULL, result_json = ?
             WHERE id = ?
             """,
             (now_kst(), json.dumps(payload, ensure_ascii=False), task_id),
@@ -235,7 +276,7 @@ def resume_tasks_for_approval(approval_id: int) -> int:
         cur = conn.execute(
             """
             UPDATE task_queue
-            SET status = 'queued', updated_at = ?, result_json = NULL
+            SET status = 'queued', updated_at = ?, locked_until = NULL, locked_by = NULL, result_json = NULL
             WHERE approval_id = ? AND status = 'waiting_approval'
             """,
             (ts, approval_id),
@@ -254,7 +295,7 @@ def block_tasks_for_approval(approval_id: int, reason: str = "approval_rejected"
         cur = conn.execute(
             """
             UPDATE task_queue
-            SET status = 'blocked', updated_at = ?, completed_at = ?, result_json = ?
+            SET status = 'blocked', updated_at = ?, completed_at = ?, locked_until = NULL, locked_by = NULL, result_json = ?
             WHERE approval_id = ? AND status = 'waiting_approval'
             """,
             (ts, ts, json.dumps({"reason": reason}, ensure_ascii=False), approval_id),
@@ -277,7 +318,7 @@ def _parse_time(value: object) -> datetime | None:
 
 def recover_stale_running(max_age_seconds: int = 1800) -> dict[str, int]:
     init_db()
-    now = datetime.fromisoformat(now_kst())
+    now = _now_dt()
     threshold = timedelta(seconds=max(1, int(max_age_seconds)))
     recovered = 0
     blocked = 0
@@ -287,6 +328,9 @@ def recover_stale_running(max_age_seconds: int = 1800) -> dict[str, int]:
     for raw in rows:
         checked += 1
         task = dict(raw)
+        locked_until = _parse_time(task.get("locked_until"))
+        if locked_until is not None and locked_until > now:
+            continue
         claimed = _parse_time(task.get("claimed_at"))
         if claimed is not None and now - claimed < threshold:
             continue

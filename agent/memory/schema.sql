@@ -394,7 +394,13 @@ CREATE TABLE IF NOT EXISTS task_queue (
     source TEXT,
     payload_json TEXT,
     attempts INTEGER DEFAULT 0,
+    max_attempts INTEGER DEFAULT 3,
     claimed_at TEXT,
+    locked_until TEXT,
+    locked_by TEXT,
+    idempotency_key TEXT,
+    not_before TEXT,
+    due_at TEXT,
     completed_at TEXT,
     result_json TEXT
 );
@@ -465,6 +471,12 @@ CREATE TABLE IF NOT EXISTS operating_reviews (
 CREATE INDEX IF NOT EXISTS idx_operating_reviews_created ON operating_reviews(created_at);
 CREATE INDEX IF NOT EXISTS idx_operating_reviews_type ON operating_reviews(review_type);
 CREATE INDEX IF NOT EXISTS idx_operating_reviews_status ON operating_reviews(status);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version TEXT PRIMARY KEY,
+    applied_at TEXT NOT NULL,
+    description TEXT
+);
 
 CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
