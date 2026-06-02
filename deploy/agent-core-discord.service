@@ -5,7 +5,6 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ubuntu
 WorkingDirectory=/home/ubuntu/agent_core
 EnvironmentFile=/home/ubuntu/agent_core/.env
 ExecStart=/home/ubuntu/agent_core/venv/bin/python -m agent.bridge.discord_bot
@@ -15,4 +14,4 @@ RestartSec=10
 NoNewPrivileges=true
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

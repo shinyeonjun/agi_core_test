@@ -29,3 +29,17 @@ def test_daily_and_activity_summary_timers_are_separate():
     assert "agentctl notify activity-summary" in activity
     assert "agentctl notify daily-summary" in daily
     assert "OnCalendar=*-*-* 09:00:00" in daily_timer
+
+
+def test_deploy_services_are_user_systemd_units():
+    services = [
+        "agent-core-discord.service",
+        "agent-core-tick.service",
+        "agent-core-lab-tick.service",
+        "agent-core-summary.service",
+        "agent-core-daily-summary.service",
+    ]
+    for name in services:
+        text = _read(name)
+        assert "User=ubuntu" not in text
+    assert "WantedBy=default.target" in _read("agent-core-discord.service")
