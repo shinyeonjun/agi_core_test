@@ -10,6 +10,7 @@ from typing import Any
 from agent.config.defaults import project_root
 from agent.core.autonomy import current_profile
 from agent.core.policy import PolicyEngine
+from agent.core.wake_signals import emit_wake_signal
 from agent.tools.action_log import create_action_run, finish_action_run, get_action_run, list_action_runs
 
 MAX_CAPTURE_CHARS = 20000
@@ -80,6 +81,7 @@ def run_action(command: str, *, cwd: str | None = None, timeout_seconds: int = D
             before_snapshot=None,
             result_summary="profile_not_full_device_lab",
         )
+        emit_wake_signal("action_blocked", "full_device", priority=0.78, payload={"action_id": action_id, "goal_id": goal_id, "reason": "profile_not_full_device_lab"}, dedupe_key=f"action:{action_id}:blocked")
         return {"id": action_id, "executed": False, "status": "blocked", "reason": "profile_not_full_device_lab", "policy": policy.to_dict()}
     if policy.denied or policy.requires_approval:
         reason = policy.denied_reason or "approval_required"
@@ -94,6 +96,7 @@ def run_action(command: str, *, cwd: str | None = None, timeout_seconds: int = D
             before_snapshot=None,
             result_summary=reason,
         )
+        emit_wake_signal("action_blocked", "full_device", priority=0.86 if policy.denied else 0.78, payload={"action_id": action_id, "goal_id": goal_id, "reason": reason}, dedupe_key=f"action:{action_id}:blocked")
         return {"id": action_id, "executed": False, "status": "blocked", "reason": reason, "policy": policy.to_dict()}
 
     before = lightweight_snapshot(resolved_cwd)
@@ -129,6 +132,14 @@ def run_action(command: str, *, cwd: str | None = None, timeout_seconds: int = D
         summary = "command_not_found"
     after = lightweight_snapshot(resolved_cwd)
     finish_action_run(action_id, status=status, returncode=returncode, stdout=stdout, stderr=stderr, after_snapshot=after, result_summary=summary)
+    signal_type = "action_completed" if status == "completed" and returncode == 0 else "action_failed" if status == "failed" else f"action_{status}"
+    emit_wake_signal(
+        signal_type,
+        "full_device",
+        priority=0.85 if status in {"failed", "timeout"} or returncode != 0 else 0.45,
+        payload={"action_id": action_id, "goal_id": goal_id, "status": status, "returncode": returncode, "summary": summary},
+        dedupe_key=f"action:{action_id}:{status}",
+    )
     return {
         "id": action_id,
         "executed": True,

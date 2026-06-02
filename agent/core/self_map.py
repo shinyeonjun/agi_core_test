@@ -19,6 +19,7 @@ from agent.core.events import log_event
 
 SELF_MAP_UNITS = (
     "agent-core-discord.service",
+    "agent-core-reactor.service",
     "agent-core-tick.timer",
     "agent-core-summary.timer",
     "agent-core-daily-summary.timer",

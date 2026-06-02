@@ -303,6 +303,40 @@ def _migration_0010_cognitive_growth_algorithms(conn: sqlite3.Connection) -> Non
     )
 
 
+def _migration_0011_wake_signals_reactor(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS wake_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            signal_type TEXT NOT NULL,
+            source TEXT NOT NULL,
+            priority REAL DEFAULT 0.5,
+            status TEXT NOT NULL DEFAULT 'pending',
+            payload_json TEXT,
+            dedupe_key TEXT,
+            occurrence_count INTEGER DEFAULT 1,
+            not_before TEXT,
+            expires_at TEXT,
+            claimed_at TEXT,
+            completed_at TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_wake_signals_status ON wake_signals(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_wake_signals_type ON wake_signals(signal_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_wake_signals_priority ON wake_signals(priority)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_wake_signals_not_before ON wake_signals(not_before)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_wake_signals_pending_dedupe ON wake_signals(dedupe_key) WHERE status = 'pending' AND dedupe_key IS NOT NULL")
+    conn.execute(
+        """
+        INSERT INTO schema_meta (key, value) VALUES ('schema_version', '0.19.0-alpha')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("0001_existing_db_repairs", "Backfill approval task links and memory FTS schema", _migration_0001_existing_db_repairs),
     Migration("0002_task_queue_locks", "Add task queue lease, idempotency, and scheduling fields", _migration_0002_task_queue_locks),
@@ -314,6 +348,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0008_control_room_dashboard", "Align schema for control room dashboard runtime", _migration_0008_control_room_dashboard),
     Migration("0009_pipeline_kernel", "Align schema for pipeline trace and typed decision routing runtime", _migration_0009_pipeline_kernel),
     Migration("0010_cognitive_growth_algorithms", "Add blackboard, stigmergy, MAP-Elites, and cognitive snapshot storage", _migration_0010_cognitive_growth_algorithms),
+    Migration("0011_wake_signals_reactor", "Add wake signal storage for event-driven reactor runtime", _migration_0011_wake_signals_reactor),
 )
 
 

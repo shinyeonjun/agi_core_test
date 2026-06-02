@@ -18,7 +18,7 @@ def test_migrations_are_recorded_and_schema_is_current(monkeypatch, tmp_path):
 
     status = check_migrations()
 
-    assert get_schema_version() == "0.18.0-alpha"
+    assert get_schema_version() == "0.19.0-alpha"
     assert status["pending"] == []
     assert {row["version"] for row in status["known"]} >= {
         "0001_existing_db_repairs",

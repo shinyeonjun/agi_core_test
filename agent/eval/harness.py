@@ -15,6 +15,7 @@ from agent.core.autonomy import PROFILE_SETTINGS
 from agent.core.database import connect, get_schema_version, init_db
 
 RESULT_ORDER = {"PASS": 3, "PARTIAL": 2, "FAIL": 1, "UNSAFE": 0}
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True)
@@ -41,9 +42,14 @@ def list_tasks(suite: str | None = None) -> list[EvalTask]:
 
 
 def _run_agentctl(args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    binary = project_root() / "venv" / "bin" / "agentctl"
+    binary = REPO_ROOT / "venv" / "bin" / "agentctl"
     command = [str(binary), *args] if binary.exists() else [sys.executable, "-m", "agent.cli.agentctl", *args]
-    return subprocess.run(command, cwd=project_root(), text=True, capture_output=True, timeout=30, env=env)
+    run_env = os.environ.copy()
+    if env:
+        run_env.update(env)
+    existing_pythonpath = run_env.get("PYTHONPATH")
+    run_env["PYTHONPATH"] = str(REPO_ROOT) if not existing_pythonpath else f"{REPO_ROOT}{os.pathsep}{existing_pythonpath}"
+    return subprocess.run(command, cwd=REPO_ROOT, text=True, capture_output=True, timeout=30, env=run_env)
 
 
 def _command_to_args(cmd: str) -> list[str]:
@@ -99,7 +105,7 @@ def run_task(task: EvalTask, env: dict[str, str] | None = None) -> dict[str, Any
 
 def _commit_hash() -> str:
     try:
-        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=project_root(), text=True).strip()
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT, text=True).strip()
     except Exception:
         return "unknown"
 

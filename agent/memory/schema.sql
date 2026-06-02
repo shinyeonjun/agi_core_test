@@ -590,6 +590,28 @@ CREATE TABLE IF NOT EXISTS cognitive_snapshots (
 CREATE INDEX IF NOT EXISTS idx_cognitive_snapshots_created ON cognitive_snapshots(created_at);
 CREATE INDEX IF NOT EXISTS idx_cognitive_snapshots_type ON cognitive_snapshots(snapshot_type);
 
+CREATE TABLE IF NOT EXISTS wake_signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    signal_type TEXT NOT NULL,
+    source TEXT NOT NULL,
+    priority REAL DEFAULT 0.5,
+    status TEXT NOT NULL DEFAULT 'pending',
+    payload_json TEXT,
+    dedupe_key TEXT,
+    occurrence_count INTEGER DEFAULT 1,
+    not_before TEXT,
+    expires_at TEXT,
+    claimed_at TEXT,
+    completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_wake_signals_status ON wake_signals(status);
+CREATE INDEX IF NOT EXISTS idx_wake_signals_type ON wake_signals(signal_type);
+CREATE INDEX IF NOT EXISTS idx_wake_signals_priority ON wake_signals(priority);
+CREATE INDEX IF NOT EXISTS idx_wake_signals_not_before ON wake_signals(not_before);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wake_signals_pending_dedupe ON wake_signals(dedupe_key) WHERE status = 'pending' AND dedupe_key IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL,
@@ -602,4 +624,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR REPLACE INTO schema_meta (key, value)
-VALUES ('schema_version', '0.18.0-alpha');
+VALUES ('schema_version', '0.19.0-alpha');

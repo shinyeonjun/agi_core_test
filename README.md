@@ -4,7 +4,7 @@ Digital AGI-oriented Local Stateful Agent Core for Orange Pi 5. This project doe
 
 ## Current Scope
 
-- v0.18-alpha Agent OS kernel for Orange Pi
+- v0.19-alpha Agent OS kernel for Orange Pi
 - Discord conversational control plane
 - Codex-backed language interpretation and rendering with rule fallback
 - Language interpretation cache and redacted interpretation logs
@@ -29,14 +29,15 @@ Digital AGI-oriented Local Stateful Agent Core for Orange Pi 5. This project doe
 - Operating intelligence snapshots for goal priority, action critic, memory hygiene, skill candidates, and next improvements
 - Cognitive growth algorithms for curiosity, utility/novelty scoring, HTN planning, case memory, Bayesian confidence, MAP-Elites, blackboard, active-inference-lite, and stigmergy markers
 - Cognitive growth pipeline that turns high-pressure growth signals into safe autonomous queue tasks while user tasks keep priority
+- Event Reactor with wake signals, `agentctl reactor once/run/status`, and a parallel systemd service template for event/pressure-driven operation
 - Explicit DB migration status table and `agentctl db migrate/check`
 - systemd unit templates
 
 Version alignment:
 
-- package: `0.18.0a0`
-- schema: `0.18.0-alpha`
-- runtime scope: `v0.18-alpha`
+- package: `0.19.0a0`
+- schema: `0.19.0-alpha`
+- runtime scope: `v0.19-alpha`
 
 ## Basic Commands
 
@@ -61,12 +62,16 @@ agentctl autonomy show
 agentctl action history
 agentctl tasks counts
 agentctl tasks list --queue-type user
+agentctl reactor status
+agentctl reactor once
 agentctl process snapshot
 agentctl process list
 agentctl control snapshot
 agentctl project plans
 agentctl intelligence snapshot --persist --refresh
 ```
+
+Reactor migration note: keep `agent-core-daily-summary.timer` and run `agent-core-reactor.service` in parallel first. Disable or weaken `agent-core-lab-tick.timer` and `agent-core-tick.timer` only after reactor cycles are stable.
 
 ## Discord
 

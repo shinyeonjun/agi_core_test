@@ -13,6 +13,7 @@ from agent.core.events import log_event
 from agent.core.goal_generator import meaningful_open_goals
 from agent.core.pipeline import run_talk
 from agent.core.state import load_state
+from agent.core.wake_signals import emit_wake_signal
 from agent.lab.planner import run_user_task
 from agent.memory.store import search_memories
 from agent.scheduler.tick import run_tick
@@ -140,6 +141,13 @@ def route_discord_event(event: DiscordEvent, config: DiscordAuthConfig) -> list[
     if not text:
         return []
     core_event_id = log_discord_input(event, text, role)
+    emit_wake_signal(
+        "discord_message",
+        "discord",
+        priority=0.96 if role == "chat" else 0.72,
+        payload={"event_id": core_event_id, "message_id": event.message_id, "channel_id": event.channel_id, "channel_role": role, "is_dm": event.is_dm},
+        dedupe_key=f"discord_message:{event.message_id}",
+    )
     if role in {"summary", "update"}:
         log_event("discord", "discord_webhook_only_channel_input", text, {"message_id": event.message_id, "channel_role": role}, 0.5)
         return ["\uc774 \ucc44\ub110\uc740 Core\uac00 \uc6f9\ud6c5\uc73c\ub85c \uc54c\ub9bc\ub9cc \ubcf4\ub0b4\ub294 \uacf3\uc774\uc57c. \ub300\ud654\ub294 #\ub300\ud654, \uc2b9\uc778\uc740 #\uc2b9\uc778\uc5d0\uc11c \ud574\uc918."]

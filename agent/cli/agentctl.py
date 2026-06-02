@@ -24,6 +24,7 @@ from agent.core.pipeline import run_talk
 from agent.core.policy import ActionProposal, PolicyEngine
 from agent.core.process_table import get_process, list_processes, process_snapshot
 from agent.core.project_execution import get_project_plan, list_project_plans
+from agent.core.reactor import adaptive_sleep_seconds, reactor_once, reactor_run, reactor_status
 from agent.core.self_map import latest_self_map, refresh_self_map, self_map_brief
 from agent.core.state import load_state, save_state
 from agent.core.style import add_style_example, apply_style_feedback, get_active_style_profile, list_style_examples, list_style_feedback, seed_default_style_profile, style_directives
@@ -522,6 +523,21 @@ def cmd_observe(args: argparse.Namespace) -> int:
     raise ValueError(f"unknown observe command: {args.observe_command}")
 
 
+def cmd_reactor(args: argparse.Namespace) -> int:
+    if args.reactor_command == "once":
+        print_json(reactor_once(dry_run=bool(args.dry_run)))
+        return 0
+    if args.reactor_command == "run":
+        print_json(reactor_run(cycles=args.cycles, dry_run=bool(args.dry_run)))
+        return 0
+    if args.reactor_command == "status":
+        status = reactor_status()
+        status["next_sleep_seconds"] = adaptive_sleep_seconds(status, jitter=False)
+        print_json(status)
+        return 0
+    raise ValueError(f"unknown reactor command: {args.reactor_command}")
+
+
 def cmd_intelligence(args: argparse.Namespace) -> int:
     if args.intelligence_command == "snapshot":
         print_json(operating_snapshot(persist=bool(args.persist), refresh_priorities=bool(args.refresh)))
@@ -782,6 +798,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_observe_actions = observe_sub.add_parser("actions"); p_observe_actions.add_argument("--limit", type=int, default=10); p_observe_actions.set_defaults(func=cmd_observe)
     p_observe_tasks = observe_sub.add_parser("tasks"); p_observe_tasks.add_argument("--limit", type=int, default=10); p_observe_tasks.set_defaults(func=cmd_observe)
     p_observe_decisions = observe_sub.add_parser("decisions"); p_observe_decisions.add_argument("--limit", type=int, default=5); p_observe_decisions.set_defaults(func=cmd_observe)
+    p = sub.add_parser("reactor"); reactor_sub = p.add_subparsers(dest="reactor_command", required=True)
+    p_reactor_once = reactor_sub.add_parser("once"); p_reactor_once.add_argument("--dry-run", action="store_true"); p_reactor_once.set_defaults(func=cmd_reactor)
+    p_reactor_run = reactor_sub.add_parser("run"); p_reactor_run.add_argument("--cycles", type=int); p_reactor_run.add_argument("--dry-run", action="store_true"); p_reactor_run.set_defaults(func=cmd_reactor)
+    p_reactor_status = reactor_sub.add_parser("status"); p_reactor_status.set_defaults(func=cmd_reactor)
     p = sub.add_parser("intelligence"); intelligence_sub = p.add_subparsers(dest="intelligence_command", required=True)
     p_int_snapshot = intelligence_sub.add_parser("snapshot"); p_int_snapshot.add_argument("--persist", action="store_true"); p_int_snapshot.add_argument("--refresh", action="store_true"); p_int_snapshot.set_defaults(func=cmd_intelligence)
     p_int_priorities = intelligence_sub.add_parser("priorities"); p_int_priorities.add_argument("--limit", type=int, default=20); p_int_priorities.add_argument("--refresh", action="store_true"); p_int_priorities.set_defaults(func=cmd_intelligence)

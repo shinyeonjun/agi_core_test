@@ -31,9 +31,17 @@ def test_daily_and_activity_summary_timers_are_separate():
     assert "OnCalendar=*-*-* 09:00:00" in daily_timer
 
 
+def test_reactor_service_runs_without_replacing_timers():
+    service = _read("agent-core-reactor.service")
+    assert "agentctl reactor run" in service
+    assert "Restart=always" in service
+    assert "WantedBy=default.target" in service
+
+
 def test_deploy_services_are_user_systemd_units():
     services = [
         "agent-core-discord.service",
+        "agent-core-reactor.service",
         "agent-core-tick.service",
         "agent-core-lab-tick.service",
         "agent-core-summary.service",

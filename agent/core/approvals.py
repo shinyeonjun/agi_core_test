@@ -7,6 +7,7 @@ from agent.config.defaults import now_kst
 from agent.core.database import connect, init_db
 from agent.core.policy import ActionProposal
 from agent.core.task_queue import block_tasks_for_approval, resume_tasks_for_approval
+from agent.core.wake_signals import emit_wake_signal
 
 
 class ApprovalStore:
@@ -67,6 +68,14 @@ class ApprovalStore:
             resume_tasks_for_approval(approval_id)
         if ok and status == "rejected":
             block_tasks_for_approval(approval_id)
+        if ok:
+            emit_wake_signal(
+                "approval_changed",
+                "approval_store",
+                priority=0.9 if status == "approved" else 0.75,
+                payload={"approval_id": approval_id, "status": status},
+                dedupe_key=f"approval_changed:{approval_id}:{status}",
+            )
         return ok
 
     def _decode_row(self, row: dict[str, Any]) -> dict[str, Any]:

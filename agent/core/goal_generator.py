@@ -14,6 +14,7 @@ from agent.core.goals import create_goal, is_noise_goal_record, list_goals, simi
 from agent.core.learner import list_reflections
 from agent.core.objective_registry import ALLOWED_GENERATED_GOAL_TYPES, DEFAULT_OBJECTIVES, TEMPLATES
 from agent.core.task_queue import enqueue_task
+from agent.core.wake_signals import emit_wake_signal
 from agent.tools.action_log import list_action_runs
 
 OPEN_STATUSES = {"proposed", "active", "waiting_approval", "blocked"}
@@ -350,6 +351,13 @@ def generate_goal_candidates(*, dry_run: bool = False, max_candidates: int = 3) 
         selected["status"] = "proposed"
         selected["generated_goal_id"] = created_goal_id
         selected["task_id"] = task_id
+        emit_wake_signal(
+            "goal_generated",
+            "goal_generator",
+            priority=0.68,
+            payload={"goal_id": created_goal_id, "task_id": task_id, "candidate_id": selected.get("id"), "goal_type": selected.get("goal_type")},
+            dedupe_key=f"goal_generated:{created_goal_id}",
+        )
         for candidate in candidates[1:]:
             _update_candidate(int(candidate["id"]), status="rejected", rejection_reason="lower_score")
             candidate["status"] = "rejected"

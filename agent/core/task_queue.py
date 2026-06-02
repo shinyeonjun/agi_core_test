@@ -10,6 +10,7 @@ from agent.config.defaults import KST, env_int, now_kst
 from agent.core.database import connect, init_db
 from agent.core.events import log_event
 from agent.core.task_lifecycle import record_task_phase
+from agent.core.wake_signals import emit_wake_signal
 
 QueueType = Literal["user", "autonomous"]
 TaskStatus = Literal["queued", "running", "done", "blocked", "waiting_approval", "skipped"]
@@ -121,6 +122,14 @@ def enqueue_task(
         conn.commit()
         task_id = int(cur.lastrowid)
     log_event("task_queue", "task_enqueued", f"{queue_type}:{task_kind}", {"task_id": task_id, "goal_id": goal_id, "status": status}, 0.7 if queue_type == "user" else 0.55)
+    if status == "queued":
+        emit_wake_signal(
+            f"{queue_type}_task_queued",
+            "task_queue",
+            priority=0.95 if queue_type == "user" else 0.62,
+            payload={"task_id": task_id, "goal_id": goal_id, "task_kind": task_kind, "queue_type": queue_type},
+            dedupe_key=f"task_queued:{task_id}",
+        )
     record_task_phase(
         task_id,
         "queued",
@@ -221,6 +230,13 @@ def finish_task(task_id: int, status: TaskStatus, result: dict[str, Any] | None 
         ok = cur.rowcount > 0
     if ok:
         log_event("task_queue", f"task_{status}", str(task_id), {"task_id": task_id, "result": result or {}}, 0.7)
+        emit_wake_signal(
+            f"task_{status}",
+            "task_queue",
+            priority=0.82 if status == "blocked" else 0.58,
+            payload={"task_id": task_id, "status": status, "result_status": (result or {}).get("status"), "reason": (result or {}).get("reason")},
+            dedupe_key=f"task_finished:{task_id}:{status}",
+        )
         record_task_phase(
             task_id,
             "reporting",
@@ -252,6 +268,13 @@ def requeue_task(task_id: int, result: dict[str, Any] | None = None) -> bool:
             conn.commit()
             ok = cur.rowcount > 0
             if ok:
+                emit_wake_signal(
+                    "task_blocked",
+                    "task_queue",
+                    priority=0.82,
+                    payload={"task_id": task_id, "reason": "max_attempts_exceeded"},
+                    dedupe_key=f"task_blocked:{task_id}:max_attempts",
+                )
                 record_task_phase(task_id, "reporting", "blocked", "최대 재시도 초과로 작업 차단", metadata=payload)
             return ok
         cur = conn.execute(
@@ -265,6 +288,13 @@ def requeue_task(task_id: int, result: dict[str, Any] | None = None) -> bool:
         conn.commit()
         ok = cur.rowcount > 0
     if ok:
+        emit_wake_signal(
+            "task_requeued",
+            "task_queue",
+            priority=0.72,
+            payload={"task_id": task_id, "reason": payload.get("reason")},
+            dedupe_key=f"task_requeued:{task_id}",
+        )
         record_task_phase(task_id, "queued", "requeued", "작업을 다시 큐에 넣음", metadata=payload)
     return ok
 
@@ -285,6 +315,7 @@ def resume_tasks_for_approval(approval_id: int) -> int:
         count = cur.rowcount
     if count:
         log_event("task_queue", "approval_tasks_resumed", str(approval_id), {"approval_id": approval_id, "count": count}, 0.75)
+        emit_wake_signal("approval_changed", "task_queue", priority=0.9, payload={"approval_id": approval_id, "resumed": count}, dedupe_key=f"approval_changed:{approval_id}:resumed")
     return count
 
 
@@ -304,6 +335,7 @@ def block_tasks_for_approval(approval_id: int, reason: str = "approval_rejected"
         count = cur.rowcount
     if count:
         log_event("task_queue", "approval_tasks_blocked", str(approval_id), {"approval_id": approval_id, "count": count, "reason": reason}, 0.75)
+        emit_wake_signal("approval_changed", "task_queue", priority=0.78, payload={"approval_id": approval_id, "blocked": count, "reason": reason}, dedupe_key=f"approval_changed:{approval_id}:blocked")
     return count
 
 
