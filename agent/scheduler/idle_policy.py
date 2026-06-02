@@ -4,6 +4,7 @@ from agent.core.cooldown import is_ready, mark
 from agent.core.drives import compute_drives
 from agent.core.events import log_event, mark_events_processed
 from agent.core.goals import count_open_goals, create_goal, mark_goal_done
+from agent.core.memory_intelligence import run_memory_intelligence
 from agent.core.metrics import collect_metrics
 from agent.core.self_map import refresh_self_map
 from agent.workspace.executor import create_status_report
@@ -18,6 +19,7 @@ def run_idle_policy() -> dict[str, object]:
     goal_id = None
     workspace_artifact_id = None
     self_map_id = None
+    memory_intelligence_result = None
     skipped_reason = None
     self_map_ready, self_map_wait = is_ready("self_map_refresh", 1800)
     if self_map_ready:
@@ -45,4 +47,26 @@ def run_idle_policy() -> dict[str, object]:
         skipped_reason = f"cooldown:workspace_status_report:{workspace_wait}s"
     if skipped_reason is None and not self_map_ready:
         skipped_reason = f"cooldown:self_map_refresh:{self_map_wait}s"
-    return {"drives": drives, "open_goals": open_goals, "created_goal_id": goal_id, "workspace_artifact_id": workspace_artifact_id, "self_map_id": self_map_id, "processed_events": processed, "skipped_reason": skipped_reason}
+    metrics = collect_metrics()
+    memory_ready, memory_wait = is_ready("memory_intelligence", 21600)
+    if memory_ready and (int(metrics.get("memories_count") or 0) >= 200 or int(metrics.get("reflections_count") or 0) >= 300):
+        try:
+            memory_intelligence_result = run_memory_intelligence(dry_run=False)
+            mark("memory_intelligence", 21600, {
+                "created_memories": len((memory_intelligence_result.get("memory") or {}).get("created") or []),
+                "promoted_skills": len((memory_intelligence_result.get("skills") or {}).get("promoted") or []),
+            })
+        except Exception as exc:  # pragma: no cover - defensive timer boundary
+            log_event("memory", "memory_intelligence_failed", type(exc).__name__, {"error": str(exc)[:300]}, 0.65)
+    elif skipped_reason is None:
+        skipped_reason = f"cooldown:memory_intelligence:{memory_wait}s"
+    return {
+        "drives": drives,
+        "open_goals": open_goals,
+        "created_goal_id": goal_id,
+        "workspace_artifact_id": workspace_artifact_id,
+        "self_map_id": self_map_id,
+        "memory_intelligence": memory_intelligence_result,
+        "processed_events": processed,
+        "skipped_reason": skipped_reason,
+    }

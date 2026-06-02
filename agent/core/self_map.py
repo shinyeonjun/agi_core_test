@@ -8,10 +8,11 @@ import shutil
 import socket
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from agent.config.defaults import env_path, now_kst, project_root, workspace_root
+from agent.config.defaults import KST, env_path, now_kst, project_root, workspace_root
 from agent.core.autonomy import get_autonomy_state
 from agent.core.database import connect, get_schema_version, init_db
 from agent.core.events import log_event
@@ -206,7 +207,7 @@ def refresh_self_map(*, record_event: bool = True) -> dict[str, Any]:
         )
         conn.commit()
         row_id = int(cur.lastrowid)
-    result = {"id": row_id, "changed": changed, "fingerprint": fingerprint, "summary": summary, "snapshot": snapshot}
+    result = {"id": row_id, "created_at": snapshot["created_at"], "changed": changed, "fingerprint": fingerprint, "summary": summary, "snapshot": snapshot}
     if record_event:
         event_type = "self_map_changed" if changed else "self_map_refreshed"
         log_event("self_map", event_type, summary, {"self_map_id": row_id, "changed": changed}, 0.72 if changed else 0.35)
@@ -223,11 +224,42 @@ def latest_self_map() -> dict[str, Any] | None:
     return {**row, "snapshot": snapshot}
 
 
-def self_map_brief() -> dict[str, Any] | None:
+def _active_service_count(item: dict[str, Any] | None) -> int:
+    if not item:
+        return 0
+    services = ((item.get("snapshot") or {}).get("services") or {})
+    return len([state for state in services.values() if state == "active"])
+
+
+def _age_seconds(item: dict[str, Any] | None) -> float | None:
+    if not item or not item.get("created_at"):
+        return None
+    try:
+        created = datetime.fromisoformat(str(item["created_at"]))
+    except ValueError:
+        return None
+    return max(0.0, (datetime.now(created.tzinfo or KST) - created).total_seconds())
+
+
+def latest_self_map_fresh(*, max_age_seconds: int = 300, refresh_if_stale: bool = True, record_event_on_refresh: bool = True) -> dict[str, Any] | None:
     latest = latest_self_map()
+    age = _age_seconds(latest)
+    stale = latest is None or age is None or age > max(1, int(max_age_seconds))
+    suspicious = latest is not None and _active_service_count(latest) == 0 and shutil.which("systemctl") is not None
+    if refresh_if_stale and (stale or suspicious):
+        return refresh_self_map(record_event=record_event_on_refresh and (stale or suspicious))
+    return latest
+
+
+def self_map_brief(*, max_age_seconds: int | None = None, refresh_if_stale: bool = False, record_event_on_refresh: bool = True) -> dict[str, Any] | None:
+    latest = (
+        latest_self_map_fresh(max_age_seconds=max_age_seconds, refresh_if_stale=refresh_if_stale, record_event_on_refresh=record_event_on_refresh)
+        if max_age_seconds is not None
+        else latest_self_map()
+    )
     if not latest:
         return None
-    snapshot = latest["snapshot"]
+    snapshot = latest.get("snapshot") or latest
     host = snapshot.get("host") or {}
     os_release = host.get("os_release") or {}
     return {

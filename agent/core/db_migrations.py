@@ -113,10 +113,19 @@ def _migration_0003_operating_reviews(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_operating_reviews_status ON operating_reviews(status)")
 
 
+def _migration_0004_memory_intelligence_indexes(conn: sqlite3.Connection) -> None:
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_updated ON memories(updated_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_last_used ON memories(last_used_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_use_count ON memories(use_count)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_reflections_created ON reflections(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_reflections_summary ON reflections(summary)")
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("0001_existing_db_repairs", "Backfill approval task links and memory FTS schema", _migration_0001_existing_db_repairs),
     Migration("0002_task_queue_locks", "Add task queue lease, idempotency, and scheduling fields", _migration_0002_task_queue_locks),
     Migration("0003_operating_reviews", "Ensure operating intelligence review storage", _migration_0003_operating_reviews),
+    Migration("0004_memory_intelligence_indexes", "Add memory and reflection indexes for compaction and retrieval", _migration_0004_memory_intelligence_indexes),
 )
 
 

@@ -1,8 +1,10 @@
 import json
+from datetime import datetime, timedelta
 
 from agent.bridge.reports import build_activity_summary
 from agent.cli.agentctl import main
-from agent.core.database import init_db
+from agent.config.defaults import KST
+from agent.core.database import connect, init_db
 from agent.core.decision import build_talk_decision
 from agent.core.self_map import latest_self_map, refresh_self_map, self_map_brief
 from agent.scheduler.idle_policy import run_idle_policy
@@ -75,3 +77,33 @@ def test_decision_and_summary_use_latest_self_map(monkeypatch, tmp_path):
     assert decision["runtime_self_map"]["summary"]
     assert "self-map" in summary
     assert "DISCORD_BOT_TOKEN" not in summary
+
+
+def test_self_map_brief_refreshes_stale_snapshot(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    old_created = (datetime.now(KST) - timedelta(hours=2)).isoformat(timespec="seconds")
+    stale_snapshot = {
+        "created_at": old_created,
+        "summary": "stale self-map",
+        "host": {"os_release": {"pretty_name": "old"}, "hostname": "old", "machine": "old"},
+        "paths": {},
+        "git": {},
+        "services": {},
+        "autonomy": {},
+        "database": {},
+    }
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO self_maps (created_at, summary, snapshot_json, fingerprint, changed)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (old_created, "stale self-map", json.dumps(stale_snapshot), "stale", 1),
+        )
+        conn.commit()
+
+    brief = self_map_brief(max_age_seconds=60, refresh_if_stale=True)
+
+    assert brief is not None
+    assert brief["id"] == 2
+    assert brief["summary"] != "stale self-map"

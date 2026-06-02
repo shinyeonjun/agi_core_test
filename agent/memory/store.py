@@ -76,12 +76,24 @@ def _score_memory(row: dict[str, Any], query: str, terms: list[str], fts_rank: f
     tag_match = sum(1 for term in terms if any(term in tag.lower() for tag in tags)) / max(1, len(terms))
     use_count_bonus = min(1.0, math.log1p(int(row.get("use_count") or 0)) / 5)
     project_relevance = 1.0 if any(tag in {"core", "project_context", "orangepi", "digital_agi"} for tag in tags) else 0.2
-    rank_bonus = 0.2 if fts_rank is not None else 0.0
+    summary_bonus = 0.16 if row.get("memory_type") in {"summary", "preference_summary", "failure_summary"} or any(tag in {"memory_summary", "compacted"} for tag in tags) else 0.0
+    rank_bonus = 0.16 if fts_rank is not None else 0.0
     score = (
-        keyword_match * 0.30 + tag_match * 0.20 + float(row.get("importance") or 0.0) * 0.20
-        + _recency_score(row) * 0.10 + use_count_bonus * 0.10 + project_relevance * 0.10 + rank_bonus
+        keyword_match * 0.28 + tag_match * 0.18 + float(row.get("importance") or 0.0) * 0.18
+        + _recency_score(row) * 0.10 + use_count_bonus * 0.10 + project_relevance * 0.08
+        + summary_bonus + rank_bonus
     )
     row["score"] = round(score, 4)
+    row["score_components"] = {
+        "keyword": round(keyword_match, 4),
+        "tag": round(tag_match, 4),
+        "importance": float(row.get("importance") or 0.0),
+        "recency": round(_recency_score(row), 4),
+        "use_count": round(use_count_bonus, 4),
+        "project": round(project_relevance, 4),
+        "summary": round(summary_bonus, 4),
+        "fts": round(rank_bonus, 4),
+    }
     return float(row["score"])
 
 
@@ -166,6 +178,37 @@ def list_memories(limit: int = 20) -> list[dict[str, Any]]:
             (limit,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def archive_memories(memory_ids: list[int], *, reason: str = "compacted") -> int:
+    ids = [int(memory_id) for memory_id in memory_ids if memory_id is not None]
+    if not ids:
+        return 0
+    init_db()
+    placeholders = ",".join("?" for _ in ids)
+    with connect() as conn:
+        rows = conn.execute(f"SELECT id, tags_json FROM memories WHERE id IN ({placeholders}) AND archived = 0", tuple(ids)).fetchall()
+        count = 0
+        ts = now_kst()
+        for row in rows:
+            tags = _parse_tags(row["tags_json"])
+            for tag in ["archived", reason]:
+                if tag not in tags:
+                    tags.append(tag)
+            cur = conn.execute(
+                "UPDATE memories SET archived = 1, updated_at = ?, tags_json = ? WHERE id = ? AND archived = 0",
+                (ts, json.dumps(tags, ensure_ascii=False), int(row["id"])),
+            )
+            count += int(cur.rowcount)
+        conn.commit()
+        return count
+
+
+def count_archived_memories() -> int:
+    init_db()
+    with connect() as conn:
+        row = conn.execute("SELECT COUNT(*) AS count FROM memories WHERE archived = 1").fetchone()
+    return int(row["count"] if row else 0)
 
 
 def rebuild_memory_fts() -> None:

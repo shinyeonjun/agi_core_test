@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS memories (
 CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
 CREATE INDEX IF NOT EXISTS idx_memories_archived ON memories(archived);
 CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance);
+CREATE INDEX IF NOT EXISTS idx_memories_updated ON memories(updated_at);
+CREATE INDEX IF NOT EXISTS idx_memories_last_used ON memories(last_used_at);
+CREATE INDEX IF NOT EXISTS idx_memories_use_count ON memories(use_count);
 
 CREATE TABLE IF NOT EXISTS goals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,6 +137,8 @@ CREATE TABLE IF NOT EXISTS reflections (
     confidence REAL DEFAULT 0.7
 );
 CREATE INDEX IF NOT EXISTS idx_reflections_goal ON reflections(goal_id);
+CREATE INDEX IF NOT EXISTS idx_reflections_created ON reflections(created_at);
+CREATE INDEX IF NOT EXISTS idx_reflections_summary ON reflections(summary);
 
 CREATE TABLE IF NOT EXISTS skills (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -484,4 +489,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR REPLACE INTO schema_meta (key, value)
-VALUES ('schema_version', '0.11.0-alpha');
+VALUES ('schema_version', '0.12.0-alpha');

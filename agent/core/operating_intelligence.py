@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import Counter
 from datetime import datetime
@@ -233,7 +234,7 @@ def skill_candidates(limit: int = 10) -> list[dict[str, Any]]:
             name = "workspace_artifact_completion"
             trigger = "workspace 산출물 생성 후 검증"
         else:
-            name = "reflection_pattern_" + str(abs(hash(summary)))[:8]
+            name = "reflection_pattern_" + hashlib.sha256(summary.encode("utf-8")).hexdigest()[:8]
             trigger = summary[:120]
         candidates.append({
             "name": name,
@@ -268,8 +269,10 @@ def proposal_feedback(limit: int = 20) -> dict[str, Any]:
 def next_improvement_candidates() -> list[dict[str, Any]]:
     metrics = collect_metrics()
     items: list[dict[str, Any]] = []
-    if float(metrics.get("action_success_rate_24h") or 0.0) < 0.85:
-        items.append({"title": "Improve action failure critic", "reason": "24시간 action 성공률이 85% 미만", "priority": 0.86})
+    if float(metrics.get("action_execution_success_rate_24h") or metrics.get("action_success_rate_24h") or 0.0) < 0.85:
+        items.append({"title": "Improve action failure critic", "reason": "24시간 실행 action 성공률이 85% 미만", "priority": 0.86})
+    if float(metrics.get("action_planned_block_rate_24h") or 0.0) >= 0.15:
+        items.append({"title": "Separate planned blocks from failures", "reason": "정상적인 정책/모드 차단이 성공률을 흐리고 있음", "priority": 0.83})
     if int(metrics.get("memories_count") or 0) >= 200 or int(metrics.get("reflections_count") or 0) >= 300:
         items.append({"title": "Compact old memories and reflections", "reason": "기억/회고 누적량이 커짐", "priority": 0.84})
     if int(metrics.get("skills_count") or 0) <= 3:

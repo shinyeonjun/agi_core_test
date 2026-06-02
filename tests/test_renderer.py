@@ -8,9 +8,9 @@ from agent.renderer.validator import validate_codex_output, validate_output
 
 
 def test_fallback_renderer_contains_contract_tokens():
-    decision = {"version": "0.11", "selected_goal": {"id": 1, "title": "Answer user input"}, "drive_scores": {"completion": 0.2}, "policy_summary": {"risk_level": "low", "requires_approval": False}, "relevant_memories": [], "relevant_skills": [], "renderer": "fallback"}
+    decision = {"version": "0.12", "selected_goal": {"id": 1, "title": "Answer user input"}, "drive_scores": {"completion": 0.2}, "policy_summary": {"risk_level": "low", "requires_approval": False}, "relevant_memories": [], "relevant_skills": [], "renderer": "fallback"}
     text = render(decision)
-    assert "v0.11" in text
+    assert "v0.12" in text
     assert "Core" in text
 
 
@@ -20,7 +20,7 @@ def test_validator_rejects_agi_claim():
 
 
 def test_codex_validator_rejects_unsafe_command():
-    result = validate_codex_output("v0.6 Core event goal sudo apt install nginx", {"must_include": ["v0.11", "Core", "event", "goal"], "must_not_include": []})
+    result = validate_codex_output("v0.6 Core event goal sudo apt install nginx", {"must_include": ["v0.12", "Core", "event", "goal"], "must_not_include": []})
     assert result["ok"] is False
 
 

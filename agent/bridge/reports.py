@@ -22,7 +22,7 @@ from agent.tools.action_log import get_action_run, list_action_runs
 
 def build_daily_summary() -> str:
     metrics = collect_metrics()
-    self_map = self_map_brief()
+    self_map = self_map_brief(max_age_seconds=300, refresh_if_stale=True, record_event_on_refresh=False)
     approvals = ApprovalStore().list(status=None, limit=20)
     actions = list_action_runs(20)
     goals = meaningful_open_goals(limit=10)
@@ -187,7 +187,7 @@ def build_observation_dashboard() -> str:
     events = list_events(limit=16)
     reflections = list_reflections(limit=5)
     approvals = ApprovalStore().list_pending()
-    self_map = self_map_brief()
+    self_map = self_map_brief(max_age_seconds=300, refresh_if_stale=True, record_event_on_refresh=False)
     task_counts = task_status_counts()
     intelligence = operating_snapshot(persist=False)
     recent_tasks = list_tasks(limit=6)
@@ -217,7 +217,8 @@ def build_observation_dashboard() -> str:
         "**24\uc2dc\uac04 \uc9c0\ud45c**",
         _line("tick", f"{metrics.get('tick_count_24h')}\ud68c"),
         _line("Discord \uba54\uc2dc\uc9c0", f"{metrics.get('discord_messages_24h')}\uac74"),
-        _line("action \uc131\uacf5\ub960", _format_rate(metrics.get("action_success_rate_24h"))),
+        _line("action \uc131\uacf5\ub960", f"실행 {_format_rate(metrics.get('action_execution_success_rate_24h'))} / 전체 {_format_rate(metrics.get('action_success_rate_24h'))}"),
+        _line("계획 차단율", _format_rate(metrics.get("action_planned_block_rate_24h"))),
         _line("\ucc28\ub2e8/\uc2dc\uac04\ucd08\uacfc", f"{metrics.get('action_blocked_count_24h')}\uac74 / {metrics.get('action_timeout_count_24h')}\uac74"),
         _line("critical \uc815\ucc45 \uac10\uc9c0", f"{metrics.get('policy_critical_count_24h')}\uac74"),
         _line("\uc0ac\uc6a9\uc790 \ud050", f"queued {task_counts.get('user:queued', 0)} / running {task_counts.get('user:running', 0)}"),

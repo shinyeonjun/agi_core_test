@@ -14,6 +14,7 @@ from agent.core.events import list_events, log_event
 from agent.core.goals import cleanup_noise_goals, list_goals, mark_goal_done
 from agent.core.goal_generator import add_root_objective, generate_goal_candidates, list_goal_candidates, list_root_objectives, seed_default_objectives, set_objective_enabled
 from agent.core.learner import list_reflections, list_skills, upsert_skill, update_after_turn
+from agent.core.memory_intelligence import compact_memories, promote_skill_candidates, run_memory_intelligence
 from agent.core.metrics import collect_metrics
 from agent.core.observability import action_failure_breakdown, action_observation, latest_decision_traces, observability_snapshot, task_observation
 from agent.core.operating_intelligence import action_critics, memory_hygiene_candidates, operating_snapshot, ranked_goals, refresh_goal_priorities, skill_candidates
@@ -153,6 +154,11 @@ def cmd_memory_rebuild_fts(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_memory_compact(args: argparse.Namespace) -> int:
+    print_json(compact_memories(min_size=args.min_size, limit=args.limit, dry_run=bool(args.dry_run)))
+    return 0
+
+
 def _policy_response(proposal: ActionProposal, approval_id: int | None = None) -> dict[str, object]:
     result = proposal.to_dict()
     result["approval_id"] = approval_id
@@ -214,6 +220,11 @@ def cmd_skills(args: argparse.Namespace) -> int:
 def cmd_skill_add(args: argparse.Namespace) -> int:
     skill_id = upsert_skill(args.name, args.trigger, args.procedure, args.tags or [])
     print(f"skill upsert complete: #{skill_id}")
+    return 0
+
+
+def cmd_skill_promote(args: argparse.Namespace) -> int:
+    print_json(promote_skill_candidates(limit=args.limit, dry_run=bool(args.dry_run), min_evidence=args.min_evidence))
     return 0
 
 
@@ -465,6 +476,9 @@ def cmd_intelligence(args: argparse.Namespace) -> int:
     if args.intelligence_command == "skills":
         print_json({"items": skill_candidates(limit=args.limit)})
         return 0
+    if args.intelligence_command == "maintain":
+        print_json(run_memory_intelligence(dry_run=bool(args.dry_run)))
+        return 0
     raise ValueError(f"unknown intelligence command: {args.intelligence_command}")
 
 
@@ -588,6 +602,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_add = memory_sub.add_parser("add"); p_add.add_argument("title"); p_add.add_argument("content"); p_add.add_argument("--type", default="fact"); p_add.add_argument("--tags", nargs="*"); p_add.add_argument("--importance", type=float, default=0.5); p_add.add_argument("--confidence", type=float, default=0.7); p_add.set_defaults(func=cmd_memory_add)
     p_search = memory_sub.add_parser("search"); p_search.add_argument("query"); p_search.add_argument("--limit", type=int, default=10); p_search.set_defaults(func=cmd_memory_search)
     p_fts = memory_sub.add_parser("rebuild-fts"); p_fts.set_defaults(func=cmd_memory_rebuild_fts)
+    p_memory_compact = memory_sub.add_parser("compact"); p_memory_compact.add_argument("--limit", type=int, default=5); p_memory_compact.add_argument("--min-size", type=int, default=3); p_memory_compact.add_argument("--dry-run", action="store_true"); p_memory_compact.set_defaults(func=cmd_memory_compact)
 
     p = sub.add_parser("policy-check"); p.add_argument("text"); p.add_argument("--action-type", default="shell_text"); p.set_defaults(func=cmd_policy_check)
     p = sub.add_parser("approvals"); p.add_argument("--all", action="store_true"); p.add_argument("--limit", type=int, default=20); p.set_defaults(func=cmd_approvals)
@@ -598,6 +613,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("skills"); p.add_argument("--limit", type=int, default=20); p.set_defaults(func=cmd_skills)
     p = sub.add_parser("skill"); skill_sub = p.add_subparsers(dest="skill_command", required=True)
     p_skill_add = skill_sub.add_parser("add"); p_skill_add.add_argument("name"); p_skill_add.add_argument("trigger"); p_skill_add.add_argument("procedure", nargs="+"); p_skill_add.add_argument("--tags", nargs="*"); p_skill_add.set_defaults(func=cmd_skill_add)
+    p_skill_promote = skill_sub.add_parser("promote"); p_skill_promote.add_argument("--limit", type=int, default=5); p_skill_promote.add_argument("--min-evidence", type=int, default=3); p_skill_promote.add_argument("--dry-run", action="store_true"); p_skill_promote.set_defaults(func=cmd_skill_promote)
     p = sub.add_parser("style"); style_sub = p.add_subparsers(dest="style_command", required=True)
     p_style_show = style_sub.add_parser("show"); p_style_show.set_defaults(func=cmd_style)
     p_style_feedback = style_sub.add_parser("feedback"); p_style_feedback.add_argument("text"); p_style_feedback.set_defaults(func=cmd_style)
@@ -664,6 +680,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_int_critics = intelligence_sub.add_parser("critics"); p_int_critics.add_argument("--limit", type=int, default=20); p_int_critics.set_defaults(func=cmd_intelligence)
     p_int_memory = intelligence_sub.add_parser("memory"); p_int_memory.add_argument("--limit", type=int, default=20); p_int_memory.set_defaults(func=cmd_intelligence)
     p_int_skills = intelligence_sub.add_parser("skills"); p_int_skills.add_argument("--limit", type=int, default=20); p_int_skills.set_defaults(func=cmd_intelligence)
+    p_int_maintain = intelligence_sub.add_parser("maintain"); p_int_maintain.add_argument("--dry-run", action="store_true"); p_int_maintain.set_defaults(func=cmd_intelligence)
     p = sub.add_parser("workspace"); workspace_sub = p.add_subparsers(dest="workspace_command", required=True)
     p_ws_init = workspace_sub.add_parser("init"); p_ws_init.set_defaults(func=cmd_workspace)
     p_ws_report = workspace_sub.add_parser("report"); p_ws_report.add_argument("--title", default="Workspace status report"); p_ws_report.set_defaults(func=cmd_workspace)

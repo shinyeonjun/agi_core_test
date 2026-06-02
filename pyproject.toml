@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-core"
-version = "0.11.0a0"
+version = "0.12.0a0"
 description = "Local Stateful Digital AGI-oriented Agent Core for Orange Pi"
 requires-python = ">=3.12"
 dependencies = [
