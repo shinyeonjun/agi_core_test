@@ -12,8 +12,9 @@ from agent.core.events import list_events
 from agent.core.goal_generator import list_goal_candidates, meaningful_open_goals
 from agent.core.learner import list_reflections
 from agent.core.metrics import collect_metrics
+from agent.core.observability import action_failure_breakdown, action_observation, task_observation
 from agent.core.self_map import self_map_brief
-from agent.core.task_queue import task_status_counts
+from agent.core.task_queue import list_tasks, task_status_counts
 from agent.lab.proposals import list_action_proposals, proposal_status_counts
 from agent.tools.action_log import get_action_run, list_action_runs
 
@@ -58,6 +59,10 @@ def _ko_summary(value: object) -> str:
     mapping = {
         "rc=0": "\uc815\uc0c1 \uc885\ub8cc",
         "timeout": "\uc2dc\uac04 \ucd08\uacfc",
+        "command_not_found": "명령 없음",
+        "approval_required": "승인 필요",
+        "env_access_denied": ".env 접근 차단",
+        "secret_access_denied": "민감정보 접근 차단",
         "ssh_key_access_denied": "SSH \ud0a4 \uc811\uadfc \ucc28\ub2e8",
         "profile_not_full_device_lab": "\uc2e4\ud589 \ud504\ub85c\ud544\uc774 \uc544\ub2c8\ub77c \ucc28\ub2e8",
         "root_delete_denied": "\uc704\ud5d8\ud55c \uc0ad\uc81c \ucc28\ub2e8",
@@ -183,6 +188,8 @@ def build_observation_dashboard() -> str:
     approvals = ApprovalStore().list_pending()
     self_map = self_map_brief()
     task_counts = task_status_counts()
+    recent_tasks = list_tasks(limit=6)
+    action_breakdown = action_failure_breakdown(actions)
     last_action = actions[0] if actions else None
     interesting_events = _interesting_events(events)
     last_event = interesting_events[0] if interesting_events else (events[0] if events else None)
@@ -214,11 +221,33 @@ def build_observation_dashboard() -> str:
         _line("\uc0ac\uc6a9\uc790 \ud050", f"queued {task_counts.get('user:queued', 0)} / running {task_counts.get('user:running', 0)}"),
         _line("\uc790\uc728 \ud050", f"queued {task_counts.get('autonomous:queued', 0)} / running {task_counts.get('autonomous:running', 0)}"),
         "",
+        "**실패/차단 원인**",
+    ])
+    if action_breakdown:
+        for category, count in sorted(action_breakdown.items()):
+            lines.append(f"- {category}: {count}건")
+    else:
+        lines.append("- 최근 action에는 실패/차단 원인이 없어.")
+
+    lines.extend([
+        "",
+        "**작업 큐 상태**",
+    ])
+    if recent_tasks:
+        for task in recent_tasks[:4]:
+            observed_task = task_observation(task)
+            lines.append(f"- #{observed_task['id']} {compact_text(observed_task['title'])}: {observed_task['waiting_reason']} / 다음: {observed_task['next_step']}")
+    else:
+        lines.append("- 현재 작업 큐가 비어 있어.")
+
+    lines.extend([
+        "",
         "**\ucd5c\uadfc action**",
     ])
     if actions:
         for action in actions[:4]:
-            lines.append(f"- #{action.get('id')} {_action_label(action)}: {_ko_status(action.get('status'))} / {_ko_summary(action.get('result_summary'))}")
+            observed_action = action_observation(action)
+            lines.append(f"- #{action.get('id')} {_action_label(action)}: {_ko_status(action.get('status'))} / {observed_action['label']} / {observed_action['summary_label']}")
     else:
         lines.append("- \uc544\uc9c1 \uae30\ub85d\ub41c action\uc774 \uc5c6\uc5b4.")
 

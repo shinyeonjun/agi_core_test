@@ -9,6 +9,7 @@ from agent.core.drives import compute_drives
 from agent.core.goals import create_goal
 from agent.core.learner import retrieve_skills
 from agent.core.metrics import collect_metrics
+from agent.core.observability import decision_trace
 from agent.core.policy import PolicyEngine
 from agent.core.self_map import self_map_brief
 from agent.core.style import apply_style_feedback, get_active_style_profile, style_directives
@@ -32,7 +33,7 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
     skills = retrieve_skills(user_message, tags=["talk", "core"], limit=3)
     selected_goal = user_goal or {"id": answer_goal_id, "title": "Answer user input", "goal_type": "answer_user"}
     selected_goal_id = int(selected_goal["id"])
-    return {
+    decision = {
         "version": "0.8",
         "kind": "talk_response",
         "created_at": now_kst(),
@@ -64,3 +65,5 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
         "must_not_include": ["auto sudo execution", "consciousness emerged", "OS change without approval", "AGI achieved"],
         "renderer_hint": {"language": "ko", "style": "calm, precise"},
     }
+    decision["decision_trace"] = decision_trace(decision)
+    return decision

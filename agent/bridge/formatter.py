@@ -5,6 +5,8 @@ import re
 import textwrap
 from typing import Any
 
+from agent.core.observability import action_observation
+
 MENTION_RE = re.compile(r"<@!?\d+>")
 SECRET_PATTERNS = (
     re.compile(r"https://discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9._-]+", re.IGNORECASE),
@@ -91,6 +93,7 @@ def format_action_update(row: dict[str, Any] | None) -> str:
         return "**\uc791\uc5c5 \uc5c5\ub370\uc774\ud2b8**\n\uc694\uccad\ud55c action\uc744 \ucc3e\uc9c0 \ubabb\ud588\uc5b4."
     command = _decode_command(row.get("command_json"))
     detail = _action_detail(command, row.get("returncode"))
+    observed = action_observation(row)
     return "\n".join([
         f"**작업 {_status_title(row.get('status'))} #{row.get('id')}**",
         _action_sentence(row, command),
@@ -99,6 +102,8 @@ def format_action_update(row: dict[str, Any] | None) -> str:
         f"위험도: {compact_text(row.get('risk_level'))}",
         f"영향: {_impact_label(row, command)}",
         f"결과: {_result_label(row)}",
+        f"분류: {observed['label']}",
+        f"다음: {observed['next_step']}",
         f"상세: {detail}",
     ])
 
@@ -202,6 +207,10 @@ def _summary_label(summary: str) -> str:
     mapping = {
         "rc=0": "성공",
         "timeout": "시간 초과",
+        "command_not_found": "명령 없음",
+        "approval_required": "승인 필요",
+        "env_access_denied": ".env 접근 차단",
+        "secret_access_denied": "민감정보 접근 차단",
         "ssh_key_access_denied": "SSH 키 접근 차단",
         "profile_not_full_device_lab": "실행 프로필 불일치",
         "root_delete_denied": "위험한 삭제 차단",

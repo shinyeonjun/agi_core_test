@@ -15,6 +15,7 @@ from agent.core.goals import cleanup_noise_goals, list_goals, mark_goal_done
 from agent.core.goal_generator import add_root_objective, generate_goal_candidates, list_goal_candidates, list_root_objectives, seed_default_objectives, set_objective_enabled
 from agent.core.learner import list_reflections, list_skills, upsert_skill, update_after_turn
 from agent.core.metrics import collect_metrics
+from agent.core.observability import action_failure_breakdown, action_observation, latest_decision_traces, observability_snapshot, task_observation
 from agent.core.pipeline import run_talk
 from agent.core.policy import ActionProposal, PolicyEngine
 from agent.core.self_map import latest_self_map, refresh_self_map, self_map_brief
@@ -411,6 +412,23 @@ def cmd_tasks(args: argparse.Namespace) -> int:
     raise ValueError(f"unknown tasks command: {args.tasks_command}")
 
 
+def cmd_observe(args: argparse.Namespace) -> int:
+    if args.observe_command == "snapshot":
+        print_json(observability_snapshot(args.limit))
+        return 0
+    if args.observe_command == "actions":
+        actions = list_action_runs(args.limit)
+        print_json({"items": [action_observation(row) for row in actions], "failure_breakdown": action_failure_breakdown(actions)})
+        return 0
+    if args.observe_command == "tasks":
+        print_json({"items": [task_observation(row) for row in list_queued_tasks(args.limit)]})
+        return 0
+    if args.observe_command == "decisions":
+        print_json({"items": latest_decision_traces(args.limit)})
+        return 0
+    raise ValueError(f"unknown observe command: {args.observe_command}")
+
+
 def cmd_workspace(args: argparse.Namespace) -> int:
     if args.workspace_command == "init":
         print_json(ensure_workspace())
@@ -592,6 +610,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_tasks_sync = tasks_sub.add_parser("sync"); p_tasks_sync.set_defaults(func=cmd_tasks)
     p_tasks_run_user = tasks_sub.add_parser("run-user"); p_tasks_run_user.add_argument("task_id", type=int); p_tasks_run_user.set_defaults(func=cmd_tasks)
     p_tasks_doctor = tasks_sub.add_parser("doctor"); p_tasks_doctor.add_argument("--max-age-seconds", type=int, default=1800); p_tasks_doctor.set_defaults(func=cmd_tasks)
+    p = sub.add_parser("observe"); observe_sub = p.add_subparsers(dest="observe_command", required=True)
+    p_observe_snapshot = observe_sub.add_parser("snapshot"); p_observe_snapshot.add_argument("--limit", type=int, default=10); p_observe_snapshot.set_defaults(func=cmd_observe)
+    p_observe_actions = observe_sub.add_parser("actions"); p_observe_actions.add_argument("--limit", type=int, default=10); p_observe_actions.set_defaults(func=cmd_observe)
+    p_observe_tasks = observe_sub.add_parser("tasks"); p_observe_tasks.add_argument("--limit", type=int, default=10); p_observe_tasks.set_defaults(func=cmd_observe)
+    p_observe_decisions = observe_sub.add_parser("decisions"); p_observe_decisions.add_argument("--limit", type=int, default=5); p_observe_decisions.set_defaults(func=cmd_observe)
     p = sub.add_parser("workspace"); workspace_sub = p.add_subparsers(dest="workspace_command", required=True)
     p_ws_init = workspace_sub.add_parser("init"); p_ws_init.set_defaults(func=cmd_workspace)
     p_ws_report = workspace_sub.add_parser("report"); p_ws_report.add_argument("--title", default="Workspace status report"); p_ws_report.set_defaults(func=cmd_workspace)

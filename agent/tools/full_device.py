@@ -112,8 +112,8 @@ def run_action(command: str, *, cwd: str | None = None, timeout_seconds: int = D
         completed = subprocess.run(argv, cwd=resolved_cwd, shell=use_shell, text=True, capture_output=True, timeout=timeout_seconds, check=False)
         stdout = redact_action_output(completed.stdout)
         stderr = redact_action_output(completed.stderr)
-        status = "completed"
         returncode = completed.returncode
+        status = "completed"
         summary = f"rc={returncode}"
     except subprocess.TimeoutExpired as exc:
         stdout = redact_action_output(exc.stdout if isinstance(exc.stdout, str) else "")
@@ -124,7 +124,7 @@ def run_action(command: str, *, cwd: str | None = None, timeout_seconds: int = D
     except FileNotFoundError as exc:
         stdout = ""
         stderr = redact_action_output(str(exc))
-        status = "completed"
+        status = "failed"
         returncode = 127
         summary = "command_not_found"
     after = lightweight_snapshot(resolved_cwd)
