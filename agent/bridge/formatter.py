@@ -94,7 +94,6 @@ def format_action_update(row: dict[str, Any] | None) -> str:
     observed = action_observation(row)
     title = f"작업 {_status_title(row.get('status'))} #{row.get('id')}"
     purpose = _action_purpose(row, command)
-    detail = _action_detail(command, row.get("returncode"))
     lines = [
         f"**{title}**",
         _action_sentence(row, purpose),
@@ -108,8 +107,6 @@ def format_action_update(row: dict[str, Any] | None) -> str:
         lines.insert(3, "결과: 성공")
     if row.get("status") == "blocked":
         lines.insert(4, "결과: 차단")
-    if detail:
-        lines.append(f"상세: {detail}")
     return "\n".join(lines)
 
 
@@ -133,11 +130,21 @@ def _action_purpose(row: dict[str, Any], command: list[str]) -> str:
     summary = compact_text(row.get("result_summary"))
     text = _command_text(command).lower()
     if summary == "profile_not_full_device_lab":
-        return "로컬 실행"
+        return "자동 로컬 실행"
     if summary == "ssh_key_access_denied":
         return "SSH 키 접근"
     if summary == "root_delete_denied":
         return "위험한 삭제"
+    if "agentctl workspace report" in text:
+        return "작업공간 상태 보고서"
+    if "agentctl eval run" in text:
+        return "Core 평가"
+    if "agentctl audit" in text:
+        return "Core 안전 점검"
+    if "pytest" in text:
+        return "테스트"
+    if text.startswith("git status") or " git status" in text:
+        return "Git 상태 확인"
     if "df -h /" in text or text == "df -h /":
         return "루트 디스크 상태"
     if text.startswith("df "):
@@ -158,6 +165,12 @@ def _action_sentence(row: dict[str, Any], purpose: str) -> str:
     if status == "completed":
         if purpose == "루트 디스크 상태":
             return "루트 디스크 상태를 확인했어."
+        if purpose.endswith("확인"):
+            return f"{purpose}을 끝냈어."
+        if purpose.endswith("점검") or purpose.endswith("평가") or purpose == "테스트":
+            return f"{purpose}을 완료했어."
+        if purpose.endswith("보고서"):
+            return f"{purpose}를 만들었어."
         return f"{purpose}을 완료했어."
     if status == "blocked":
         return f"{purpose}은 실행하지 않았어."
@@ -196,22 +209,16 @@ def _risk_label(value: object) -> str:
 def _impact_label(row: dict[str, Any], command: list[str]) -> str:
     status = compact_text(row.get("status"))
     text = _command_text(command).lower()
-    readonly_prefixes = ("df ", "free ", "pwd", "ls ", "find ")
+    readonly_prefixes = ("df ", "free ", "pwd", "ls ", "find ", "git status")
     if status == "blocked":
         return "실행 안 됨, 시스템 변경 없음"
     if text.startswith(readonly_prefixes) or "systemctl --failed" in text:
         return "읽기 전용, 시스템 변경 없음"
+    if "agentctl workspace report" in text:
+        return "보고서 파일 생성"
+    if "pytest" in text or "agentctl eval run" in text or "agentctl audit" in text:
+        return "검증 실행, 시스템 설정 변경 없음"
     return "로컬 명령 1회 실행"
-
-
-def _action_detail(command: list[str], returncode: object) -> str:
-    command_text = _command_text(command)
-    if not command_text:
-        return ""
-    rc = compact_text(returncode)
-    if rc == "-":
-        return f"`{command_text}`"
-    return f"`{command_text}`, rc={rc}"
 
 
 def format_daily_summary(metrics: dict[str, Any], approvals: list[dict[str, Any]], actions: list[dict[str, Any]], goals: list[dict[str, Any]]) -> str:

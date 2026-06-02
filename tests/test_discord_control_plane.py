@@ -153,7 +153,9 @@ def test_action_update_is_control_room_readable(monkeypatch, tmp_path):
     assert "루트 디스크 상태를 확인했어." in text
     assert "영향: 읽기 전용, 시스템 변경 없음" in text
     assert "결과: 성공" in text
-    assert "상세: `df -h /`, rc=0" in text
+    assert "df -h" not in text
+    assert "rc=0" not in text
+    assert "상세:" not in text
     assert "명령:" not in text
     assert "반환값:" not in text
     assert "['df', '-h', '/']" not in text
@@ -175,6 +177,27 @@ def test_action_update_explains_blocked_impact(monkeypatch, tmp_path):
     assert "위험한 삭제 차단" in text
     assert "영향: 실행 안 됨, 시스템 변경 없음" in text
     assert "결과: 차단" in text
+    assert "rm -rf" not in text
+    assert "상세:" not in text
+    assert_no_mojibake(text)
+
+
+def test_action_update_translates_workspace_report(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    text = format_action_update({
+        "id": 12,
+        "status": "completed",
+        "profile": "full_device_lab",
+        "risk_level": "medium",
+        "command_json": json.dumps(["./venv/bin/agentctl", "workspace", "report", "--title", "Lab experiment report"]),
+        "result_summary": "rc=0",
+        "returncode": 0,
+    })
+    assert "작업 완료 #12" in text
+    assert "작업공간 상태 보고서를 만들었어." in text
+    assert "영향: 보고서 파일 생성" in text
+    assert "agentctl workspace report" not in text
+    assert "Lab experiment report" not in text
     assert_no_mojibake(text)
 
 
