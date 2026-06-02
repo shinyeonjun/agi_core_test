@@ -9,6 +9,8 @@ from agent.core.metrics import collect_metrics
 METRIC_KEYS = {
     "events_count",
     "memories_count",
+    "memory_vector_count",
+    "memory_vector_coverage",
     "open_goals_count",
     "meaningful_open_goals_count",
     "noise_open_goals_count",

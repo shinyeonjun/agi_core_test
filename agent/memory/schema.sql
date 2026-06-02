@@ -34,6 +34,20 @@ CREATE INDEX IF NOT EXISTS idx_memories_updated ON memories(updated_at);
 CREATE INDEX IF NOT EXISTS idx_memories_last_used ON memories(last_used_at);
 CREATE INDEX IF NOT EXISTS idx_memories_use_count ON memories(use_count);
 
+CREATE TABLE IF NOT EXISTS memory_vectors (
+    memory_id INTEGER NOT NULL,
+    vector_type TEXT NOT NULL,
+    dimensions INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    vector_json TEXT NOT NULL,
+    nonzero_count INTEGER DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(memory_id, vector_type)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_vectors_type ON memory_vectors(vector_type);
+CREATE INDEX IF NOT EXISTS idx_memory_vectors_hash ON memory_vectors(content_hash);
+CREATE INDEX IF NOT EXISTS idx_memory_vectors_updated ON memory_vectors(updated_at);
+
 CREATE TABLE IF NOT EXISTS goals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
@@ -489,4 +503,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR REPLACE INTO schema_meta (key, value)
-VALUES ('schema_version', '0.12.0-alpha');
+VALUES ('schema_version', '0.13.0-alpha');

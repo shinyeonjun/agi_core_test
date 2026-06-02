@@ -18,18 +18,21 @@ def test_migrations_are_recorded_and_schema_is_current(monkeypatch, tmp_path):
 
     status = check_migrations()
 
-    assert get_schema_version() == "0.12.0-alpha"
+    assert get_schema_version() == "0.13.0-alpha"
     assert status["pending"] == []
     assert {row["version"] for row in status["known"]} >= {
         "0001_existing_db_repairs",
         "0002_task_queue_locks",
         "0003_operating_reviews",
         "0004_memory_intelligence_indexes",
+        "0005_sparse_memory_vectors",
     }
     with connect() as conn:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(task_queue)").fetchall()}
+        vector_columns = {row["name"] for row in conn.execute("PRAGMA table_info(memory_vectors)").fetchall()}
         indexes = {row["name"] for row in conn.execute("PRAGMA index_list(memories)").fetchall()}
     assert {"locked_until", "locked_by", "idempotency_key", "not_before", "due_at", "max_attempts"} <= columns
+    assert {"memory_id", "vector_type", "dimensions", "content_hash", "vector_json", "nonzero_count", "updated_at"} <= vector_columns
     assert {"idx_memories_updated", "idx_memories_last_used", "idx_memories_use_count"} <= indexes
 
 

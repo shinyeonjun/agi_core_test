@@ -121,11 +121,32 @@ def _migration_0004_memory_intelligence_indexes(conn: sqlite3.Connection) -> Non
     conn.execute("CREATE INDEX IF NOT EXISTS idx_reflections_summary ON reflections(summary)")
 
 
+def _migration_0005_sparse_memory_vectors(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memory_vectors (
+            memory_id INTEGER NOT NULL,
+            vector_type TEXT NOT NULL,
+            dimensions INTEGER NOT NULL,
+            content_hash TEXT NOT NULL,
+            vector_json TEXT NOT NULL,
+            nonzero_count INTEGER DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(memory_id, vector_type)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_vectors_type ON memory_vectors(vector_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_vectors_hash ON memory_vectors(content_hash)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_vectors_updated ON memory_vectors(updated_at)")
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("0001_existing_db_repairs", "Backfill approval task links and memory FTS schema", _migration_0001_existing_db_repairs),
     Migration("0002_task_queue_locks", "Add task queue lease, idempotency, and scheduling fields", _migration_0002_task_queue_locks),
     Migration("0003_operating_reviews", "Ensure operating intelligence review storage", _migration_0003_operating_reviews),
     Migration("0004_memory_intelligence_indexes", "Add memory and reflection indexes for compaction and retrieval", _migration_0004_memory_intelligence_indexes),
+    Migration("0005_sparse_memory_vectors", "Add local sparse vector storage for memory reranking", _migration_0005_sparse_memory_vectors),
 )
 
 

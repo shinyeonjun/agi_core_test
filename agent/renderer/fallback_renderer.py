@@ -9,7 +9,7 @@ def render(decision: dict[str, Any]) -> str:
     top_drive = max(drives.items(), key=lambda item: item[1])[0] if drives else "unknown"
     policy = decision.get("policy_summary", {})
     skills = decision.get("relevant_skills", [])
-    version = str(decision.get("version", "v0.12"))
+    version = str(decision.get("version", "v0.13"))
     if not version.startswith("v"):
         version = f"v{version}"
     goal = decision.get("selected_goal") or {"id": decision.get("selected_goal_id"), "title": "unknown"}

@@ -8,6 +8,7 @@ from typing import Any
 
 from agent.config.defaults import KST, now_kst
 from agent.core.database import connect, init_db
+from agent.memory.sparse_vector import search_memory_vectors, upsert_memory_vector
 
 
 def add_memory(
@@ -32,7 +33,15 @@ def add_memory(
             (ts, ts, memory_type, title, content, json.dumps(tags or [], ensure_ascii=False), importance, confidence, source_event_id),
         )
         conn.commit()
-        return int(cur.lastrowid)
+        memory_id = int(cur.lastrowid)
+    upsert_memory_vector({
+        "id": memory_id,
+        "title": title,
+        "content": content,
+        "memory_type": memory_type,
+        "tags_json": json.dumps(tags or [], ensure_ascii=False),
+    })
+    return memory_id
 
 
 def _query_terms(query: str) -> list[str]:
@@ -69,7 +78,7 @@ def _recency_score(row: dict[str, Any]) -> float:
     return 0.1
 
 
-def _score_memory(row: dict[str, Any], query: str, terms: list[str], fts_rank: float | None = None) -> float:
+def _score_memory(row: dict[str, Any], query: str, terms: list[str], fts_rank: float | None = None, sparse_similarity: float | None = None) -> float:
     haystack = f"{row.get('title', '')} {row.get('content', '')}".lower()
     tags = _parse_tags(row.get("tags_json"))
     keyword_match = sum(1 for term in terms if term in haystack) / max(1, len(terms))
@@ -78,10 +87,11 @@ def _score_memory(row: dict[str, Any], query: str, terms: list[str], fts_rank: f
     project_relevance = 1.0 if any(tag in {"core", "project_context", "orangepi", "digital_agi"} for tag in tags) else 0.2
     summary_bonus = 0.16 if row.get("memory_type") in {"summary", "preference_summary", "failure_summary"} or any(tag in {"memory_summary", "compacted"} for tag in tags) else 0.0
     rank_bonus = 0.16 if fts_rank is not None else 0.0
+    sparse_bonus = max(0.0, min(1.0, float(sparse_similarity if sparse_similarity is not None else row.get("sparse_similarity") or 0.0)))
     score = (
-        keyword_match * 0.28 + tag_match * 0.18 + float(row.get("importance") or 0.0) * 0.18
-        + _recency_score(row) * 0.10 + use_count_bonus * 0.10 + project_relevance * 0.08
-        + summary_bonus + rank_bonus
+        keyword_match * 0.24 + tag_match * 0.16 + sparse_bonus * 0.22
+        + float(row.get("importance") or 0.0) * 0.16 + _recency_score(row) * 0.08
+        + use_count_bonus * 0.08 + project_relevance * 0.06 + summary_bonus + rank_bonus
     )
     row["score"] = round(score, 4)
     row["score_components"] = {
@@ -93,6 +103,7 @@ def _score_memory(row: dict[str, Any], query: str, terms: list[str], fts_rank: f
         "project": round(project_relevance, 4),
         "summary": round(summary_bonus, 4),
         "fts": round(rank_bonus, 4),
+        "sparse": round(sparse_bonus, 4),
     }
     return float(row["score"])
 
@@ -150,15 +161,35 @@ def _search_like(query: str, terms: list[str], limit: int) -> list[dict[str, Any
     return sorted(result, key=lambda row: row.get("score", 0.0), reverse=True)[:limit]
 
 
+def _merge_candidates(*candidate_groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[int, dict[str, Any]] = {}
+    for group in candidate_groups:
+        for row in group:
+            memory_id = int(row["id"])
+            existing = merged.get(memory_id)
+            if not existing:
+                merged[memory_id] = dict(row)
+                continue
+            existing["sparse_similarity"] = max(float(existing.get("sparse_similarity") or 0.0), float(row.get("sparse_similarity") or 0.0))
+            if row.get("bm25_score") is not None:
+                existing["bm25_score"] = row.get("bm25_score")
+    return list(merged.values())
+
+
 def search_memories(query: str, limit: int = 10) -> list[dict[str, Any]]:
     init_db()
     terms = _query_terms(query)
+    candidate_limit = max(limit * 5, 50)
     try:
-        rows = _search_fts(query, terms, limit)
+        fts_rows = _search_fts(query, terms, candidate_limit)
     except Exception:
-        rows = []
-    if not rows:
-        rows = _search_like(query, terms, limit)
+        fts_rows = []
+    like_rows = _search_like(query, terms, candidate_limit) if not fts_rows else []
+    vector_rows = search_memory_vectors(query, limit=candidate_limit)
+    rows = _merge_candidates(fts_rows, like_rows, vector_rows)
+    for row in rows:
+        _score_memory(row, query, terms, row.get("bm25_score"), row.get("sparse_similarity"))
+    rows = sorted(rows, key=lambda row: row.get("score", 0.0), reverse=True)[:limit]
     ids = [row["id"] for row in rows]
     if ids:
         with connect() as conn:

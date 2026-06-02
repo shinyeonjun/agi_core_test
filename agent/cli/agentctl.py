@@ -28,6 +28,7 @@ from agent.core.task_queue import doctor_tasks, list_tasks as list_queued_tasks,
 from agent.eval.harness import list_eval_runs, list_tasks as list_eval_tasks, run_suite
 from agent.language.engine import get_language_engine, interpret_user_message, language_cache_stats, list_interpretation_logs
 from agent.memory.store import add_memory, list_memories, rebuild_memory_fts, search_memories
+from agent.memory.sparse_vector import backfill_memory_vectors, search_memory_vectors, vector_status
 from agent.ops.backup import create_backup
 from agent.scheduler.tick import run_tick
 from agent.tools.system_readonly import READ_ONLY_COMMANDS, run_readonly, system_snapshot
@@ -157,6 +158,19 @@ def cmd_memory_rebuild_fts(_args: argparse.Namespace) -> int:
 def cmd_memory_compact(args: argparse.Namespace) -> int:
     print_json(compact_memories(min_size=args.min_size, limit=args.limit, dry_run=bool(args.dry_run)))
     return 0
+
+
+def cmd_vector(args: argparse.Namespace) -> int:
+    if args.vector_command == "status":
+        print_json(vector_status())
+        return 0
+    if args.vector_command == "backfill":
+        print_json(backfill_memory_vectors(limit=args.limit, force=bool(args.force), dry_run=bool(args.dry_run)))
+        return 0
+    if args.vector_command == "search":
+        print_json(search_memory_vectors(args.query, limit=args.limit, min_similarity=args.min_similarity))
+        return 0
+    raise ValueError(f"unknown vector command: {args.vector_command}")
 
 
 def _policy_response(proposal: ActionProposal, approval_id: int | None = None) -> dict[str, object]:
@@ -603,6 +617,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_search = memory_sub.add_parser("search"); p_search.add_argument("query"); p_search.add_argument("--limit", type=int, default=10); p_search.set_defaults(func=cmd_memory_search)
     p_fts = memory_sub.add_parser("rebuild-fts"); p_fts.set_defaults(func=cmd_memory_rebuild_fts)
     p_memory_compact = memory_sub.add_parser("compact"); p_memory_compact.add_argument("--limit", type=int, default=5); p_memory_compact.add_argument("--min-size", type=int, default=3); p_memory_compact.add_argument("--dry-run", action="store_true"); p_memory_compact.set_defaults(func=cmd_memory_compact)
+    p = sub.add_parser("vector"); vector_sub = p.add_subparsers(dest="vector_command", required=True)
+    p_vector_status = vector_sub.add_parser("status"); p_vector_status.set_defaults(func=cmd_vector)
+    p_vector_backfill = vector_sub.add_parser("backfill"); p_vector_backfill.add_argument("--limit", type=int, default=100); p_vector_backfill.add_argument("--force", action="store_true"); p_vector_backfill.add_argument("--dry-run", action="store_true"); p_vector_backfill.set_defaults(func=cmd_vector)
+    p_vector_search = vector_sub.add_parser("search"); p_vector_search.add_argument("query"); p_vector_search.add_argument("--limit", type=int, default=10); p_vector_search.add_argument("--min-similarity", type=float, default=0.05); p_vector_search.set_defaults(func=cmd_vector)
 
     p = sub.add_parser("policy-check"); p.add_argument("text"); p.add_argument("--action-type", default="shell_text"); p.set_defaults(func=cmd_policy_check)
     p = sub.add_parser("approvals"); p.add_argument("--all", action="store_true"); p.add_argument("--limit", type=int, default=20); p.set_defaults(func=cmd_approvals)

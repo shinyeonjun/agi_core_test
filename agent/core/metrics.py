@@ -7,6 +7,7 @@ from agent.core.autonomy import get_autonomy_state
 from agent.core.database import connect, init_db
 from agent.core.goals import is_noise_goal_record
 from agent.config.defaults import KST
+from agent.memory.sparse_vector import VECTOR_TYPE
 
 
 def _count(conn, query: str, params: tuple[Any, ...] = ()) -> int:
@@ -94,6 +95,29 @@ def collect_metrics() -> dict[str, Any]:
         return {
             "events_count": _count(conn, "SELECT COUNT(*) AS count FROM events"),
             "memories_count": _count(conn, "SELECT COUNT(*) AS count FROM memories WHERE archived = 0"),
+            "memory_vector_count": _count(
+                conn,
+                """
+                SELECT COUNT(*) AS count
+                FROM memory_vectors v
+                JOIN memories m ON m.id = v.memory_id
+                WHERE m.archived = 0 AND v.vector_type = ?
+                """,
+                (VECTOR_TYPE,),
+            ),
+            "memory_vector_coverage": round(
+                _count(
+                    conn,
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM memory_vectors v
+                    JOIN memories m ON m.id = v.memory_id
+                    WHERE m.archived = 0 AND v.vector_type = ?
+                    """,
+                    (VECTOR_TYPE,),
+                ) / max(1, _count(conn, "SELECT COUNT(*) AS count FROM memories WHERE archived = 0")),
+                4,
+            ),
             "open_goals_count": _count(conn, "SELECT COUNT(*) AS count FROM goals WHERE status IN ('proposed', 'active', 'waiting_approval', 'blocked')"),
             "meaningful_open_goals_count": meaningful_open_goals,
             "noise_open_goals_count": noise_open_goals,

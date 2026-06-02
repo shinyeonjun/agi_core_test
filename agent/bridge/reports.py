@@ -217,6 +217,7 @@ def build_observation_dashboard() -> str:
         "**24\uc2dc\uac04 \uc9c0\ud45c**",
         _line("tick", f"{metrics.get('tick_count_24h')}\ud68c"),
         _line("Discord \uba54\uc2dc\uc9c0", f"{metrics.get('discord_messages_24h')}\uac74"),
+        _line("memory vector", f"{metrics.get('memory_vector_count')}개 / coverage {_format_rate(metrics.get('memory_vector_coverage'))}"),
         _line("action \uc131\uacf5\ub960", f"실행 {_format_rate(metrics.get('action_execution_success_rate_24h'))} / 전체 {_format_rate(metrics.get('action_success_rate_24h'))}"),
         _line("계획 차단율", _format_rate(metrics.get("action_planned_block_rate_24h"))),
         _line("\ucc28\ub2e8/\uc2dc\uac04\ucd08\uacfc", f"{metrics.get('action_blocked_count_24h')}\uac74 / {metrics.get('action_timeout_count_24h')}\uac74"),
