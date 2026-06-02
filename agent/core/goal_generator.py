@@ -12,6 +12,7 @@ from agent.core.drives import compute_drives
 from agent.core.events import list_events, log_event
 from agent.core.goals import create_goal, is_noise_goal_record, list_goals, similar
 from agent.core.learner import list_reflections
+from agent.core.task_queue import enqueue_task
 from agent.tools.action_log import list_action_runs
 
 OPEN_STATUSES = {"proposed", "active", "waiting_approval", "blocked"}
@@ -293,7 +294,7 @@ def _candidate_for_objective(objective: dict[str, Any], drives: dict[str, float]
 
 def generate_goal_candidates(*, dry_run: bool = False, max_candidates: int = 3) -> dict[str, Any]:
     seed_default_objectives()
-    open_goals = meaningful_open_goals()
+    open_goals = [goal for goal in meaningful_open_goals() if goal.get("goal_type") != "user_directed"]
     if open_goals:
         result = {"created_goal_id": None, "generated": False, "reason": "meaningful_open_goal_exists", "open_goal_id": open_goals[0].get("id"), "candidates": []}
         log_event("goal", "goal_generation_skipped", result["reason"], result, 0.55)
@@ -358,10 +359,20 @@ def generate_goal_candidates(*, dry_run: bool = False, max_candidates: int = 3) 
             metadata={"generated_by": "goal_generator", "root_objective_id": selected.get("root_objective_id"), "candidate_id": selected.get("id"), "execution": "not_executed_same_tick"},
             dedupe=True,
         )
+        task_id = enqueue_task(
+            "autonomous",
+            goal_id=created_goal_id,
+            task_kind=str(selected["goal_type"]),
+            title=str(selected["title"]),
+            source="goal_generator",
+            priority=float(selected["score"]),
+            payload={"candidate_id": selected.get("id"), "root_objective_id": selected.get("root_objective_id")},
+        )
         _update_candidate(int(selected["id"]), status="proposed", generated_goal_id=created_goal_id)
         _mark_objective_used(int(selected["root_objective_id"]))
         selected["status"] = "proposed"
         selected["generated_goal_id"] = created_goal_id
+        selected["task_id"] = task_id
         for candidate in candidates[1:]:
             _update_candidate(int(candidate["id"]), status="rejected", rejection_reason="lower_score")
             candidate["status"] = "rejected"

@@ -301,6 +301,7 @@ def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
     decision = core_result.get("decision") or {}
     policy = decision.get("policy_summary") or {}
     user_goal = decision.get("user_directed_goal") or {}
+    task_result = core_result.get("task_result") or {}
     style_feedback = decision.get("style_feedback") or {}
     interpretation = decision.get("language_interpretation") or {}
     intent = interpretation.get("intent")
@@ -314,6 +315,18 @@ def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
             f"\ubc18\uc601: {feedback_type}",
             "\uc774\uac74 \ub2f5\ubcc0 \ubc29\uc2dd\uc5d0\ub9cc \uc801\uc6a9\ub418\uace0, \uc2e4\ud589/\uc815\ucc45 \ud310\ub2e8\uc740 \ubc14\uafb8\uc9c0 \uc54a\uc544.",
         ])
+    if user_goal and task_result:
+        if task_result.get("status") in {"user_goal_completed", "artifact_created", "completed", "done"}:
+            return "\n".join([
+                f"\uc644\ub8cc\ud588\uc5b4. \uc791\uc5c5 #{compact_text(task_result.get('task_id'))}\ub97c \ucc98\ub9ac\ud588\uace0, \ubaa9\ud45c #{compact_text(user_goal.get('id'))}\ub3c4 \uc815\ub9ac\ud588\uc5b4.",
+                f"\uacb0\uacfc: {compact_text(task_result.get('artifact_type') or task_result.get('status'))}",
+                "\uc774 \uc791\uc5c5\uc740 \ub300\ud654 \ud2b8\ub9ac\uac70\ub85c \ubc14\ub85c \ucc98\ub9ac\ud588\uace0, \uc790\uc728 \uc2a4\ucf00\uc904\ub7ec\uc640\ub294 \ubd84\ub9ac\ub418\uc5b4 \uc788\uc5b4.",
+            ])
+        if task_result.get("status") == "skipped":
+            return "\n".join([
+                f"\uc791\uc5c5 #{compact_text(task_result.get('task_id'))}\ub294 \ub4f1\ub85d\ud588\uc9c0\ub9cc \uc9c0\uae08 \ubc14\ub85c \ub05d\ub0b4\uc9c0\ub294 \ubabb\ud588\uc5b4.",
+                f"\uc774\uc720: {compact_text(task_result.get('reason'))}",
+            ])
     if user_goal:
         if user_goal.get("denied") or user_goal.get("status") == "blocked":
             return "\n".join([

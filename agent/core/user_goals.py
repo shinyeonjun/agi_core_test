@@ -5,6 +5,7 @@ from typing import Any
 
 from agent.core.goals import create_goal
 from agent.core.policy import PolicyEngine
+from agent.core.task_queue import enqueue_task
 from agent.language.engine import interpret_user_message
 from agent.language.fallback_rule import classify_user_goal_kind_rule
 
@@ -68,8 +69,20 @@ def maybe_create_user_goal(text: str, *, source_event_id: int | None = None, met
         metadata=goal_metadata,
         dedupe=True,
     )
+    task_status = "blocked" if status == "blocked" else "waiting_approval" if status == "waiting_approval" else "queued"
+    task_id = enqueue_task(
+        "user",
+        goal_id=goal_id,
+        task_kind=task_kind,
+        title=_title_from_text(text),
+        source="discord_user_directive",
+        priority=0.98,
+        status=task_status,
+        payload={"source_event_id": source_event_id, "risk_level": policy.risk_level, "requires_approval": policy.requires_approval},
+    )
     return {
         "id": goal_id,
+        "task_id": task_id,
         "status": status,
         "goal_type": "user_directed",
         "title": _title_from_text(text),

@@ -380,6 +380,28 @@ CREATE INDEX IF NOT EXISTS idx_action_proposals_goal ON action_proposals(goal_id
 CREATE INDEX IF NOT EXISTS idx_action_proposals_profile ON action_proposals(profile);
 CREATE INDEX IF NOT EXISTS idx_action_proposals_status ON action_proposals(status);
 
+CREATE TABLE IF NOT EXISTS task_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    queue_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    priority REAL DEFAULT 0.5,
+    goal_id INTEGER,
+    task_kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    source TEXT,
+    payload_json TEXT,
+    attempts INTEGER DEFAULT 0,
+    claimed_at TEXT,
+    completed_at TEXT,
+    result_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_task_queue_status ON task_queue(status);
+CREATE INDEX IF NOT EXISTS idx_task_queue_type_status ON task_queue(queue_type, status);
+CREATE INDEX IF NOT EXISTS idx_task_queue_goal ON task_queue(goal_id);
+CREATE INDEX IF NOT EXISTS idx_task_queue_priority ON task_queue(priority);
+
 CREATE TABLE IF NOT EXISTS root_objectives (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
@@ -422,4 +444,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR REPLACE INTO schema_meta (key, value)
-VALUES ('schema_version', '0.8.1-alpha');
+VALUES ('schema_version', '0.9.0-alpha');

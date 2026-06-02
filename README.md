@@ -14,6 +14,7 @@ Digital AGI-oriented Local Stateful Agent Core for Orange Pi 5. This project doe
 - WorkspaceExecutor bounded to `/home/ubuntu/agent_workspace`
 - ProjectSpec and workspace artifact tracking
 - Runtime self-map loop for host/service/git/config-presence awareness
+- Split task queue for immediate user tasks and scheduled autonomous tasks
 - systemd unit templates
 
 ## Basic Commands
@@ -35,6 +36,8 @@ agentctl workspace init
 agentctl workspace report --title "Daily workspace status"
 agentctl autonomy show
 agentctl action history
+agentctl tasks counts
+agentctl tasks list --queue-type user
 ```
 
 ## Discord
@@ -69,6 +72,21 @@ The normal tick loop refreshes it on cooldown, so Discord summaries and chat ren
 ```bash
 agentctl self-map refresh
 agentctl self-map show
+```
+
+## Task Queue Split
+
+User-directed work and autonomous scheduled work are intentionally separate.
+
+- Discord user directives enqueue `user` tasks and the chat bridge runs that user task immediately when policy allows it.
+- The lab scheduler only claims `autonomous` tasks. It does not consume user tasks.
+- Memory, events, reflections, goals, self-map, policy, and approvals remain shared state.
+
+```bash
+agentctl tasks counts
+agentctl tasks list --queue-type user
+agentctl tasks list --queue-type autonomous
+agentctl tasks run-user <task_id>
 ```
 
 ## Codex Runtime Tuning

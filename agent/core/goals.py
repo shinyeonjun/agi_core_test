@@ -76,6 +76,13 @@ def list_goals(limit: int = 20, include_archived: bool = False) -> list[dict[str
     return [dict(row) for row in rows]
 
 
+def get_goal(goal_id: int) -> dict[str, Any] | None:
+    init_db()
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
+    return dict(row) if row else None
+
+
 def count_open_goals() -> int:
     init_db()
     with connect() as conn:

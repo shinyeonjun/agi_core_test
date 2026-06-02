@@ -6,12 +6,13 @@ from agent.config.defaults import project_root
 from agent.core.autonomy import current_profile
 from agent.core.drives import compute_drives
 from agent.core.events import log_event
-from agent.core.goals import goal_metadata, mark_goal_done, update_goal_metadata
+from agent.core.goals import get_goal, goal_metadata, mark_goal_done, update_goal_metadata
 from agent.core.goal_generator import generate_goal_candidates, meaningful_open_goals
 from agent.core.learner import create_reflection
 from agent.core.metrics import collect_metrics
 from agent.core.policy import PolicyEngine
 from agent.core.state import load_state
+from agent.core.task_queue import claim_next_task, claim_task, enqueue_task, finish_task, list_tasks, requeue_task, task_status_counts
 from agent.lab.proposals import create_action_proposal, has_recent_goal_command, list_action_proposals, normalize_command, proposal_status_counts, update_action_proposal_status
 from agent.tools.action_log import list_action_runs
 from agent.tools.full_device import run_action
@@ -55,6 +56,55 @@ def _active_goal() -> dict[str, Any] | None:
     return goals[0] if goals else None
 
 
+def _queue_type_for_goal(goal: dict[str, Any]) -> str:
+    metadata = goal_metadata(goal)
+    if goal.get("goal_type") == "user_directed" or metadata.get("priority_owner") == "user":
+        return "user"
+    return "autonomous"
+
+
+def _task_status_for_goal(goal: dict[str, Any]) -> str:
+    status = str(goal.get("status") or "queued")
+    if status == "waiting_approval":
+        return "waiting_approval"
+    if status == "blocked":
+        return "blocked"
+    return "queued"
+
+
+def _task_kind_for_goal(goal: dict[str, Any]) -> str:
+    metadata = goal_metadata(goal)
+    return str(metadata.get("task_kind") or goal.get("goal_type") or "general")
+
+
+def sync_open_goals_to_tasks(limit: int = 100) -> dict[str, Any]:
+    synced = 0
+    skipped = 0
+    for goal in meaningful_open_goals(limit=limit):
+        status = _task_status_for_goal(goal)
+        if status in {"blocked", "waiting_approval"}:
+            skipped += 1
+        task_id = enqueue_task(
+            _queue_type_for_goal(goal),  # type: ignore[arg-type]
+            goal_id=int(goal["id"]),
+            task_kind=_task_kind_for_goal(goal),
+            title=str(goal.get("title") or "Untitled task"),
+            source="goal_sync",
+            priority=float(goal.get("priority") or 0.5),
+            status=status,  # type: ignore[arg-type]
+            payload={"goal_type": goal.get("goal_type"), "goal_status": goal.get("status")},
+        )
+        if task_id:
+            synced += 1
+    return {"synced": synced, "skipped": skipped}
+
+
+def _goal_from_task(task: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not task or task.get("goal_id") is None:
+        return None
+    return get_goal(int(task["goal_id"]))
+
+
 def _completed_steps_from_history(goal_id: int | None) -> set[str]:
     if goal_id is None:
         return set()
@@ -88,7 +138,8 @@ def _persist_goal_step(goal: dict[str, Any] | None, step: str) -> bool:
     completed = list(dict.fromkeys([*metadata.get("completed_steps", []), step]))
     metadata.update({"sequence": sequence, "completed_steps": completed})
     done = all(item in completed for item in sequence)
-    return update_goal_metadata(int(goal["id"]), metadata, status="done" if done else None)
+    update_goal_metadata(int(goal["id"]), metadata, status="done" if done else None)
+    return done
 
 
 def _proposal_for_step(goal_id: int | None, kind: str, step: dict[str, str], state: dict[str, Any]) -> dict[str, Any]:
@@ -297,17 +348,101 @@ def _handle_artifact_goal(goal: dict[str, Any], drives: dict[str, float]) -> dic
     return result
 
 
+def _finish_claimed_task(task: dict[str, Any], status: str, result: dict[str, Any]) -> dict[str, Any]:
+    finish_status = "done" if status in {"user_goal_completed", "artifact_created", "completed", "done"} else "blocked" if status in {"blocked", "failed", "timeout"} else "skipped"
+    finish_task(int(task["id"]), finish_status, result)
+    result["task_id"] = int(task["id"])
+    result["queue_type"] = task.get("queue_type")
+    return result
+
+
+def _process_claimed_task(task: dict[str, Any]) -> dict[str, Any]:
+    goal = _goal_from_task(task)
+    if not goal:
+        result = {"status": "blocked", "executed": False, "reason": "goal_not_found", "task_id": task.get("id")}
+        finish_task(int(task["id"]), "blocked", result)
+        return result
+
+    drives = compute_drives()
+    artifact_result = _handle_artifact_goal(goal, drives)
+    if artifact_result:
+        return _finish_claimed_task(task, str(artifact_result.get("status")), artifact_result)
+
+    proposals = plan_action_proposals(goal, limit=1)
+    profile = current_profile()
+    if profile != "full_device_lab":
+        result = {
+            "status": "skipped",
+            "executed": False,
+            "reason": "profile_not_full_device_lab",
+            "profile": profile,
+            "proposal_id": proposals[0]["id"] if proposals else None,
+            "goal_id": goal.get("id"),
+        }
+        requeue_task(int(task["id"]), result)
+        log_event("lab", "task_requeued", result["reason"], result, 0.55)
+        return {**result, "task_id": int(task["id"]), "queue_type": task.get("queue_type")}
+
+    approved = next((item for item in proposals if item["status"] == "approved_by_policy"), None)
+    if not approved:
+        reflection_id = create_reflection(
+            "Task worker produced no executable proposal.",
+            goal_id=goal.get("id"),
+            learned={"queue_type": task.get("queue_type"), "task_id": task.get("id"), "proposals": len(proposals)},
+            confidence=0.72,
+        )
+        result = {"status": "blocked", "executed": False, "reason": "no_approved_proposal", "profile": profile, "goal_id": goal.get("id"), "reflection_id": reflection_id}
+        return _finish_claimed_task(task, "blocked", result)
+
+    action_result = run_action(approved["command"], cwd=approved.get("cwd"), goal_id=approved.get("goal_id"))
+    proposal_status = "executed" if action_result.get("executed") else "blocked"
+    update_action_proposal_status(int(approved["id"]), proposal_status, str(action_result.get("reason") or action_result.get("status")))
+    goal_done = False
+    if action_result.get("executed") and approved.get("metadata", {}).get("step"):
+        goal_done = _persist_goal_step(goal, str(approved["metadata"]["step"]))
+    reflection_id = create_reflection(
+        "Task worker executed one approved local action and recorded the result.",
+        goal_id=approved.get("goal_id"),
+        learned={"queue_type": task.get("queue_type"), "task_id": task.get("id"), "proposal_id": approved["id"], "action_id": action_result.get("id"), "status": action_result.get("status")},
+        confidence=0.8,
+    )
+    result = {
+        "status": action_result.get("status"),
+        "executed": bool(action_result.get("executed")),
+        "profile": profile,
+        "goal_id": goal.get("id"),
+        "goal_done": goal_done,
+        "proposal_id": approved["id"],
+        "action_id": action_result.get("id"),
+        "returncode": action_result.get("returncode"),
+        "reflection_id": reflection_id,
+    }
+    if goal_done:
+        return _finish_claimed_task(task, "done", result)
+    requeue_task(int(task["id"]), result)
+    return {**result, "task_id": int(task["id"]), "queue_type": task.get("queue_type")}
+
+
+def run_user_task(task_id: int) -> dict[str, Any]:
+    task = claim_task(task_id)
+    if not task:
+        existing = next((row for row in list_tasks(limit=50) if int(row.get("id", -1)) == int(task_id)), None)
+        return {"status": "skipped", "executed": False, "reason": "task_not_queued", "task_id": task_id, "task": existing}
+    if task.get("queue_type") != "user":
+        requeue_task(int(task["id"]), {"reason": "not_user_task"})
+        return {"status": "skipped", "executed": False, "reason": "not_user_task", "task_id": task_id}
+    result = _process_claimed_task(task)
+    log_event("lab", "user_task_processed", str(task_id), result, 0.82)
+    return result
+
+
 def run_lab_tick() -> dict[str, Any]:
     profile = current_profile()
-    selected_goal = _active_goal()
-    artifact_result = _handle_artifact_goal(selected_goal, compute_drives()) if profile == "full_device_lab" and selected_goal else None
-    if artifact_result:
-        return artifact_result
-    proposals = plan_action_proposals(selected_goal, limit=1)
+    sync_open_goals_to_tasks()
     if profile != "full_device_lab":
         reflection_id = create_reflection(
-            "Lab tick generated proposals but did not execute because profile is not full_device_lab.",
-            learned={"profile": profile, "proposals": len(proposals)},
+            "Autonomous worker skipped because profile is not full_device_lab.",
+            learned={"profile": profile},
             confidence=0.78,
         )
         result = {
@@ -315,48 +450,32 @@ def run_lab_tick() -> dict[str, Any]:
             "executed": False,
             "reason": "profile_not_full_device_lab",
             "profile": profile,
-            "proposal_id": proposals[0]["id"] if proposals else None,
+            "proposal_id": None,
             "reflection_id": reflection_id,
         }
         log_event("lab", "lab_tick_skipped", result["reason"], result, 0.6)
         return result
-    approved = next((item for item in proposals if item["status"] == "approved_by_policy"), None)
-    if not approved:
+
+    task = claim_next_task("autonomous")
+    if not task:
         reflection_id = create_reflection(
-            "Lab tick produced no executable proposal.",
-            learned={"profile": profile, "proposals": len(proposals)},
+            "Autonomous worker found no queued autonomous task.",
+            learned={"profile": profile},
             confidence=0.72,
         )
-        result = {"status": "blocked", "executed": False, "reason": "no_approved_proposal", "profile": profile, "reflection_id": reflection_id}
+        result = {"status": "idle", "executed": False, "reason": "no_autonomous_task", "profile": profile, "reflection_id": reflection_id}
         log_event("lab", "lab_tick_blocked", result["reason"], result, 0.65)
         return result
-    action_result = run_action(approved["command"], cwd=approved.get("cwd"), goal_id=approved.get("goal_id"))
-    proposal_status = "executed" if action_result.get("executed") else "blocked"
-    update_action_proposal_status(int(approved["id"]), proposal_status, str(action_result.get("reason") or action_result.get("status")))
-    if action_result.get("executed") and approved.get("metadata", {}).get("step"):
-        _persist_goal_step(selected_goal, str(approved["metadata"]["step"]))
-    reflection_id = create_reflection(
-        "Lab tick executed one approved local action and recorded the result.",
-        goal_id=approved.get("goal_id"),
-        learned={"proposal_id": approved["id"], "action_id": action_result.get("id"), "status": action_result.get("status")},
-        confidence=0.8,
-    )
-    result = {
-        "status": action_result.get("status"),
-        "executed": bool(action_result.get("executed")),
-        "profile": profile,
-        "proposal_id": approved["id"],
-        "action_id": action_result.get("id"),
-        "returncode": action_result.get("returncode"),
-        "reflection_id": reflection_id,
-    }
-    log_event("lab", "lab_tick_executed", approved["command"], result, 0.75)
+    result = _process_claimed_task(task)
+    log_event("lab", "autonomous_task_processed", str(task.get("id")), result, 0.75)
     return result
 
 
 def run_lab_tick_if_enabled(*, notify: bool = False) -> dict[str, Any]:
     profile = current_profile()
-    if not meaningful_open_goals():
+    autonomous_open_goals = [goal for goal in meaningful_open_goals() if goal.get("goal_type") != "user_directed"]
+    autonomous_queued = list_tasks(limit=1, status="queued", queue_type="autonomous")
+    if not autonomous_open_goals and not autonomous_queued:
         generation = generate_goal_candidates(dry_run=False)
         if generation.get("created_goal_id"):
             result = {
@@ -405,6 +524,7 @@ def lab_report(limit: int = 10) -> dict[str, Any]:
         "actions_completed": completed,
         "actions_blocked": sum(1 for row in actions if row.get("status") == "blocked"),
         "proposal_status_counts": proposal_status_counts(),
+        "task_status_counts": task_status_counts(),
         "recent_actions": [
             {"id": row.get("id"), "status": row.get("status"), "profile": row.get("profile"), "risk_level": row.get("risk_level"), "summary": row.get("result_summary")}
             for row in actions

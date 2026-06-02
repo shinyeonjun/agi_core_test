@@ -199,9 +199,10 @@ def test_chat_task_message_creates_user_directed_goal(monkeypatch, tmp_path):
     output = "\n".join(route_discord_event(event, control_config()))
     goals = list_goals(limit=5, include_archived=True)
     user_goal = next(goal for goal in goals if goal["goal_type"] == "user_directed")
-    assert "작업 목표" in output
+    assert "완료" in output
+    assert "자율 스케줄러" in output
     assert f"#{user_goal['id']}" in output
-    assert user_goal["status"] == "active"
+    assert user_goal["status"] == "done"
     assert user_goal["priority"] > 0.9
 
 

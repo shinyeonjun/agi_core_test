@@ -20,7 +20,8 @@ from agent.core.policy import ActionProposal, PolicyEngine
 from agent.core.self_map import latest_self_map, refresh_self_map, self_map_brief
 from agent.core.state import load_state, save_state
 from agent.core.style import add_style_example, apply_style_feedback, get_active_style_profile, list_style_examples, list_style_feedback, seed_default_style_profile, style_directives
-from agent.eval.harness import list_eval_runs, list_tasks, run_suite
+from agent.core.task_queue import list_tasks as list_queued_tasks, task_status_counts
+from agent.eval.harness import list_eval_runs, list_tasks as list_eval_tasks, run_suite
 from agent.language.engine import get_language_engine, interpret_user_message, language_cache_stats, list_interpretation_logs
 from agent.memory.store import add_memory, list_memories, rebuild_memory_fts, search_memories
 from agent.ops.backup import create_backup
@@ -28,7 +29,7 @@ from agent.scheduler.tick import run_tick
 from agent.tools.system_readonly import READ_ONLY_COMMANDS, run_readonly, system_snapshot
 from agent.tools.full_device import get_action_run, list_action_runs, run_action
 from agent.lab.codex_bridge import write_codex_lab_context
-from agent.lab.planner import lab_report, run_lab_tick, run_lab_tick_if_enabled
+from agent.lab.planner import lab_report, run_lab_tick, run_lab_tick_if_enabled, run_user_task, sync_open_goals_to_tasks
 from agent.lab.proposals import list_action_proposals
 from agent.workspace.executor import create_project_spec, create_status_report, ensure_workspace, write_text_artifact
 from agent.workspace.store import list_project_specs, list_workspace_artifacts
@@ -256,7 +257,7 @@ def cmd_language(args: argparse.Namespace) -> int:
 
 
 def cmd_eval_list(args: argparse.Namespace) -> int:
-    print_json([task.__dict__ for task in list_tasks(args.suite)])
+    print_json([task.__dict__ for task in list_eval_tasks(args.suite)])
     return 0
 
 
@@ -389,6 +390,22 @@ def cmd_lab(args: argparse.Namespace) -> int:
         print_json(write_codex_lab_context(args.limit))
         return 0
     raise ValueError(f"unknown lab command: {args.lab_command}")
+
+
+def cmd_tasks(args: argparse.Namespace) -> int:
+    if args.tasks_command == "list":
+        print_json(list_queued_tasks(args.limit, status=args.status, queue_type=args.queue_type))
+        return 0
+    if args.tasks_command == "counts":
+        print_json(task_status_counts())
+        return 0
+    if args.tasks_command == "sync":
+        print_json(sync_open_goals_to_tasks())
+        return 0
+    if args.tasks_command == "run-user":
+        print_json(run_user_task(args.task_id))
+        return 0
+    raise ValueError(f"unknown tasks command: {args.tasks_command}")
 
 
 def cmd_workspace(args: argparse.Namespace) -> int:
@@ -566,6 +583,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_lab_proposals = lab_sub.add_parser("proposals"); p_lab_proposals.add_argument("--limit", type=int, default=20); p_lab_proposals.add_argument("--status"); p_lab_proposals.set_defaults(func=cmd_lab)
     p_lab_report = lab_sub.add_parser("report"); p_lab_report.add_argument("--limit", type=int, default=10); p_lab_report.set_defaults(func=cmd_lab)
     p_lab_codex = lab_sub.add_parser("codex-plan"); p_lab_codex.add_argument("--limit", type=int, default=10); p_lab_codex.set_defaults(func=cmd_lab)
+    p = sub.add_parser("tasks"); tasks_sub = p.add_subparsers(dest="tasks_command", required=True)
+    p_tasks_list = tasks_sub.add_parser("list"); p_tasks_list.add_argument("--limit", type=int, default=20); p_tasks_list.add_argument("--status"); p_tasks_list.add_argument("--queue-type", choices=["user", "autonomous"]); p_tasks_list.set_defaults(func=cmd_tasks)
+    p_tasks_counts = tasks_sub.add_parser("counts"); p_tasks_counts.set_defaults(func=cmd_tasks)
+    p_tasks_sync = tasks_sub.add_parser("sync"); p_tasks_sync.set_defaults(func=cmd_tasks)
+    p_tasks_run_user = tasks_sub.add_parser("run-user"); p_tasks_run_user.add_argument("task_id", type=int); p_tasks_run_user.set_defaults(func=cmd_tasks)
     p = sub.add_parser("workspace"); workspace_sub = p.add_subparsers(dest="workspace_command", required=True)
     p_ws_init = workspace_sub.add_parser("init"); p_ws_init.set_defaults(func=cmd_workspace)
     p_ws_report = workspace_sub.add_parser("report"); p_ws_report.add_argument("--title", default="Workspace status report"); p_ws_report.set_defaults(func=cmd_workspace)

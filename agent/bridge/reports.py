@@ -14,6 +14,7 @@ from agent.core.goal_generator import list_goal_candidates, meaningful_open_goal
 from agent.core.learner import list_reflections
 from agent.core.metrics import collect_metrics
 from agent.core.self_map import self_map_brief
+from agent.core.task_queue import task_status_counts
 from agent.lab.proposals import list_action_proposals, proposal_status_counts
 from agent.tools.action_log import get_action_run, list_action_runs
 
@@ -181,6 +182,7 @@ def build_observation_dashboard() -> str:
     reflections = list_reflections(limit=5)
     approvals = ApprovalStore().list_pending()
     self_map = self_map_brief()
+    task_counts = task_status_counts()
     last_action = actions[0] if actions else None
     interesting_events = _interesting_events(events)
     last_event = interesting_events[0] if interesting_events else (events[0] if events else None)
@@ -209,6 +211,8 @@ def build_observation_dashboard() -> str:
         _line("action \uc131\uacf5\ub960", _format_rate(metrics.get("action_success_rate_24h"))),
         _line("\ucc28\ub2e8/\uc2dc\uac04\ucd08\uacfc", f"{metrics.get('action_blocked_count_24h')}\uac74 / {metrics.get('action_timeout_count_24h')}\uac74"),
         _line("critical \uc815\ucc45 \uac10\uc9c0", f"{metrics.get('policy_critical_count_24h')}\uac74"),
+        _line("\uc0ac\uc6a9\uc790 \ud050", f"queued {task_counts.get('user:queued', 0)} / running {task_counts.get('user:running', 0)}"),
+        _line("\uc790\uc728 \ud050", f"queued {task_counts.get('autonomous:queued', 0)} / running {task_counts.get('autonomous:running', 0)}"),
         "",
         "**\ucd5c\uadfc action**",
     ])

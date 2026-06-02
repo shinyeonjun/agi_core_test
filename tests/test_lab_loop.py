@@ -33,8 +33,7 @@ def test_safe_profile_lab_tick_records_proposal_without_execution(monkeypatch, t
     assert result["status"] == "skipped"
     assert result["reason"] == "profile_not_full_device_lab"
     proposals = list_action_proposals(5)
-    assert proposals
-    assert proposals[0]["status"] == "proposed"
+    assert proposals == []
     assert list_action_runs(5) == []
 
 
@@ -56,6 +55,7 @@ def test_safe_profile_timer_lab_tick_can_generate_goal_without_action(monkeypatc
 def test_full_device_lab_tick_executes_at_most_one_action(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     set_autonomy_profile("full_device_lab")
+    create_goal("Observe system once", "read only", goal_type="system_observation", status="proposed", priority=0.8, dedupe=False)
     result = run_lab_tick()
     assert result["executed"] is True
     assert result["action_id"] is not None
@@ -118,6 +118,7 @@ def test_full_device_lab_still_denies_external_harm_paths(monkeypatch, tmp_path)
 def test_lab_report_returns_recent_action_summary(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     set_autonomy_profile("full_device_lab")
+    create_goal("Observe for report", "read only", goal_type="system_observation", status="proposed", priority=0.8, dedupe=False)
     run_lab_tick()
     report = lab_report(limit=5)
     assert report["profile"] == "full_device_lab"
@@ -146,7 +147,7 @@ def test_lab_cli_tick_and_proposals(monkeypatch, tmp_path, capsys):
     assert tick["executed"] is False
     assert main(["lab", "proposals", "--limit", "1"]) == 0
     proposals = json.loads(capsys.readouterr().out)
-    assert proposals[0]["status"] == "proposed"
+    assert proposals == []
 
 
 def test_lab_cli_tick_if_enabled_generates_goal_cleanly(monkeypatch, tmp_path, capsys):
@@ -287,7 +288,7 @@ def test_duplicate_recent_action_is_rejected_for_same_goal(monkeypatch, tmp_path
     assert second[0]["reason"] == "duplicate_recent_action"
 
 
-def test_user_directed_goal_preempts_autonomous_goal(monkeypatch, tmp_path):
+def test_autonomous_worker_ignores_user_queue(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     set_autonomy_profile("full_device_lab")
     auto_id = create_goal("Autonomous observation", "read only", goal_type="system_observation", status="proposed", priority=0.8, dedupe=False)
@@ -305,13 +306,11 @@ def test_user_directed_goal_preempts_autonomous_goal(monkeypatch, tmp_path):
     result = run_lab_tick()
 
     assert open_goals[0]["id"] == user_id
-    assert result["status"] == "user_goal_completed"
-    assert result["goal_id"] == user_id
-    assert result["artifact_type"] == "project_spec"
-    assert list_action_runs(5) == []
+    assert result["goal_id"] == auto_id
+    assert result["executed"] is True
     goals = {goal["id"]: goal for goal in list_goals(limit=20, include_archived=True)}
-    assert goals[user_id]["status"] == "done"
-    assert goals[auto_id]["status"] == "proposed"
+    assert goals[user_id]["status"] == "active"
+    assert goals[auto_id]["status"] in {"proposed", "done"}
 
 
 def test_blocked_user_directed_goal_is_not_auto_completed(monkeypatch, tmp_path):

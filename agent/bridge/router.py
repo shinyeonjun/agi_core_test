@@ -13,6 +13,7 @@ from agent.core.events import log_event
 from agent.core.goals import list_goals
 from agent.core.pipeline import run_talk
 from agent.core.state import load_state
+from agent.lab.planner import run_user_task
 from agent.memory.store import search_memories
 from agent.scheduler.tick import run_tick
 
@@ -156,6 +157,9 @@ def route_discord_event(event: DiscordEvent, config: DiscordAuthConfig) -> list[
     if role == "approval":
         return ["\uc2b9\uc778 \ucc44\ub110\uc5d0\uc11c\ub294 \uc77c\ubc18 \ub300\ud654\ub97c \ucc98\ub9ac\ud558\uc9c0 \uc54a\uc544. `!approvals`\ub85c \ub300\uae30 \ubaa9\ub85d\uc744 \ud655\uc778\ud574\uc918."]
     result = run_talk(text, source="discord", source_event_id=core_event_id, metadata={"message_id": event.message_id, "channel_role": role})
+    user_goal = (result.get("decision") or {}).get("user_directed_goal") or {}
+    if user_goal.get("task_id") and user_goal.get("status") == "active":
+        result["task_result"] = run_user_task(int(user_goal["task_id"]))
     reply = format_chat_reply(text, result)
     log_event("discord", "discord_chat_reply", reply, {"message_id": event.message_id, "channel_role": role}, 0.55)
     return split_for_discord(reply, config.max_response_chars)
