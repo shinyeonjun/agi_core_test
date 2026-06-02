@@ -64,15 +64,15 @@ def _ensure_memory_fts(conn: sqlite3.Connection) -> None:
         DROP TRIGGER IF EXISTS memories_ai;
         DROP TRIGGER IF EXISTS memories_ad;
         DROP TRIGGER IF EXISTS memories_au;
-        CREATE TRIGGER memories_ai AFTER INSERT ON memories BEGIN
+        CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
           INSERT INTO memories_fts(rowid, title, content, tags_json)
           VALUES (new.id, new.title, new.content, COALESCE(new.tags_json, ''));
         END;
-        CREATE TRIGGER memories_ad AFTER DELETE ON memories BEGIN
+        CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
           INSERT INTO memories_fts(memories_fts, rowid, title, content, tags_json)
           VALUES('delete', old.id, old.title, old.content, COALESCE(old.tags_json, ''));
         END;
-        CREATE TRIGGER memories_au AFTER UPDATE ON memories BEGIN
+        CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
           INSERT INTO memories_fts(memories_fts, rowid, title, content, tags_json)
           VALUES('delete', old.id, old.title, old.content, COALESCE(old.tags_json, ''));
           INSERT INTO memories_fts(rowid, title, content, tags_json)
