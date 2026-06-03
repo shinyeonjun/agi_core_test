@@ -25,6 +25,7 @@ from agent.core.policy import ActionProposal, PolicyEngine
 from agent.core.process_table import get_process, list_processes, process_snapshot
 from agent.core.project_execution import get_project_plan, list_project_plans
 from agent.core.reactor import adaptive_sleep_seconds, reactor_once, reactor_run, reactor_status
+from agent.core.research_ingestion import ingest_research_papers, list_research_paper_seeds
 from agent.core.wake_signals import prune_wake_signals
 from agent.core.self_map import latest_self_map, refresh_self_map, self_map_brief
 from agent.core.state import load_state, save_state
@@ -236,6 +237,17 @@ def cmd_reflections(args: argparse.Namespace) -> int:
 def cmd_skills(args: argparse.Namespace) -> int:
     print_json(list_skills(args.limit))
     return 0
+
+
+def cmd_research(args: argparse.Namespace) -> int:
+    if args.research_command == "papers":
+        papers = list_research_paper_seeds()
+        print_json({"items": papers[: args.limit]})
+        return 0
+    if args.research_command == "ingest":
+        print_json(ingest_research_papers(limit=args.limit, dry_run=bool(args.dry_run)))
+        return 0
+    raise ValueError(f"unknown research command: {args.research_command}")
 
 
 def cmd_skill_add(args: argparse.Namespace) -> int:
@@ -729,6 +741,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("reflections"); p.add_argument("--limit", type=int, default=20); p.set_defaults(func=cmd_reflections)
     p = sub.add_parser("skills"); p.add_argument("--limit", type=int, default=20); p.set_defaults(func=cmd_skills)
+    p = sub.add_parser("research"); research_sub = p.add_subparsers(dest="research_command", required=True)
+    p_research_papers = research_sub.add_parser("papers"); p_research_papers.add_argument("--limit", type=int, default=20); p_research_papers.set_defaults(func=cmd_research)
+    p_research_ingest = research_sub.add_parser("ingest"); p_research_ingest.add_argument("--limit", type=int); p_research_ingest.add_argument("--dry-run", action="store_true"); p_research_ingest.set_defaults(func=cmd_research)
     p = sub.add_parser("skill"); skill_sub = p.add_subparsers(dest="skill_command", required=True)
     p_skill_add = skill_sub.add_parser("add"); p_skill_add.add_argument("name"); p_skill_add.add_argument("trigger"); p_skill_add.add_argument("procedure", nargs="+"); p_skill_add.add_argument("--tags", nargs="*"); p_skill_add.set_defaults(func=cmd_skill_add)
     p_skill_promote = skill_sub.add_parser("promote"); p_skill_promote.add_argument("--limit", type=int, default=5); p_skill_promote.add_argument("--min-evidence", type=int, default=3); p_skill_promote.add_argument("--dry-run", action="store_true"); p_skill_promote.set_defaults(func=cmd_skill_promote)
