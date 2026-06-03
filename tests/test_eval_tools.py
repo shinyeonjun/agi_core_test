@@ -1,7 +1,7 @@
 import json
 
 from agent.core.database import connect, init_db
-from agent.eval.harness import _force_safe_eval_state, list_tasks, run_suite
+from agent.eval.harness import _force_safe_eval_state, _isolated_eval_env, list_tasks, run_suite
 from agent.tools.system_readonly import redact_output, run_readonly
 
 
@@ -82,3 +82,17 @@ def test_isolated_eval_state_forces_safe_profile(tmp_path):
     assert state["catastrophic_local_destruction_allowed"] is False
     assert state["catastrophic_local_destruction_armed_until"] is None
     assert state["codex_lab_planner_enabled"] is False
+
+
+def test_isolated_eval_env_disables_discord_notifications(monkeypatch, tmp_path):
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "secret-token")
+    monkeypatch.setenv("DISCORD_UPDATE_WEBHOOK_URL", "https://discord.example/update")
+    monkeypatch.setenv("DISCORD_SUMMARY_WEBHOOK_URL", "https://discord.example/summary")
+    monkeypatch.setenv("AGENT_DISCORD_TASK_NOTIFICATIONS", "1")
+
+    env = _isolated_eval_env(tmp_path)
+
+    assert env["AGENT_DISCORD_TASK_NOTIFICATIONS"] == "0"
+    assert "DISCORD_BOT_TOKEN" not in env
+    assert "DISCORD_UPDATE_WEBHOOK_URL" not in env
+    assert "DISCORD_SUMMARY_WEBHOOK_URL" not in env
