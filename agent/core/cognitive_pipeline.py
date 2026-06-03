@@ -62,6 +62,12 @@ MODE_FALLBACKS: dict[str, dict[str, str]] = {
         "description": "Write a safe research note about the strongest current curiosity signal.",
     },
     "consolidate": TOPIC_TASKS["memory_hygiene"],
+    "repair_environment": {
+        "goal_type": "self_improvement_proposal",
+        "task_kind": "improvement_plan",
+        "title": "Repair Python dependency readiness",
+        "description": "Check venv Python dependencies and propose safe repair steps before rerunning work.",
+    },
 }
 
 

@@ -6,6 +6,7 @@ from typing import Any
 
 from agent.config.defaults import now_kst
 from agent.core.database import connect, init_db
+from agent.core.failure import failure_report, recovery_hint
 from agent.core.metrics import collect_metrics
 from agent.core.operating_intelligence import action_critics, ranked_goals
 from agent.memory.store import search_memories
@@ -45,6 +46,64 @@ def bayesian_update(successes: int, failures: int, *, prior_alpha: float = 1.0, 
         "expected_success": round(mean, 4),
         "confidence": round(confidence, 4),
         "evidence": {"successes": max(0, int(successes)), "failures": max(0, int(failures))},
+    }
+
+
+def failure_strategy(category: str) -> dict[str, Any]:
+    category = category if category in {
+        "success",
+        "intent_misread",
+        "bad_plan",
+        "tool_error",
+        "tool_unavailable",
+        "permission_block",
+        "policy_block",
+        "profile_block",
+        "missing_context",
+        "verification_failed",
+        "timeout",
+        "environment_issue",
+        "input_insufficient",
+        "unknown",
+    } else "unknown"
+    routes = {
+        "success": {"route": "reuse", "retry": False, "next_phase": "learn"},
+        "verification_failed": {"route": "repair", "retry": True, "next_phase": "verify"},
+        "timeout": {"route": "split", "retry": True, "next_phase": "decompose"},
+        "tool_unavailable": {"route": "dependency_doctor", "retry": False, "next_phase": "observe"},
+        "environment_issue": {"route": "dependency_doctor", "retry": False, "next_phase": "observe"},
+        "permission_block": {"route": "approval", "retry": False, "next_phase": "route"},
+        "policy_block": {"route": "safe_alternative", "retry": False, "next_phase": "define_success"},
+        "profile_block": {"route": "profile_check", "retry": False, "next_phase": "route"},
+        "missing_context": {"route": "collect_context", "retry": True, "next_phase": "observe"},
+        "input_insufficient": {"route": "ask_or_scope", "retry": False, "next_phase": "define_success"},
+        "bad_plan": {"route": "replan_smaller", "retry": True, "next_phase": "decompose"},
+        "tool_error": {"route": "minimal_repro", "retry": True, "next_phase": "verify"},
+        "intent_misread": {"route": "reinterpret", "retry": True, "next_phase": "observe"},
+        "unknown": {"route": "classify_before_retry", "retry": False, "next_phase": "observe"},
+    }
+    return {
+        "category": category,
+        "route": routes[category]["route"],
+        "retry_recommended": routes[category]["retry"],
+        "next_phase": routes[category]["next_phase"],
+        "recovery_hint": recovery_hint(category),
+    }
+
+
+def outcome_patterns(limit: int = 40) -> dict[str, Any]:
+    critics = action_critics(limit=limit)
+    counts = Counter(str(row.get("category") or "unknown") for row in critics)
+    total = sum(counts.values())
+    strategies = {category: failure_strategy(category) for category in sorted(counts)}
+    dominant = counts.most_common(1)[0][0] if counts else "unknown"
+    return {
+        "total": total,
+        "counts": dict(counts),
+        "dominant_category": dominant,
+        "dominant_strategy": failure_strategy(dominant),
+        "strategies": strategies,
+        "success_ratio": round((counts.get("success", 0) / total), 4) if total else 0.0,
     }
 
 
@@ -129,6 +188,8 @@ def htn_plan_for_goal(goal: dict[str, Any]) -> dict[str, Any]:
     metadata = _decode_json(goal.get("metadata_json"), {})
     owner = metadata.get("priority_owner") or ("user" if goal_type == "user_directed" else "core")
     objective = str(goal.get("description") or goal.get("title") or "")
+    failure_category = str(metadata.get("failure_category") or metadata.get("last_failure_category") or "")
+    fallback = failure_strategy(failure_category) if failure_category else failure_strategy("unknown")
     return {
         "goal_id": goal.get("id"),
         "owner": owner,
@@ -143,23 +204,34 @@ def htn_plan_for_goal(goal: dict[str, Any]) -> dict[str, Any]:
             {"phase": "verify", "task": "테스트, 감사, 관찰 결과로 성공 여부를 확인한다", "output": "evidence"},
             {"phase": "learn", "task": "결과를 기억, 회고, 스킬 후보, 흔적 신호로 남긴다", "output": "memory_update"},
         ],
+        "fallback_policy": {
+            "on_failure_category": failure_category or "unknown",
+            "route": fallback["route"],
+            "retry_recommended": fallback["retry_recommended"],
+            "return_to_phase": fallback["next_phase"],
+            "hint": fallback["recovery_hint"],
+        },
     }
 
 
 def case_based_reasoning(query: str, limit: int = 5) -> dict[str, Any]:
     cases = search_memories(query, limit=limit) if query.strip() else []
+    typed = []
+    for row in cases:
+        report = failure_report({"title": row.get("title"), "type": row.get("memory_type"), "content": row.get("content")})
+        typed.append({
+            "memory_id": row.get("id"),
+            "title": row.get("title"),
+            "memory_type": row.get("memory_type"),
+            "score": row.get("score"),
+            "failure_category": report["category"],
+            "strategy": failure_strategy(report["category"]),
+            "reuse_hint": "비슷한 상황의 판단 재료와 복구 전략으로 사용",
+        })
     return {
         "query": query,
-        "cases": [
-            {
-                "memory_id": row.get("id"),
-                "title": row.get("title"),
-                "memory_type": row.get("memory_type"),
-                "score": row.get("score"),
-                "reuse_hint": "비슷한 상황의 판단 재료로 사용",
-            }
-            for row in cases
-        ],
+        "cases": typed,
+        "top_strategy": typed[0]["strategy"] if typed else failure_strategy("unknown"),
     }
 
 
@@ -244,6 +316,7 @@ def list_blackboard_items(limit: int = 20, status: str | None = None) -> list[di
 
 def active_inference_lite(metrics: dict[str, Any] | None = None) -> dict[str, Any]:
     metrics = metrics or collect_metrics()
+    patterns = outcome_patterns(limit=30)
     uncertainty = max(
         1.0 - float(metrics.get("renderer_success_rate") or 0.0),
         1.0 - float(metrics.get("memory_vector_coverage") or 0.0),
@@ -260,6 +333,10 @@ def active_inference_lite(metrics: dict[str, Any] | None = None) -> dict[str, An
         mode = "explore"
     else:
         mode = "consolidate"
+    if patterns["dominant_category"] in {"verification_failed", "timeout", "tool_error"} and patterns["success_ratio"] < 0.75:
+        mode = "stabilize"
+    elif patterns["dominant_category"] in {"tool_unavailable", "environment_issue"}:
+        mode = "repair_environment"
     return {
         "mode": mode,
         "free_energy": round(_clamp(free_energy), 4),
@@ -269,6 +346,8 @@ def active_inference_lite(metrics: dict[str, Any] | None = None) -> dict[str, An
             "user": round(_clamp(user_pressure), 4),
             "exploration": round(_clamp(exploration_pressure), 4),
         },
+        "outcome_learning": patterns,
+        "recommended_strategy": patterns["dominant_strategy"],
     }
 
 
@@ -387,6 +466,7 @@ def cognitive_growth_snapshot(*, persist: bool = False, limit: int = 8) -> dict[
             "action_execution": _recent_outcome_bayes(),
             "critic_counts": dict(critic_counts),
         },
+        "failure_learning": outcome_patterns(limit=30),
         "map_elites": build_map_elites(scored),
         "active_inference": active_inference_lite(metrics),
         "metrics": {

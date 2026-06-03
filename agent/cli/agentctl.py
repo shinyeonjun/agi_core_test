@@ -12,6 +12,7 @@ from agent.core.approvals import ApprovalStore
 from agent.core.capabilities import collect_capability_map, capability_summary_lines
 from agent.core.cognitive_engine import add_blackboard_item, add_stigmergy_marker, cognitive_growth_snapshot, list_blackboard_items, list_stigmergy_markers
 from agent.core.database import check_migrations, get_schema_version, init_db, migrate_db
+from agent.core.dependency_doctor import dependency_doctor, install_missing_python_dependencies
 from agent.core.events import list_events, log_event
 from agent.core.goals import cleanup_noise_goals, list_goals, mark_goal_done
 from agent.core.goal_generator import add_root_objective, generate_goal_candidates, list_goal_candidates, list_root_objectives, seed_default_objectives, set_objective_enabled
@@ -76,6 +77,18 @@ def cmd_db(args: argparse.Namespace) -> int:
         print_json(check_migrations())
         return 0
     raise ValueError(f"unknown db command: {args.db_command}")
+
+
+def cmd_deps(args: argparse.Namespace) -> int:
+    if args.deps_command == "doctor":
+        result = (
+            install_missing_python_dependencies(include_dev=not args.no_dev)
+            if args.install
+            else dependency_doctor(include_dev=not args.no_dev)
+        )
+        print_json(result)
+        return 0 if result.get("ok") else 1
+    raise ValueError(f"unknown deps command: {args.deps_command}")
 
 
 def cmd_talk(args: argparse.Namespace) -> int:
@@ -736,6 +749,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("db"); db_sub = p.add_subparsers(dest="db_command", required=True)
     p_db_migrate = db_sub.add_parser("migrate"); p_db_migrate.set_defaults(func=cmd_db)
     p_db_check = db_sub.add_parser("check"); p_db_check.set_defaults(func=cmd_db)
+    p = sub.add_parser("deps"); deps_sub = p.add_subparsers(dest="deps_command", required=True)
+    p_deps_doctor = deps_sub.add_parser("doctor"); p_deps_doctor.add_argument("--install", action="store_true"); p_deps_doctor.add_argument("--no-dev", action="store_true"); p_deps_doctor.set_defaults(func=cmd_deps)
     p = sub.add_parser("state"); p.set_defaults(func=cmd_state)
     p = sub.add_parser("talk"); p.add_argument("message"); p.set_defaults(func=cmd_talk)
     p = sub.add_parser("tick"); p.set_defaults(func=cmd_tick)

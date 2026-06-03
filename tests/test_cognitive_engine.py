@@ -7,8 +7,11 @@ from agent.core.cognitive_engine import (
     bayesian_update,
     build_map_elites,
     cognitive_growth_snapshot,
+    failure_strategy,
+    htn_plan_for_goal,
     list_blackboard_items,
     list_stigmergy_markers,
+    outcome_patterns,
 )
 from agent.core.database import connect, init_db
 from agent.core.goals import create_goal
@@ -21,6 +24,30 @@ def test_bayesian_update_uses_success_failure_evidence():
 
     assert strong["expected_success"] > weak["expected_success"]
     assert strong["confidence"] == weak["confidence"]
+
+
+def test_failure_strategy_maps_categories_to_recovery_routes():
+    timeout = failure_strategy("timeout")
+    env = failure_strategy("environment_issue")
+
+    assert timeout["route"] == "split"
+    assert timeout["retry_recommended"] is True
+    assert env["route"] == "dependency_doctor"
+    assert env["next_phase"] == "observe"
+
+
+def test_htn_plan_uses_failure_fallback_from_goal_metadata():
+    plan = htn_plan_for_goal({
+        "id": 10,
+        "title": "Fix tests",
+        "description": "pytest 실패 복구",
+        "goal_type": "user_directed",
+        "metadata_json": '{"failure_category": "verification_failed", "priority_owner": "user"}',
+    })
+
+    assert plan["owner"] == "user"
+    assert plan["fallback_policy"]["route"] == "repair"
+    assert plan["fallback_policy"]["return_to_phase"] == "verify"
 
 
 def test_map_elites_keeps_best_candidate_per_cell():
@@ -60,7 +87,10 @@ def test_cognitive_growth_snapshot_exposes_nine_algorithms_and_persists():
     assert result["curiosity"]
     assert result["utility_scoring"]
     assert result["htn_plan"]["steps"]
+    assert result["htn_plan"]["fallback_policy"]
     assert "action_execution" in result["bayesian_update"]
+    assert "failure_learning" in result
+    assert result["active_inference"]["recommended_strategy"]
     assert "snapshot_id" in result
     with connect() as conn:
         row = conn.execute("SELECT * FROM cognitive_snapshots WHERE id = ?", (result["snapshot_id"],)).fetchone()
@@ -76,3 +106,12 @@ def test_intelligence_growth_cli(capsys):
     assert len(payload["algorithms"]) == 9
     assert "blackboard" in payload
     assert "stigmergy" in payload
+
+
+def test_outcome_patterns_exposes_strategy_shape():
+    init_db()
+
+    result = outcome_patterns()
+
+    assert "dominant_strategy" in result
+    assert result["dominant_strategy"]["route"]

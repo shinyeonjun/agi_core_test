@@ -74,6 +74,7 @@ def collect_capability_map() -> dict[str, Any]:
             {"name": "discord_chat", "status": "enabled", "description": "Discord chat routing through Core run_talk"},
             {"name": "memory_search", "status": "enabled", "description": "FTS plus local sparse vector memory retrieval"},
             {"name": "goal_task_queue", "status": "enabled", "description": "Separate user and autonomous task queues"},
+            {"name": "python_dependency_doctor", "status": "enabled", "description": "Checks venv Python requirements and can repair missing Python packages without apt/system changes"},
             {"name": "core_process_table", "status": "enabled", "description": "OS-like process view for tasks, project plans, lifecycle, progress, blockers, and next actions"},
             {"name": "control_snapshot", "status": "enabled", "description": "Redacted Discord/CLI snapshot for process table, goals, approvals, actions, memory, self-map, metrics, and safety status"},
             {"name": "project_execution_loop", "status": "enabled", "description": "User goals can be decomposed into tracked plans, steps, completion criteria, verification, and failure categories"},
@@ -118,6 +119,7 @@ def collect_capability_map() -> dict[str, Any]:
             "package install/remove/update",
             "external network fetch",
             "local file mutation outside the worker policy",
+            "apt/system dependency installation; Python venv package repair is handled separately by dependency doctor",
         ],
         "forbidden": [
             "secret/token/private key reading or storage",
