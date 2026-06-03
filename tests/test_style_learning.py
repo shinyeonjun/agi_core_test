@@ -56,8 +56,9 @@ def test_discord_style_feedback_reply_is_conversational(monkeypatch, tmp_path):
 
     output = "\n".join(route_discord_event(event, control_config()))
 
-    assert "말투 피드백" in output
-    assert "실행/정책 판단" in output
+    assert "말투 피드백" not in output
+    assert "실행/정책 판단" not in output
+    assert list_style_feedback(5)
     assert "fallback renderer" not in output
     assert not any(goal["goal_type"] == "user_directed" for goal in list_goals(limit=10, include_archived=True))
 

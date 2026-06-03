@@ -156,7 +156,8 @@ def route_discord_event(event: DiscordEvent, config: DiscordAuthConfig) -> list[
         return ["\uc5ec\uae30\ub294 \uc2b9\uc778 \uc804\uc6a9 \ucc44\ub110\uc774\uc57c. `!approvals`, `!approve <id>`, `!reject <id>`\ub9cc \uc0ac\uc6a9\ud560 \uc218 \uc788\uc5b4."]
     ready, wait = is_ready(f"discord_answer:{event.user_id}", config.user_cooldown_seconds)
     if not ready:
-        return ["\uc7a0\uae50\ub9cc \ucc9c\ucc9c\ud788 \ubcf4\ub0b4\uc918. \ubc29\uae08 \uba54\uc2dc\uc9c0\ub97c \ucc98\ub9ac \uc911\uc774\uc57c."]
+        log_event("discord", "discord_chat_cooldown_suppressed", "", {"message_id": event.message_id, "channel_role": role, "wait_seconds": wait}, 0.35)
+        return []
     mark(f"discord_answer:{event.user_id}", config.user_cooldown_seconds, {"channel_id": event.channel_id, "channel_role": role})
     command_output = handle_command(text, role=role)
     if command_output is not None:

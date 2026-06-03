@@ -49,8 +49,8 @@ def test_discord_user_task_runs_immediately_and_reports(monkeypatch, tmp_path):
     tasks = list_tasks(limit=10, queue_type="user")
     goals = list_goals(limit=10, include_archived=True)
 
-    assert "완료" in output
-    assert "자율 스케줄러" in output
+    assert "작업 처리됨" in output
+    assert "자율 스케줄러" not in output
     assert tasks[0]["status"] == "done"
     assert next(goal for goal in goals if goal["goal_type"] == "user_directed")["status"] == "done"
 

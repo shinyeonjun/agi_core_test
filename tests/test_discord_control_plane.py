@@ -56,8 +56,9 @@ def test_chat_channel_routes_to_core(monkeypatch, tmp_path):
     event = DiscordEvent(None, "10", "1", "m1", False, False, "\uc9c0\uae08 \uc0c1\ud0dc \uc54c\ub824\uc918")
     chunks = route_discord_event(event, control_config())
     assert chunks
-    assert "답변 렌더러" in chunks[0]
-    assert "지어내진" in chunks[0]
+    assert "Core 답변 생성" in chunks[0]
+    assert "지어내진" not in chunks[0]
+    assert "잠깐만" not in chunks[0]
     assert "fallback renderer" not in chunks[0]
 
 
@@ -206,7 +207,7 @@ def test_chat_channel_hides_internal_debug_output(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     event = DiscordEvent(None, "10", "1", "m5", False, False, "\u314e\u3147")
     output = "\n".join(route_discord_event(event, control_config()))
-    assert "답변 렌더러" in output
+    assert "Core 답변 생성" in output
     assert "fallback renderer" not in output
     assert "related_memories" not in output
     assert "selected_goal" not in output
@@ -217,8 +218,9 @@ def test_chat_status_does_not_fall_back_to_template_and_command_state_keeps_deta
     setup_isolated(monkeypatch, tmp_path)
     event = DiscordEvent(None, "10", "1", "m6", False, False, "\uc9c0\uae08 \uc0c1\ud0dc \uc54c\ub824\uc918")
     output = "\n".join(route_discord_event(event, control_config()))
-    assert "답변 렌더러" in output
-    assert "지어내진" in output
+    assert "Core 답변 생성" in output
+    assert "지어내진" not in output
+    assert "잠깐만" not in output
     assert "Relevant skills" not in output
     command_event = DiscordEvent(None, "10", "1", "m7", False, False, "!state")
     command_output = "\n".join(route_discord_event(command_event, control_config()))
@@ -231,9 +233,8 @@ def test_chat_task_message_creates_user_directed_goal(monkeypatch, tmp_path):
     output = "\n".join(route_discord_event(event, control_config()))
     goals = list_goals(limit=5, include_archived=True)
     user_goal = next(goal for goal in goals if goal["goal_type"] == "user_directed")
-    assert "완료" in output
-    assert "자율 스케줄러" in output
-    assert f"#{user_goal['id']}" in output
+    assert "자율 스케줄러" not in output
+    assert "좋아. 목표" not in output
     assert user_goal["status"] == "done"
     assert user_goal["priority"] > 0.9
 
@@ -251,7 +252,7 @@ def test_chat_architecture_question_does_not_use_canned_formatter_template(monke
     monkeypatch.setenv("AGENT_LANGUAGE_ENGINE", "rule")
     event = DiscordEvent(None, "10", "1", "m-arch", False, False, "그 너 코어 어떻게 이루어져있어?")
     output = "\n".join(route_discord_event(event, control_config()))
-    assert "답변 렌더러" in output
+    assert "Core 답변 생성" in output
     assert "Core는 LanguageEngine, PolicyEngine" not in output
     assert "더 구체적" not in output
 
@@ -261,7 +262,7 @@ def test_chat_capability_question_is_not_style_feedback(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_LANGUAGE_ENGINE", "rule")
     event = DiscordEvent(None, "10", "1", "m-cap", False, False, "너가할 수 있는거 냉정하게 뭐뭐 할 수 있는지 궁금해")
     output = "\n".join(route_discord_event(event, control_config()))
-    assert "답변 렌더러" in output
+    assert "Core 답변 생성" in output
     assert "말투 피드백" not in output
 
 
@@ -272,6 +273,7 @@ def test_dangerous_chat_task_is_blocked_goal(monkeypatch, tmp_path):
     user_goal = next(goal for goal in list_goals(limit=5, include_archived=True) if goal["goal_type"] == "user_directed")
     assert user_goal["status"] == "blocked"
     assert "위험" in output
+    assert "좋아. 목표" not in output
 
 
 

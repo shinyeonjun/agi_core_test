@@ -16,7 +16,7 @@ class DiscordAuthConfig:
     always_chat_in_dm: bool = True
     require_mention_outside_allowed_channels: bool = True
     max_response_chars: int = 1800
-    user_cooldown_seconds: int = 3
+    user_cooldown_seconds: int = 0
 
     @classmethod
     def from_env(cls) -> "DiscordAuthConfig":
@@ -38,7 +38,7 @@ class DiscordAuthConfig:
             always_chat_in_dm=env_bool("DISCORD_ALWAYS_CHAT_IN_DM", True),
             require_mention_outside_allowed_channels=env_bool("DISCORD_REQUIRE_MENTION_OUTSIDE_ALLOWED_CHANNELS", True),
             max_response_chars=env_int("DISCORD_MAX_RESPONSE_CHARS", 1800),
-            user_cooldown_seconds=env_int("DISCORD_USER_COOLDOWN_SECONDS", 3),
+            user_cooldown_seconds=env_int("DISCORD_USER_COOLDOWN_SECONDS", 0),
         )
 
 

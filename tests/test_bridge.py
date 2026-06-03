@@ -8,6 +8,10 @@ def config() -> DiscordAuthConfig:
     return DiscordAuthConfig(allowed_user_ids={"1"}, allowed_channel_ids={"10"}, user_cooldown_seconds=0)
 
 
+def cooldown_config() -> DiscordAuthConfig:
+    return DiscordAuthConfig(allowed_user_ids={"1"}, allowed_channel_ids={"10"}, user_cooldown_seconds=30)
+
+
 def test_classify_allowed_dm():
     assert classify_context(user_id="1", channel_id="dm", is_dm=True, was_mention=False, author_is_bot=False, config=config()) == "conversation"
 
@@ -47,6 +51,13 @@ def test_route_command_state_returns_chunks():
 def test_bot_message_ignored():
     event = DiscordEvent(None, "10", "1", "m2", False, False, "hello", author_is_bot=True)
     assert route_discord_event(event, config()) == []
+
+
+def test_chat_cooldown_suppresses_template_reply():
+    first = DiscordEvent(None, "10", "1", "cooldown-1", False, False, "첫 메시지")
+    second = DiscordEvent(None, "10", "1", "cooldown-2", False, False, "두 번째 메시지")
+    assert route_discord_event(first, cooldown_config())
+    assert route_discord_event(second, cooldown_config()) == []
 
 
 
@@ -95,8 +106,9 @@ def test_route_chat_hides_fallback_renderer():
     output = "\n".join(route_discord_event(event, config()))
     assert "fallback renderer" not in output
     assert "goal:" not in output
-    assert "답변 렌더러" in output
-    assert "지어내진" in output
+    assert "Core 답변 생성" in output
+    assert "잠깐만" not in output
+    assert "천천히" not in output
 
 
 def test_format_chat_reply_prefers_core_renderer_text():
@@ -128,4 +140,4 @@ def test_format_chat_reply_rejects_internal_renderer_text():
 
     assert "selected_goal_id" not in output
     assert "user_goal_created" not in output
-    assert "답변 생성" in output
+    assert "Core 답변 생성" in output

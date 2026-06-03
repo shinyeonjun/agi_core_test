@@ -275,6 +275,8 @@ def _core_chat_text(core_result: dict[str, Any]) -> str | None:
         "source_event_id",
         "must_include",
         "must_not_include",
+        "요청은 core 작업 흐름",
+        "core 답변 렌더러",
     )
     if any(marker in lowered for marker in internal_markers):
         return None
@@ -286,32 +288,37 @@ def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
     policy = decision.get("policy_summary") or {}
     user_goal = decision.get("user_directed_goal") or {}
     task_result = core_result.get("task_result") or {}
-    style_feedback = decision.get("style_feedback") or {}
+    if policy.get("denied"):
+        reason = compact_text(policy.get("reason") or policy.get("denied_reason") or "정책 차단")
+        return f"위험해서 실행하지 않았어.\n이유: {reason}"
 
-    if style_feedback:
-        feedback_type = compact_text(style_feedback.get("feedback_type"))
-        return f"좋아. 말투 피드백으로 기억해뒀어.\n반영: {feedback_type}\n실행/정책 판단은 그대로 두고 말하는 방식만 조정할게."
+    natural = _natural_chat_reply(core_result)
+    if natural:
+        return natural
+
     if user_goal and task_result:
         return _format_task_result(user_goal, task_result)
     if user_goal:
         return _format_user_goal(user_goal)
-    if policy.get("denied"):
-        reason = compact_text(policy.get("reason") or policy.get("denied_reason") or "정책 차단")
-        return f"그 요청은 실행하지 않았어.\n이유: {reason}"
-
-    rendered = _core_chat_text(core_result)
-    if rendered:
-        return rendered
     return _renderer_unavailable_reply(decision)
+
+
+def _natural_chat_reply(core_result: dict[str, Any]) -> str | None:
+    task_result = core_result.get("task_result") or {}
+    report = compact_text(task_result.get("report"), "").strip() if isinstance(task_result, dict) else ""
+    if report:
+        return report[:1600]
+    return _core_chat_text(core_result)
 
 
 def _format_task_result(user_goal: dict[str, Any], task_result: dict[str, Any]) -> str:
     status = compact_text(task_result.get("status"))
     if status in {"user_goal_completed", "artifact_created", "completed", "done", "codex_work_completed"}:
         report = compact_text(task_result.get("report"), "")
-        report_line = f"\n요약: {report[:700]}" if report else ""
+        if report:
+            return report[:1600]
         result_label = compact_text(task_result.get("artifact_type") or status)
-        return f"완료했어. 작업 #{compact_text(task_result.get('task_id'))}, 목표 #{compact_text(user_goal.get('id'))} 처리됨.\n결과: {result_label}{report_line}\n자율 스케줄러와 분리해서 사용자 요청으로 바로 처리했어."
+        return f"작업 처리됨.\n결과: {result_label}"
     if status in {"codex_work_blocked", "codex_work_failed"}:
         reason = compact_text(task_result.get("reason") or status)
         return f"작업 #{compact_text(task_result.get('task_id'))}는 끝까지 못 갔어.\n이유: {reason}"
@@ -322,15 +329,14 @@ def _format_task_result(user_goal: dict[str, Any], task_result: dict[str, Any]) 
 
 def _format_user_goal(user_goal: dict[str, Any]) -> str:
     if user_goal.get("denied") or user_goal.get("status") == "blocked":
-        return f"그 작업은 위험할 수 있어서 실행 목표로는 잠가뒀어.\n목표: #{user_goal.get('id')}\n이유: {compact_text(user_goal.get('reason'))}"
+        return f"위험해서 실행 목표로는 잠가뒀어.\n이유: {compact_text(user_goal.get('reason'))}"
     if user_goal.get("status") == "waiting_approval":
-        return f"좋아. 목표 #{user_goal.get('id')}로 등록했고, 승인 대기 상태야."
-    return f"좋아. 목표 #{user_goal.get('id')}로 등록했어. 사용자 요청이라 자율 작업보다 먼저 볼게."
+        return "승인이 필요한 작업이라 대기 상태로 뒀어."
+    return "작업으로 넘겼어."
 
 
 def _renderer_unavailable_reply(decision: dict[str, Any]) -> str:
-    renderer = compact_text(decision.get("renderer") or "chat_renderer")
-    return f"지금 `{renderer}` 답변 생성이 안정적으로 끝나지 않았어.\n내용을 지어내서 말하진 않을게. 같은 질문을 한 번만 다시 보내줘."
+    return "Core 답변 생성이 안정적으로 끝나지 않았어. 입력은 기록해뒀어."
 
 
 def _is_noise_title(value: object) -> bool:

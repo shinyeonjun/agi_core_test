@@ -19,6 +19,6 @@ def test_format_chat_reply_treats_codex_work_completed_as_done():
         },
     )
 
-    assert "완료" in output
-    assert "codex_work_report" in output
     assert "테스트 통과" in output
+    assert "완료했어" not in output
+    assert "codex_work_report" not in output
