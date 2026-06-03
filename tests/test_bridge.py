@@ -1,4 +1,5 @@
 from agent.bridge.auth import DiscordAuthConfig, classify_context
+from agent.bridge.discord_bot import _acquire_single_instance_lock, _release_single_instance_lock
 from agent.bridge.formatter import split_for_discord, strip_bot_mention
 from agent.bridge.router import DiscordEvent, _approval_summary, _goal_summary, _memory_summary, route_discord_event
 from agent.bridge.formatter import format_chat_reply
@@ -51,6 +52,29 @@ def test_route_command_state_returns_chunks():
 def test_bot_message_ignored():
     event = DiscordEvent(None, "10", "1", "m2", False, False, "hello", author_is_bot=True)
     assert route_discord_event(event, config()) == []
+
+
+def test_discord_bot_single_instance_lock_blocks_duplicate():
+    lock = _acquire_single_instance_lock()
+    assert lock is not None
+    try:
+        assert _acquire_single_instance_lock() is None
+    finally:
+        _release_single_instance_lock(lock)
+
+
+def test_discord_bot_single_instance_lock_replaces_stale_pid():
+    lock = _acquire_single_instance_lock()
+    assert lock is not None
+    _release_single_instance_lock(lock)
+    lock.write_text("99999999", encoding="utf-8")
+
+    replacement = _acquire_single_instance_lock()
+    assert replacement is not None
+    try:
+        assert replacement.read_text(encoding="utf-8").strip()
+    finally:
+        _release_single_instance_lock(replacement)
 
 
 def test_chat_cooldown_suppresses_template_reply():

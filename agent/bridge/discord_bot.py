@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import os
 from pathlib import Path
 
 from agent.bridge.auth import DiscordAuthConfig
 from agent.bridge.router import DiscordEvent, route_discord_event
-from agent.config.defaults import env_path
+from agent.config.defaults import data_dir, env_path
 
 
 def load_env_file(path: Path | None = None) -> None:
@@ -42,8 +43,60 @@ def check_config() -> int:
     return 0
 
 
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name != "posix":
+        return pid == os.getpid()
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _release_single_instance_lock(path: Path) -> None:
+    try:
+        if path.exists() and path.read_text(encoding="utf-8").strip() == str(os.getpid()):
+            path.unlink()
+    except OSError:
+        pass
+
+
+def _acquire_single_instance_lock() -> Path | None:
+    lock_path = data_dir() / "discord_bot.pid"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    while True:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                existing_pid = int(lock_path.read_text(encoding="utf-8").strip() or "0")
+            except (OSError, ValueError):
+                existing_pid = 0
+            if _pid_alive(existing_pid):
+                return None
+            try:
+                lock_path.unlink()
+            except OSError:
+                return None
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(str(os.getpid()))
+        atexit.register(_release_single_instance_lock, lock_path)
+        return lock_path
+
+
 def run_bot() -> int:
     load_env_file()
+    lock_path = _acquire_single_instance_lock()
+    if lock_path is None:
+        print("agent-core discord bridge is already running; refusing duplicate instance.")
+        return 2
     try:
         import discord
     except ImportError:
