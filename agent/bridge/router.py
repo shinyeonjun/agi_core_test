@@ -14,6 +14,7 @@ from agent.core.goal_generator import meaningful_open_goals
 from agent.core.pipeline import run_talk
 from agent.core.state import load_state
 from agent.core.task_queue import list_tasks
+from agent.core.user_goals import cancel_goal_or_task_target
 from agent.core.wake_signals import emit_wake_signal
 from agent.memory.store import search_memories
 from agent.scheduler.tick import run_tick
@@ -218,6 +219,19 @@ def _tick_summary() -> str:
     )
 
 
+def _cancel_summary(text: str) -> str:
+    result = cancel_goal_or_task_target(text)
+    if not result:
+        return "취소할 대상을 이해하지 못했어. 예: `!cancel 524` 또는 `#524 없애줘`."
+    cancel = result.get("cancel_result") if isinstance(result.get("cancel_result"), dict) else {}
+    status = compact_text(cancel.get("status"))
+    if status == "missing_target":
+        return "취소할 번호가 필요해. 예: `!cancel 524`."
+    if status == "not_found":
+        return f"#{compact_text(cancel.get('target_id'))}는 목표/작업 목록에서 못 찾았어."
+    return f"정리했어. 작업 {compact_text(cancel.get('cancelled_tasks'), '0')}개를 멈추고, 목표 {compact_text(cancel.get('archived_goals'), '0')}개를 목록에서 뺐어."
+
+
 def handle_command(text: str, *, role: ChannelRole = "chat") -> str | None:
     if not text.startswith("!"):
         return None
@@ -238,6 +252,8 @@ def handle_command(text: str, *, role: ChannelRole = "chat") -> str | None:
         return _memory_summary(arg)
     if command == "!approvals":
         return _approval_summary()
+    if command in {"!cancel", "!remove"}:
+        return _cancel_summary(text)
     if command in {"!detail", "!approval"} and arg.strip().isdigit():
         rows = [row for row in ApprovalStore().list(status=None, limit=100) if int(row.get("id", -1)) == int(arg.strip())]
         return format_approval_card(rows[0]) if rows else "해당 승인 항목을 찾지 못했어."
@@ -247,7 +263,7 @@ def handle_command(text: str, *, role: ChannelRole = "chat") -> str | None:
     if command == "!reject" and arg.strip().isdigit():
         ok = ApprovalStore().reject(int(arg.strip()))
         return f"거절 완료: #{arg.strip()}\n연결된 작업이 있으면 차단 상태로 정리했어." if ok else "거절할 항목이 없거나 이미 처리됐어."
-    return "알 수 없는 명령이야. 사용 가능: `!state`, `!work`, `!goals`, `!tick`, `!memories`, `!approvals`, `!approve <id>`, `!reject <id>`."
+    return "알 수 없는 명령이야. 사용 가능: `!state`, `!work`, `!goals`, `!tick`, `!memories`, `!approvals`, `!cancel <id>`, `!approve <id>`, `!reject <id>`."
 
 
 def route_discord_event(event: DiscordEvent, config: DiscordAuthConfig) -> list[str]:

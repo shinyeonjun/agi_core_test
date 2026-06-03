@@ -12,6 +12,7 @@ from agent.core.approvals import ApprovalStore
 from agent.core.capabilities import collect_capability_map, capability_summary_lines
 from agent.core.cognitive_engine import add_blackboard_item, add_stigmergy_marker, cognitive_growth_snapshot, list_blackboard_items, list_stigmergy_markers
 from agent.core.database import check_migrations, get_schema_version, init_db, migrate_db
+from agent.core.db_hygiene import cleanup_db_noise
 from agent.core.dependency_doctor import dependency_doctor, install_missing_python_dependencies
 from agent.core.events import list_events, log_event
 from agent.core.goals import cleanup_noise_goals, list_goals, mark_goal_done
@@ -77,6 +78,9 @@ def cmd_db(args: argparse.Namespace) -> int:
         return 0
     if args.db_command == "check":
         print_json(check_migrations())
+        return 0
+    if args.db_command == "cleanup":
+        print_json(cleanup_db_noise(apply=bool(args.apply), stale_seconds=args.stale_seconds))
         return 0
     raise ValueError(f"unknown db command: {args.db_command}")
 
@@ -764,6 +768,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("db"); db_sub = p.add_subparsers(dest="db_command", required=True)
     p_db_migrate = db_sub.add_parser("migrate"); p_db_migrate.set_defaults(func=cmd_db)
     p_db_check = db_sub.add_parser("check"); p_db_check.set_defaults(func=cmd_db)
+    p_db_cleanup = db_sub.add_parser("cleanup"); p_db_cleanup.add_argument("--apply", action="store_true"); p_db_cleanup.add_argument("--stale-seconds", type=int, default=1800); p_db_cleanup.set_defaults(func=cmd_db)
     p = sub.add_parser("deps"); deps_sub = p.add_subparsers(dest="deps_command", required=True)
     p_deps_doctor = deps_sub.add_parser("doctor"); p_deps_doctor.add_argument("--install", action="store_true"); p_deps_doctor.add_argument("--no-dev", action="store_true"); p_deps_doctor.set_defaults(func=cmd_deps)
     p = sub.add_parser("state"); p.set_defaults(func=cmd_state)

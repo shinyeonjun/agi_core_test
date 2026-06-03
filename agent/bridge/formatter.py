@@ -292,6 +292,9 @@ def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
         reason = compact_text(policy.get("reason") or policy.get("denied_reason") or "정책 차단")
         return f"위험해서 실행하지 않았어.\n이유: {reason}"
 
+    if user_goal and user_goal.get("control_action"):
+        return _format_user_goal(user_goal)
+
     natural = _natural_chat_reply(core_result)
     if natural:
         return natural
@@ -328,6 +331,16 @@ def _format_task_result(user_goal: dict[str, Any], task_result: dict[str, Any]) 
 
 
 def _format_user_goal(user_goal: dict[str, Any]) -> str:
+    if user_goal.get("control_action") == "cancel":
+        result = user_goal.get("cancel_result") if isinstance(user_goal.get("cancel_result"), dict) else {}
+        status = compact_text(result.get("status"))
+        if status == "missing_target":
+            return "어떤 걸 취소할지 번호가 필요해. 예: `!cancel 524` 또는 `#524 없애줘`."
+        if status == "not_found":
+            return f"#{compact_text(result.get('target_id'))}는 목표/작업 목록에서 못 찾았어."
+        tasks = int(result.get("cancelled_tasks") or 0)
+        goals = int(result.get("archived_goals") or 0)
+        return f"정리했어. 작업 {tasks}개를 멈추고, 목표 {goals}개를 목록에서 뺐어."
     if user_goal.get("self_improvement"):
         ticket = user_goal.get("ticket") if isinstance(user_goal.get("ticket"), dict) else {}
         return "\n".join(

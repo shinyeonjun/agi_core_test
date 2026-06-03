@@ -2,11 +2,13 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from agent.bridge.auth import DiscordAuthConfig
+from agent.bridge.formatter import format_chat_reply
 from agent.bridge.router import DiscordEvent, route_discord_event
 from agent.cli.agentctl import main
 from agent.core.approvals import ApprovalStore
 from agent.core.autonomy import set_autonomy_profile
 from agent.core.database import connect, init_db
+from agent.core.db_hygiene import cleanup_db_noise
 from agent.core.goals import create_goal, list_goals
 from agent.core.pipeline import run_talk
 from agent.core.task_lifecycle import list_task_lifecycle, task_lifecycle_summary
@@ -206,3 +208,68 @@ def test_task_idempotency_key_reuses_existing_task(monkeypatch, tmp_path):
 
     assert second == first
     assert len(list_tasks(limit=10, queue_type="user")) == 1
+
+
+def test_cancel_target_message_archives_goal_and_skips_open_tasks(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    goal_id = create_goal("논문 수집 개발", "외부 논문 수집은 나중에", goal_type="user_directed", status="active", priority=0.98, metadata={"priority_owner": "user", "task_kind": "code_change"}, dedupe=False)
+    task_id = enqueue_task("user", goal_id=goal_id, task_kind="code_change", title="논문 수집 개발", source="test", priority=0.98)
+
+    result = run_talk(f"#{task_id} 이거 목표에서 없애줘")
+    goals = {goal["id"]: goal for goal in list_goals(limit=10, include_archived=True)}
+    tasks = {task["id"]: task for task in list_tasks(limit=10, queue_type="user")}
+
+    assert result["decision"]["user_goal_created"] is False
+    assert result["decision"]["user_directed_goal"]["control_action"] == "cancel"
+    assert goals[goal_id]["status"] == "archived"
+    assert tasks[task_id]["status"] == "skipped"
+    assert "정리" in format_chat_reply(f"#{task_id} 이거 목표에서 없애줘", result)
+
+
+def test_cancel_command_does_not_create_new_project_task(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    goal_id = create_goal("논문 수집 개발", "외부 논문 수집은 나중에", goal_type="user_directed", status="active", priority=0.98, metadata={"priority_owner": "user", "task_kind": "code_change"}, dedupe=False)
+    task_id = enqueue_task("user", goal_id=goal_id, task_kind="code_change", title="논문 수집 개발", source="test", priority=0.98)
+    event = DiscordEvent(None, "10", "1", "m-cancel", False, False, f"!cancel {task_id}")
+
+    output = "\n".join(route_discord_event(event, control_config()))
+    tasks = list_tasks(limit=10, queue_type="user")
+
+    assert "정리했어" in output
+    assert len(tasks) == 1
+    assert tasks[0]["status"] == "skipped"
+
+
+def test_db_cleanup_archives_cancel_request_noise(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    goal_id = create_goal("remove goal #123", "remove this task from goals", goal_type="user_directed", status="active", priority=0.7, dedupe=False)
+    task_id = enqueue_task("user", goal_id=goal_id, task_kind="project_spec", title="remove goal #123", source="discord_user_directive", priority=0.7)
+
+    dry_run = cleanup_db_noise(apply=False)
+    assert task_id in dry_run["cancel_noise_tasks"]
+    assert goal_id in dry_run["cancel_noise_goals"]
+
+    applied = cleanup_db_noise(apply=True)
+    goals = {goal["id"]: goal for goal in list_goals(limit=10, include_archived=True)}
+    tasks = {task["id"]: task for task in list_tasks(limit=10, queue_type="user")}
+
+    assert applied["changed"]["tasks_skipped"] == 1
+    assert applied["changed"]["goals_archived"] == 1
+    assert tasks[task_id]["status"] == "skipped"
+    assert goals[goal_id]["status"] == "archived"
+
+
+def test_db_cleanup_cli_defaults_to_dry_run(monkeypatch, tmp_path, capsys):
+    setup_isolated(monkeypatch, tmp_path)
+    goal_id = create_goal("remove goal #999", "remove this goal", goal_type="user_directed", status="active", priority=0.7, dedupe=False)
+    enqueue_task("user", goal_id=goal_id, task_kind="project_spec", title="remove goal #999", source="discord_user_directive", priority=0.7)
+
+    assert main(["db", "cleanup"]) == 0
+    dry = json.loads(capsys.readouterr().out)
+    assert dry["applied"] is False
+    assert dry["cancel_noise_tasks"]
+
+    assert main(["db", "cleanup", "--apply"]) == 0
+    applied = json.loads(capsys.readouterr().out)
+    assert applied["applied"] is True
+    assert applied["changed"]["tasks_skipped"] == 1
