@@ -282,7 +282,7 @@ def enqueue_user_self_improvement_request(text: str, *, source_event_id: int | N
             source="discord_self_improvement",
             priority=max(0.9, float(ticket.get("priority") or 0.7)),
             payload={"ticket": ticket, "worker_prompt": prompt, "requires_native_loop": True, "source_event_id": source_event_id},
-            idempotency_key=f"user_self_improvement:{ticket.get('key')}:{source_event_id or 'manual'}",
+            idempotency_key=f"user_self_improvement:{ticket.get('key')}",
         )
         created.append({"goal_id": goal_id, "task_id": task_id, "ticket": ticket})
     return {"created": created, "count": len(created), "source": "user_self_improvement_request"}

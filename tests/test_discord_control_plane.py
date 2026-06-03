@@ -157,6 +157,17 @@ def test_task_phase_notification_missing_webhook_is_safe(monkeypatch, tmp_path):
     assert result["reason"] == "disabled_or_missing_webhook"
 
 
+def test_task_phase_notification_compact_mode_suppresses_noise(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    monkeypatch.setenv("DISCORD_UPDATE_WEBHOOK_URL", "https://discord.invalid/webhook")
+    created = enqueue_user_self_improvement_request("Core 자가개선 진행", source_event_id=123, limit=1)["created"][0]
+
+    result = notify_task_phase(created["task_id"], "executing", "started", "테스트용 진행 알림", queue_type="user")
+
+    assert result["sent"] is False
+    assert result["reason"] == "compact_mode_suppressed"
+
+
 def test_daily_summary_is_human_readable(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     text = build_daily_summary()

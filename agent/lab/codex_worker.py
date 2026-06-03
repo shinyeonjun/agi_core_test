@@ -471,7 +471,8 @@ def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: in
     if self_improvement and backend != "native_loop":
         return _blocked_result("self_improvement_requires_native_loop", goal_id=goal_id, task_id=task_id, backend=backend)
 
-    policy = PolicyEngine(profile="safe").classify_decision(user_request, action_type="codex_work")
+    policy_text = "Core self improvement code task in isolated worktree. Keep changes inside allowed repository files." if self_improvement else user_request
+    policy = PolicyEngine(profile="safe").classify_decision(policy_text, action_type="codex_work")
     if policy.denied or policy.requires_approval:
         return _blocked_result(
             policy.reason,

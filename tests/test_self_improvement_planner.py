@@ -106,6 +106,17 @@ def test_discord_self_improvement_request_creates_user_code_task(monkeypatch, tm
     assert metadata["state_machine"]["main_apply"] == "approval_required"
 
 
+def test_discord_self_improvement_request_dedupes_same_ticket(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+
+    first = enqueue_user_self_improvement_request("Core 자가개선 진행", source_event_id=123, limit=1)["created"][0]
+    second = enqueue_user_self_improvement_request("Core 자가개선 다시 진행", source_event_id=456, limit=1)["created"][0]
+    tasks = list_tasks(limit=10, queue_type="user")
+
+    assert second["task_id"] == first["task_id"]
+    assert len(tasks) == 1
+
+
 def test_user_self_improvement_status_reports_queue_phase(monkeypatch, tmp_path, capsys):
     setup_isolated(monkeypatch, tmp_path)
     enqueue_user_self_improvement_request("Core 자가개선 진행", source_event_id=123, limit=1)
