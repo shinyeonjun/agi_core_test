@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from agent.cli.agentctl import main
+from agent.core.learner import create_reflection
 from agent.workspace.executor import create_project_spec, ensure_workspace, safe_workspace_path, write_text_artifact
 from agent.workspace.store import list_project_specs, list_workspace_artifacts
 
@@ -48,3 +49,16 @@ def test_workspace_cli_self_check(monkeypatch, tmp_path, capsys):
     assert main(["self-check", "workspace"]) == 0
     output = capsys.readouterr().out
     assert "scratch/" in output
+
+
+def test_reflection_self_check_works_after_many_reflections(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("AGENT_CORE_DB_PATH", str(tmp_path / "agent.db"))
+    monkeypatch.setenv("AGENT_LANGUAGE_ENGINE", "rule")
+    for index in range(1001):
+        create_reflection(f"preexisting reflection {index}")
+
+    assert main(["self-check", "reflection"]) == 0
+    output = capsys.readouterr().out
+
+    assert '"ok": true' in output
+    assert '"reflection_created": true' in output

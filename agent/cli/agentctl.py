@@ -57,6 +57,11 @@ def print_json(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2))
 
 
+def _latest_reflection_id() -> int:
+    rows = list_reflections(1)
+    return int(rows[0]["id"]) if rows else 0
+
+
 def cmd_init(_args: argparse.Namespace) -> int:
     init_db()
     seed_default_style_profile()
@@ -733,9 +738,9 @@ def cmd_self_check(args: argparse.Namespace) -> int:
         print_json(result)
         return 0 if result["ok"] else 1
     if args.area == "reflection":
-        before = len(list_reflections(1000))
+        before = _latest_reflection_id()
         learner = update_after_turn("\uc544\ub2c8 \ub2e4\uc2dc \ud574\uc918", None, None, {"selected_goal_id": None})
-        after = len(list_reflections(1000))
+        after = _latest_reflection_id()
         skills = list_skills(100)
         result = {
             "ok": learner["feedback"] == "negative" and after > before and any(skill["name"] == "core_talk_pipeline" for skill in skills),
