@@ -11,8 +11,10 @@ from agent.core.cooldown import is_ready, mark
 from agent.core.database import connect, init_db
 from agent.core.events import log_event
 from agent.core.goal_generator import meaningful_open_goals
+from agent.core.self_improvement_state import self_improvement_status
 from agent.core.pipeline import run_talk
 from agent.core.state import load_state
+from agent.core.task_queue import list_tasks
 from agent.core.wake_signals import emit_wake_signal
 from agent.memory.store import search_memories
 from agent.scheduler.tick import run_tick
@@ -101,6 +103,33 @@ def _goal_summary() -> str:
     return "\n".join(lines)
 
 
+def _work_summary() -> str:
+    tasks = list_tasks(limit=8)
+    self_status = self_improvement_status(limit=5)
+    approvals = ApprovalStore().list_pending()
+    lines = ["**진행 중인 작업**"]
+    visible = [task for task in tasks if task.get("status") in {"queued", "running", "waiting_approval"}]
+    if not visible:
+        lines.append("지금 대기/진행 중인 작업은 없어.")
+    else:
+        for task in visible[:5]:
+            label = "자가개선" if str(task.get("source") or "").startswith("discord_self_improvement") else "작업"
+            status = {"queued": "대기 중", "running": "진행 중", "waiting_approval": "승인 대기"}.get(str(task.get("status")), str(task.get("status")))
+            lines.append(f"- #{task.get('id')} {label}: {redact_discord_content(str(task.get('title') or '작업'))} / {status}")
+    self_items = self_status.get("items") or []
+    if self_items:
+        lines.extend(["", "**자가개선 상태**"])
+        for item in self_items[:3]:
+            lines.append(f"- #{item.get('task_id')} {item.get('title')}: {item.get('phase')} / {item.get('next_step')}")
+    lines.extend(["", "**승인 대기**"])
+    if approvals:
+        for row in approvals[:3]:
+            lines.append(f"- #{row.get('id')} {redact_discord_content(str(row.get('description') or '승인 필요'))}")
+    else:
+        lines.append("없어.")
+    return "\n".join(lines)
+
+
 def handle_command(text: str, *, role: ChannelRole = "chat") -> str | None:
     if not text.startswith("!"):
         return None
@@ -113,6 +142,8 @@ def handle_command(text: str, *, role: ChannelRole = "chat") -> str | None:
         return _state_summary()
     if command == "!goals":
         return _goal_summary()
+    if command in {"!work", "!tasks"}:
+        return _work_summary()
     if command == "!tick":
         return run_tick()["message"]
     if command == "!memories":
@@ -128,7 +159,7 @@ def handle_command(text: str, *, role: ChannelRole = "chat") -> str | None:
     if command == "!reject" and arg.strip().isdigit():
         ok = ApprovalStore().reject(int(arg.strip()))
         return f"\uac70\uc808 \uc644\ub8cc: #{arg.strip()}\n연결된 작업이 있으면 차단 상태로 정리했어." if ok else "\uac70\uc808\ud560 \ud56d\ubaa9\uc774 \uc5c6\uac70\ub098 \uc774\ubbf8 \ucc98\ub9ac\ub410\uc5b4."
-    return "\uc54c \uc218 \uc5c6\ub294 \uba85\ub839\uc774\uc57c. \uc0ac\uc6a9 \uac00\ub2a5: `!state`, `!goals`, `!tick`, `!memories`, `!approvals`, `!approve <id>`, `!reject <id>`."
+    return "\uc54c \uc218 \uc5c6\ub294 \uba85\ub839\uc774\uc57c. \uc0ac\uc6a9 \uac00\ub2a5: `!state`, `!work`, `!tasks`, `!goals`, `!tick`, `!memories`, `!approvals`, `!approve <id>`, `!reject <id>`."
 
 
 def route_discord_event(event: DiscordEvent, config: DiscordAuthConfig) -> list[str]:

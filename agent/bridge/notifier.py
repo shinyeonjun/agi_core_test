@@ -12,9 +12,14 @@ from agent.config.defaults import env_path
 from agent.core.events import log_event
 
 WebhookKind = Literal["summary", "update"]
+BotChannelKind = Literal["chat", "approval"]
 WEBHOOK_ENV = {
     "summary": "DISCORD_SUMMARY_WEBHOOK_URL",
     "update": "DISCORD_UPDATE_WEBHOOK_URL",
+}
+BOT_CHANNEL_ENV = {
+    "chat": "DISCORD_CHAT_CHANNEL_ID",
+    "approval": "DISCORD_APPROVAL_CHANNEL_ID",
 }
 
 
@@ -33,6 +38,12 @@ def load_env_file(path: Path | None = None) -> None:
 def webhook_url(kind: WebhookKind) -> str | None:
     load_env_file()
     value = os.environ.get(WEBHOOK_ENV[kind], "").strip()
+    return value or None
+
+
+def bot_channel_id(kind: BotChannelKind) -> str | None:
+    load_env_file()
+    value = os.environ.get(BOT_CHANNEL_ENV[kind], "").strip()
     return value or None
 
 
@@ -58,4 +69,34 @@ def post_webhook(kind: WebhookKind, content: str, *, username: str = "Agent Core
         except urllib.error.URLError as exc:
             return {"sent": False, "kind": kind, "reason": "request_failed", "error": redact_discord_content(str(exc)), "chunks": sent}
     log_event("discord", "webhook_sent", kind, {"kind": kind, "chunks": sent}, 0.55)
+    return {"sent": True, "kind": kind, "chunks": sent}
+
+
+def post_bot_channel(kind: BotChannelKind, content: str, *, dry_run: bool = False) -> dict[str, Any]:
+    safe_content = redact_discord_content(content)
+    chunks = split_for_discord(safe_content, 1800)
+    load_env_file()
+    token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
+    channel_id = bot_channel_id(kind)
+    if not token or not channel_id:
+        return {"sent": False, "kind": kind, "reason": "missing_bot_token_or_channel", "chunks": len(chunks), "preview": chunks[0] if chunks else ""}
+    if dry_run:
+        return {"sent": False, "kind": kind, "reason": "dry_run", "chunks": len(chunks), "preview": chunks[0] if chunks else ""}
+    sent = 0
+    for chunk in chunks:
+        payload = json.dumps({"content": chunk}, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            f"https://discord.com/api/v10/channels/{channel_id}/messages",
+            data=payload,
+            headers={"Content-Type": "application/json", "Authorization": f"Bot {token}", "User-Agent": "agent-core-discord-control-plane"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                if response.status >= 300:
+                    return {"sent": False, "kind": kind, "reason": f"http_{response.status}", "chunks": sent}
+                sent += 1
+        except urllib.error.URLError as exc:
+            return {"sent": False, "kind": kind, "reason": "request_failed", "error": redact_discord_content(str(exc)), "chunks": sent}
+    log_event("discord", "bot_channel_sent", kind, {"kind": kind, "chunks": sent}, 0.6)
     return {"sent": True, "kind": kind, "chunks": sent}

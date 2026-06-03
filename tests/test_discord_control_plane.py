@@ -10,7 +10,9 @@ from agent.core.approvals import ApprovalStore
 from agent.core.database import init_db
 from agent.core.goals import list_goals
 from agent.core.policy import PolicyEngine
+from agent.core.self_improvement_planner import enqueue_user_self_improvement_request
 from agent.core.task_queue import list_tasks
+from agent.bridge.task_notifications import notify_task_phase
 
 
 MOJIBAKE_MARKERS = ("�", "濡", "紐", "媛", "醫", "뺤", "怨", "寃", "?꾨", "?덉")
@@ -130,6 +132,29 @@ def test_notify_dry_run_cli(capsys, monkeypatch, tmp_path):
     assert main(["notify", "observation-dashboard", "--dry-run"]) == 0
     observation = json.loads(capsys.readouterr().out)
     assert observation["reason"] == "missing_webhook_url"
+
+
+def test_work_command_shows_user_task_state(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    created = enqueue_user_self_improvement_request("Core 자가개선 진행", source_event_id=123, limit=1)["created"][0]
+    event = DiscordEvent(None, "10", "1", "m-work", False, False, "!work")
+
+    output = "\n".join(route_discord_event(event, control_config()))
+
+    assert "진행 중인 작업" in output
+    assert f"#{created['task_id']}" in output
+    assert "자가개선" in output
+    assert "승인 대기" in output
+
+
+def test_task_phase_notification_missing_webhook_is_safe(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    created = enqueue_user_self_improvement_request("Core 자가개선 진행", source_event_id=123, limit=1)["created"][0]
+
+    result = notify_task_phase(created["task_id"], "executing", "started", "테스트용 진행 알림", queue_type="user")
+
+    assert result["sent"] is False
+    assert result["reason"] == "disabled_or_missing_webhook"
 
 
 def test_daily_summary_is_human_readable(monkeypatch, tmp_path):

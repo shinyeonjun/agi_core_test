@@ -245,6 +245,12 @@ def finish_task(task_id: int, status: TaskStatus, result: dict[str, Any] | None 
             queue_type=(result or {}).get("queue_type"),
             metadata={"result_status": (result or {}).get("status"), "reason": (result or {}).get("reason")},
         )
+        try:
+            from agent.bridge.task_notifications import notify_task_finished
+
+            notify_task_finished(task_id, status, result or {})
+        except Exception as exc:
+            log_event("discord", "task_finished_notify_failed", str(task_id), {"error": type(exc).__name__, "status": status}, 0.35)
     return ok
 
 

@@ -332,6 +332,25 @@ def _format_user_goal(user_goal: dict[str, Any]) -> str:
         ticket = user_goal.get("ticket") if isinstance(user_goal.get("ticket"), dict) else {}
         return "\n".join(
             [
+                f"자가개선 작업 #{compact_text(user_goal.get('task_id'))} 접수했어.",
+                "상태: 대기 중",
+                f"목표: {compact_text(ticket.get('title') or user_goal.get('title'))}",
+                "진행 로그는 #업데이트에 보낼게.",
+                "main 반영이 필요하면 #승인에서 물어볼게.",
+            ]
+        )
+    if not (user_goal.get("denied") or user_goal.get("status") in {"blocked", "waiting_approval"}):
+        return "\n".join(
+            [
+                f"작업 #{compact_text(user_goal.get('task_id'))} 접수했어.",
+                "상태: 대기 중",
+                "진행 로그는 #업데이트에 보낼게.",
+            ]
+        )
+    if user_goal.get("self_improvement"):
+        ticket = user_goal.get("ticket") if isinstance(user_goal.get("ticket"), dict) else {}
+        return "\n".join(
+            [
                 "자가개선 작업으로 잡았어.",
                 f"목표: {compact_text(ticket.get('title') or user_goal.get('title'))}",
                 f"작업: #{compact_text(user_goal.get('task_id'))}",

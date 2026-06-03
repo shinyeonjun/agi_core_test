@@ -62,6 +62,12 @@ def record_task_phase(
         {"task_id": int(task_id), "phase": phase, "status": status, "queue_type": queue_type, **(metadata or {})},
         0.76 if queue_type == "user" else 0.62,
     )
+    try:
+        from agent.bridge.task_notifications import notify_task_phase
+
+        notify_task_phase(int(task_id), phase, status, summary, queue_type=queue_type, metadata=metadata)
+    except Exception as exc:
+        log_event("discord", "task_phase_notify_failed", str(task_id), {"error": type(exc).__name__, "phase": phase}, 0.35)
     return event_id
 
 

@@ -32,7 +32,20 @@ class ApprovalStore:
                 ),
             )
             conn.commit()
-            return int(cur.lastrowid)
+            approval_id = int(cur.lastrowid)
+        try:
+            from agent.bridge.task_notifications import notify_approval_required
+
+            notify_approval_required(approval_id, proposal.to_dict())
+        except Exception as exc:
+            emit_wake_signal(
+                "approval_notify_failed",
+                "approval_store",
+                priority=0.45,
+                payload={"approval_id": approval_id, "error": type(exc).__name__},
+                dedupe_key=f"approval_notify_failed:{approval_id}",
+            )
+        return approval_id
 
     def list_pending(self) -> list[dict[str, Any]]:
         return self.list(status="pending")
