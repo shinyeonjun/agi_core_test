@@ -41,7 +41,7 @@ def test_user_directive_enqueues_user_task(monkeypatch, tmp_path):
     assert tasks[0]["status"] == "queued"
 
 
-def test_discord_user_task_runs_immediately_and_reports(monkeypatch, tmp_path):
+def test_discord_user_task_is_queued_without_blocking_chat(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     event = DiscordEvent(None, "10", "1", "m1", False, False, "FastAPI 프로젝트 초안 만들어줘")
 
@@ -49,10 +49,10 @@ def test_discord_user_task_runs_immediately_and_reports(monkeypatch, tmp_path):
     tasks = list_tasks(limit=10, queue_type="user")
     goals = list_goals(limit=10, include_archived=True)
 
-    assert "작업 처리됨" in output
+    assert "작업으로 넘겼어" in output
     assert "자율 스케줄러" not in output
-    assert tasks[0]["status"] == "done"
-    assert next(goal for goal in goals if goal["goal_type"] == "user_directed")["status"] == "done"
+    assert tasks[0]["status"] == "queued"
+    assert next(goal for goal in goals if goal["goal_type"] == "user_directed")["status"] == "active"
 
 
 def test_scheduler_does_not_claim_user_queue(monkeypatch, tmp_path):

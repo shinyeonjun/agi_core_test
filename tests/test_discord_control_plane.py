@@ -10,6 +10,7 @@ from agent.core.approvals import ApprovalStore
 from agent.core.database import init_db
 from agent.core.goals import list_goals
 from agent.core.policy import PolicyEngine
+from agent.core.task_queue import list_tasks
 
 
 MOJIBAKE_MARKERS = ("�", "濡", "紐", "媛", "醫", "뺤", "怨", "寃", "?꾨", "?덉")
@@ -232,11 +233,14 @@ def test_chat_task_message_creates_user_directed_goal(monkeypatch, tmp_path):
     event = DiscordEvent(None, "10", "1", "m8", False, False, "FastAPI 프로젝트 초안 만들어봐")
     output = "\n".join(route_discord_event(event, control_config()))
     goals = list_goals(limit=5, include_archived=True)
+    tasks = list_tasks(limit=5, queue_type="user")
     user_goal = next(goal for goal in goals if goal["goal_type"] == "user_directed")
     assert "자율 스케줄러" not in output
     assert "좋아. 목표" not in output
-    assert user_goal["status"] == "done"
+    assert "작업으로 넘겼어" in output
+    assert user_goal["status"] == "active"
     assert user_goal["priority"] > 0.9
+    assert tasks[0]["status"] == "queued"
 
 
 def test_chat_status_message_does_not_create_user_goal(monkeypatch, tmp_path):
