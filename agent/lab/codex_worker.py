@@ -17,6 +17,7 @@ from agent.core.autonomy import current_profile
 from agent.core.capabilities import ALLOWED_CODEX_WORK_BACKENDS, ALLOWED_CODEX_WORK_SANDBOXES, codex_work_backend, codex_work_sandbox, codex_worker_blockers, codex_worker_enabled
 from agent.core.events import log_event
 from agent.core.policy import PolicyEngine
+from agent.core.self_improvement_release import evaluate_release_candidate
 from agent.tools.full_device import redact_action_output
 from agent.workspace.executor import write_text_artifact
 
@@ -300,6 +301,18 @@ def _run_verification_command(root: Path, command: str, *, timeout: int) -> dict
         return {"command": command, "returncode": 127, "stdout": "", "stderr": type(exc).__name__}
 
 
+def _verification_passed(evidence: list[dict[str, Any]]) -> bool:
+    latest_with_verification = None
+    for item in reversed(evidence):
+        verification = item.get("verification")
+        if verification:
+            latest_with_verification = verification
+            break
+    if not latest_with_verification:
+        return False
+    return all(record.get("returncode") == 0 for record in latest_with_verification)
+
+
 def _run_native_loop_backend(root: Path, user_request: str, *, goal_id: int | None, task_id: int | None, sandbox: str) -> dict[str, Any]:
     worktree, branch, worktree_status = _create_native_worktree(root, task_id)
     config = codex_exec_config("WORK", default_reasoning="high", default_timeout=120)
@@ -466,6 +479,19 @@ def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: in
     for key in ("worktree", "worktree_branch", "worktree_status", "mode", "backend_error", "iterations_used", "max_iterations", "verification_commands", "evidence_ledger", "integration_status"):
         if backend_result.get(key) is not None:
             result[key] = backend_result[key]
+    evidence = backend_result.get("evidence_ledger") if isinstance(backend_result.get("evidence_ledger"), list) else []
+    result["release_gate"] = evaluate_release_candidate(
+        changed_files=after_status,
+        worktree_isolated=backend_result.get("worktree_status") == "created",
+        tests_passed=_verification_passed(evidence),
+        audit_passed=False,
+        eval_passed=False,
+        review_passed=False,
+        approval_status="pending",
+        risk_level=policy.risk_level,
+        rollback_plan=f"remove worktree branch {backend_result.get('worktree_branch')}" if backend_result.get("worktree_branch") else None,
+        secrets_touched=bool(unsafe_files),
+    )
     artifact = write_text_artifact(
         "reports",
         f"codex-work-{task_id or 'manual'}-{uuid4().hex[:8]}.md",

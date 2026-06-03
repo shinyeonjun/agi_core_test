@@ -26,6 +26,7 @@ from agent.core.process_table import get_process, list_processes, process_snapsh
 from agent.core.project_execution import get_project_plan, list_project_plans
 from agent.core.reactor import adaptive_sleep_seconds, reactor_once, reactor_run, reactor_status
 from agent.core.research_ingestion import ingest_research_papers, list_research_paper_seeds
+from agent.core.self_improvement_release import build_self_improvement_release_plan, evaluate_release_candidate
 from agent.core.wake_signals import prune_wake_signals
 from agent.core.self_map import latest_self_map, refresh_self_map, self_map_brief
 from agent.core.state import load_state, save_state
@@ -248,6 +249,37 @@ def cmd_research(args: argparse.Namespace) -> int:
         print_json(ingest_research_papers(limit=args.limit, dry_run=bool(args.dry_run)))
         return 0
     raise ValueError(f"unknown research command: {args.research_command}")
+
+
+def cmd_release(args: argparse.Namespace) -> int:
+    if args.release_command == "plan":
+        print_json(
+            build_self_improvement_release_plan(
+                args.title,
+                request=args.request or "",
+                risk_level=args.risk_level,
+                owner=args.owner,
+            )
+        )
+        return 0
+    if args.release_command == "gate":
+        print_json(
+            evaluate_release_candidate(
+                changed_files=args.changed_file or [],
+                worktree_isolated=args.worktree == "isolated",
+                tests_passed=bool(args.tests_passed),
+                audit_passed=bool(args.audit_passed),
+                eval_passed=bool(args.eval_passed),
+                review_passed=bool(args.review_passed),
+                approval_status=args.approval,
+                risk_level=args.risk_level,
+                rollback_plan=args.rollback_plan,
+                secrets_touched=bool(args.secrets_touched),
+                destructive_change=bool(args.destructive_change),
+            )
+        )
+        return 0
+    raise ValueError(f"unknown release command: {args.release_command}")
 
 
 def cmd_skill_add(args: argparse.Namespace) -> int:
@@ -744,6 +776,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("research"); research_sub = p.add_subparsers(dest="research_command", required=True)
     p_research_papers = research_sub.add_parser("papers"); p_research_papers.add_argument("--limit", type=int, default=20); p_research_papers.set_defaults(func=cmd_research)
     p_research_ingest = research_sub.add_parser("ingest"); p_research_ingest.add_argument("--limit", type=int); p_research_ingest.add_argument("--dry-run", action="store_true"); p_research_ingest.set_defaults(func=cmd_research)
+    p = sub.add_parser("release"); release_sub = p.add_subparsers(dest="release_command", required=True)
+    p_release_plan = release_sub.add_parser("plan"); p_release_plan.add_argument("title"); p_release_plan.add_argument("--request"); p_release_plan.add_argument("--risk-level", default="medium", choices=["low", "medium", "high", "critical"]); p_release_plan.add_argument("--owner", default="user"); p_release_plan.set_defaults(func=cmd_release)
+    p_release_gate = release_sub.add_parser("gate"); p_release_gate.add_argument("--changed-file", action="append"); p_release_gate.add_argument("--worktree", default="isolated", choices=["isolated", "main"]); p_release_gate.add_argument("--risk-level", default="medium", choices=["low", "medium", "high", "critical"]); p_release_gate.add_argument("--tests-passed", action="store_true"); p_release_gate.add_argument("--audit-passed", action="store_true"); p_release_gate.add_argument("--eval-passed", action="store_true"); p_release_gate.add_argument("--review-passed", action="store_true"); p_release_gate.add_argument("--approval", default="pending", choices=["pending", "approved", "rejected"]); p_release_gate.add_argument("--rollback-plan"); p_release_gate.add_argument("--secrets-touched", action="store_true"); p_release_gate.add_argument("--destructive-change", action="store_true"); p_release_gate.set_defaults(func=cmd_release)
     p = sub.add_parser("skill"); skill_sub = p.add_subparsers(dest="skill_command", required=True)
     p_skill_add = skill_sub.add_parser("add"); p_skill_add.add_argument("name"); p_skill_add.add_argument("trigger"); p_skill_add.add_argument("procedure", nargs="+"); p_skill_add.add_argument("--tags", nargs="*"); p_skill_add.set_defaults(func=cmd_skill_add)
     p_skill_promote = skill_sub.add_parser("promote"); p_skill_promote.add_argument("--limit", type=int, default=5); p_skill_promote.add_argument("--min-evidence", type=int, default=3); p_skill_promote.add_argument("--dry-run", action="store_true"); p_skill_promote.set_defaults(func=cmd_skill_promote)
