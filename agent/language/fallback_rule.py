@@ -5,6 +5,29 @@ from typing import Any
 
 from agent.language.schemas import Interpretation, normalize_interpretation
 
+SELF_IMPROVEMENT_TOKENS = (
+    "자가개선",
+    "자기개선",
+    "셀프개선",
+    "스스로 개선",
+    "스스로 고쳐",
+    "네 코어 개선",
+    "너 코어 개선",
+    "core 개선",
+    "코어 개선",
+    "self-improve",
+    "self improvement",
+)
+
+
+def is_self_improvement_request_rule(text: str) -> bool:
+    lowered = text.strip().lower()
+    if not lowered or lowered.startswith("!"):
+        return False
+    if not any(token in lowered for token in SELF_IMPROVEMENT_TOKENS):
+        return False
+    return any(token in lowered for token in ("해", "해봐", "진행", "구현", "개선", "고쳐", "돌려", "run", "do", "implement", "fix"))
+
 POSITIVE_KEYWORDS = ("좋다", "맞아", "ㅇㅇ", "계속", "이 방향", "오케이", "굿", "좋아")
 NEGATIVE_KEYWORDS = ("아니", "그게 아니라", "틀림", "너무 장황", "다시", "이상한데", "별로")
 
@@ -166,6 +189,25 @@ class FallbackRuleLanguageEngine:
         cleaned = text.strip()
         if not cleaned:
             return normalize_interpretation({"intent": "unknown", "confidence": 0.0}, engine=self.name)
+
+        if is_self_improvement_request_rule(cleaned):
+            return normalize_interpretation(
+                {
+                    "intent": "self_improvement_request",
+                    "sentiment": "neutral",
+                    "target": "self_improvement",
+                    "confidence": 0.86,
+                    "execution": {
+                        "requires_action": True,
+                        "suggested_queue_type": "self_improvement_code",
+                        "risk_hint": "medium",
+                        "description": "Core self-improvement code loop",
+                        "request": cleaned[:500],
+                    },
+                    "safety_notes": ["requires_native_loop", "main_apply_requires_approval"],
+                },
+                engine=self.name,
+            )
 
         style = detect_style_feedback_rule(cleaned)
         if style:

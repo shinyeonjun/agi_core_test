@@ -29,6 +29,7 @@ from agent.core.reactor import adaptive_sleep_seconds, reactor_once, reactor_run
 from agent.core.research_ingestion import ingest_research_papers, list_research_paper_seeds
 from agent.core.self_improvement_release import build_self_improvement_release_plan, evaluate_release_candidate
 from agent.core.self_improvement_planner import enqueue_self_improvement_tickets, generate_self_improvement_tickets
+from agent.core.self_improvement_state import self_improvement_status
 from agent.core.wake_signals import prune_wake_signals
 from agent.core.self_map import latest_self_map, refresh_self_map, self_map_brief
 from agent.core.state import load_state, save_state
@@ -302,6 +303,9 @@ def cmd_self_improve(args: argparse.Namespace) -> int:
         return 0
     if args.self_improve_command == "enqueue":
         print_json(enqueue_self_improvement_tickets(limit=args.limit))
+        return 0
+    if args.self_improve_command == "status":
+        print_json(self_improvement_status(limit=args.limit))
         return 0
     raise ValueError(f"unknown self-improve command: {args.self_improve_command}")
 
@@ -808,6 +812,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("self-improve"); self_improve_sub = p.add_subparsers(dest="self_improve_command", required=True)
     p_self_tickets = self_improve_sub.add_parser("tickets"); p_self_tickets.add_argument("--limit", type=int, default=5); p_self_tickets.set_defaults(func=cmd_self_improve)
     p_self_enqueue = self_improve_sub.add_parser("enqueue"); p_self_enqueue.add_argument("--limit", type=int, default=1); p_self_enqueue.set_defaults(func=cmd_self_improve)
+    p_self_status = self_improve_sub.add_parser("status"); p_self_status.add_argument("--limit", type=int, default=10); p_self_status.set_defaults(func=cmd_self_improve)
     p = sub.add_parser("skill"); skill_sub = p.add_subparsers(dest="skill_command", required=True)
     p_skill_add = skill_sub.add_parser("add"); p_skill_add.add_argument("name"); p_skill_add.add_argument("trigger"); p_skill_add.add_argument("procedure", nargs="+"); p_skill_add.add_argument("--tags", nargs="*"); p_skill_add.set_defaults(func=cmd_skill_add)
     p_skill_promote = skill_sub.add_parser("promote"); p_skill_promote.add_argument("--limit", type=int, default=5); p_skill_promote.add_argument("--min-evidence", type=int, default=3); p_skill_promote.add_argument("--dry-run", action="store_true"); p_skill_promote.set_defaults(func=cmd_skill_promote)

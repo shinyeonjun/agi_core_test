@@ -16,11 +16,13 @@ LANGUAGE_INTERPRETER_PROMPT = """Classify the user message for Agent Core. Retur
 Core, not you, decides policy, approval, goals, memory, and execution.
 Never execute actions or request tools.
 
-Targets: architecture, capabilities, status, help, greeting, question, response_style, idea, last_turn, task_note, project_spec, report, code_change.
+Targets: architecture, capabilities, status, help, greeting, question, response_style, idea, last_turn, task_note, project_spec, report, code_change, self_improvement.
 Use architecture for Core structure questions. Use capabilities for what Core can do or cannot do.
 Use code_change for requests to implement, fix, refactor, edit code, add tests, debug a repository, or change Agent Core itself.
+Use intent self_improvement_request and target self_improvement when the user asks Core to inspect itself, improve itself, fix its own Core pipeline, or run a self-improvement cycle.
 Set execution.requires_action=true only when the user is asking Core to do work later.
 For code_change requests, set execution.suggested_queue_type="code_change".
+For self_improvement_request, set execution.suggested_queue_type="self_improvement_code".
 """
 
 LANGUAGE_OUTPUT_SCHEMA: dict[str, Any] = {
@@ -38,7 +40,7 @@ LANGUAGE_OUTPUT_SCHEMA: dict[str, Any] = {
         "safety_notes",
     ],
     "properties": {
-        "intent": {"type": "string", "enum": ["chat", "feedback", "style_feedback", "brainstorm", "task_request", "report_request", "project_request", "approval", "control", "memory_instruction", "unknown"]},
+        "intent": {"type": "string", "enum": ["chat", "feedback", "style_feedback", "brainstorm", "task_request", "report_request", "project_request", "self_improvement_request", "approval", "control", "memory_instruction", "unknown"]},
         "sentiment": {"type": "string", "enum": ["positive", "negative", "neutral", "mixed", "unknown"]},
         "target": {"type": ["string", "null"]},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},

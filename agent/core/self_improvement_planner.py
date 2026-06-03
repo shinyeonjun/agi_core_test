@@ -242,6 +242,52 @@ def enqueue_self_improvement_ticket(ticket: dict[str, Any]) -> dict[str, Any]:
     return {"goal_id": goal_id, "task_id": task_id, "ticket": ticket}
 
 
+def enqueue_user_self_improvement_request(text: str, *, source_event_id: int | None = None, limit: int = 1) -> dict[str, Any]:
+    init_db()
+    tickets = generate_self_improvement_tickets(limit=limit)
+    created: list[dict[str, Any]] = []
+    for ticket in tickets[: max(1, int(limit))]:
+        prompt = ticket_to_worker_prompt(ticket)
+        title = f"사용자 요청 자가개선: {ticket.get('title') or 'Core self-improvement'}"
+        goal_id = create_goal(
+            title,
+            prompt,
+            goal_type="self_improvement_proposal",
+            status="active",
+            priority=max(0.9, float(ticket.get("priority") or 0.7)),
+            risk_level=str(ticket.get("risk_level") or "medium"),
+            metadata={
+                "source": "user_self_improvement_request",
+                "source_event_id": source_event_id,
+                "priority_owner": "user",
+                "task_kind": "code_change",
+                "self_improvement_ticket": ticket,
+                "raw_user_text": prompt,
+                "user_request": text,
+                "created_at": now_kst(),
+                "requires_native_loop": True,
+                "state_machine": {
+                    "phase": "queued",
+                    "steps": ["rank_ticket", "worktree_execute", "verify", "review", "approval", "apply_after_approval"],
+                    "main_apply": "approval_required",
+                },
+            },
+            dedupe=True,
+        )
+        task_id = enqueue_task(
+            "user",
+            goal_id=goal_id,
+            task_kind="code_change",
+            title=title,
+            source="discord_self_improvement",
+            priority=max(0.9, float(ticket.get("priority") or 0.7)),
+            payload={"ticket": ticket, "worker_prompt": prompt, "requires_native_loop": True, "source_event_id": source_event_id},
+            idempotency_key=f"user_self_improvement:{ticket.get('key')}:{source_event_id or 'manual'}",
+        )
+        created.append({"goal_id": goal_id, "task_id": task_id, "ticket": ticket})
+    return {"created": created, "count": len(created), "source": "user_self_improvement_request"}
+
+
 def enqueue_self_improvement_tickets(limit: int = 1) -> dict[str, Any]:
     tickets = generate_self_improvement_tickets(limit=limit)
     enqueued = [enqueue_self_improvement_ticket(ticket) for ticket in tickets[: max(1, int(limit))]]

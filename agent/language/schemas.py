@@ -11,6 +11,7 @@ ALLOWED_INTENTS = {
     "task_request",
     "report_request",
     "project_request",
+    "self_improvement_request",
     "approval",
     "control",
     "memory_instruction",
@@ -88,7 +89,7 @@ def normalize_interpretation(value: dict[str, Any] | Interpretation, *, engine: 
         confidence = 0.0
     execution = _as_dict(data.get("execution"))
     if "requires_action" not in execution:
-        execution["requires_action"] = intent in {"task_request", "project_request", "report_request"}
+        execution["requires_action"] = intent in {"task_request", "project_request", "report_request", "self_improvement_request"}
     return Interpretation(
         intent=intent,
         sentiment=sentiment,

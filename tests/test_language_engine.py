@@ -208,7 +208,7 @@ def test_discord_uses_language_interpretation_for_feedback(monkeypatch, tmp_path
 
     output = "\n".join(route_discord_event(event, control_config()))
 
-    assert "이번 답변 생성이 실패" in output
+    assert "Core가 지금 입력은 기록해뒀어" in output
     assert "fallback renderer" not in output
 
 

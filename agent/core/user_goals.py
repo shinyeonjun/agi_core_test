@@ -7,6 +7,7 @@ from agent.core.approvals import ApprovalStore
 from agent.core.goals import create_goal, update_goal_metadata
 from agent.core.policy import PolicyEngine
 from agent.core.project_execution import create_project_execution_plan, link_plan_task, needs_project_plan
+from agent.core.self_improvement_planner import enqueue_user_self_improvement_request
 from agent.core.task_queue import enqueue_task
 from agent.language.engine import interpret_user_message
 from agent.language.fallback_rule import classify_user_goal_kind_rule
@@ -18,7 +19,7 @@ def is_user_goal_request(text: str, *, interpretation: dict[str, Any] | None = N
         return False
     interpretation = interpretation or interpret_user_message(cleaned, {"purpose": "user_goal_detection"}, log=False)
     execution = interpretation.get("execution") or {}
-    return interpretation.get("intent") in {"task_request", "project_request", "report_request"} and bool(execution.get("requires_action"))
+    return interpretation.get("intent") in {"task_request", "project_request", "report_request", "self_improvement_request"} and bool(execution.get("requires_action"))
 
 
 def classify_user_goal_kind(text: str, *, interpretation: dict[str, Any] | None = None) -> str:
@@ -40,6 +41,27 @@ def _title_from_text(text: str) -> str:
 def maybe_create_user_goal(text: str, *, source_event_id: int | None = None, metadata: dict[str, Any] | None = None, interpretation: dict[str, Any] | None = None) -> dict[str, Any] | None:
     if not is_user_goal_request(text, interpretation=interpretation):
         return None
+
+    if (interpretation or {}).get("intent") == "self_improvement_request":
+        result = enqueue_user_self_improvement_request(text, source_event_id=source_event_id, limit=1)
+        item = (result.get("created") or [{}])[0]
+        ticket = item.get("ticket") or {}
+        return {
+            "id": item.get("goal_id"),
+            "task_id": item.get("task_id"),
+            "status": "active",
+            "goal_type": "self_improvement_proposal",
+            "title": str(ticket.get("title") or "Core self-improvement"),
+            "task_kind": "code_change",
+            "risk_level": str(ticket.get("risk_level") or "medium"),
+            "requires_approval": False,
+            "approval_id": None,
+            "project_plan_id": None,
+            "denied": False,
+            "reason": "self_improvement_queued",
+            "self_improvement": True,
+            "ticket": ticket,
+        }
 
     engine = PolicyEngine()
     policy = engine.classify_decision(text, action_type="user_directive")

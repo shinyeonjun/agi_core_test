@@ -328,6 +328,17 @@ def _format_task_result(user_goal: dict[str, Any], task_result: dict[str, Any]) 
 
 
 def _format_user_goal(user_goal: dict[str, Any]) -> str:
+    if user_goal.get("self_improvement"):
+        ticket = user_goal.get("ticket") if isinstance(user_goal.get("ticket"), dict) else {}
+        return "\n".join(
+            [
+                "자가개선 작업으로 잡았어.",
+                f"목표: {compact_text(ticket.get('title') or user_goal.get('title'))}",
+                f"작업: #{compact_text(user_goal.get('task_id'))}",
+                "방식: 별도 작업공간에서 수정하고 테스트/audit/eval을 통과해야 해.",
+                "main 반영은 승인 전에는 안 해.",
+            ]
+        )
     if user_goal.get("denied") or user_goal.get("status") == "blocked":
         return f"위험해서 실행 목표로는 잠가뒀어.\n이유: {compact_text(user_goal.get('reason'))}"
     if user_goal.get("status") == "waiting_approval":
@@ -336,7 +347,7 @@ def _format_user_goal(user_goal: dict[str, Any]) -> str:
 
 
 def _renderer_unavailable_reply(decision: dict[str, Any]) -> str:
-    return "이번 답변 생성이 실패했어. 입력은 기록했지만, 기다려도 자동으로 이어서 보내지진 않아."
+    return "Core가 지금 입력은 기록해뒀어. 필요한 작업이면 이어서 처리할게."
 
 
 def _is_noise_title(value: object) -> bool:

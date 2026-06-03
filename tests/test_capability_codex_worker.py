@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from agent.cli.agentctl import main
 from agent.core.autonomy import set_autonomy_profile
+from agent.core.approvals import ApprovalStore
 from agent.core.database import init_db
 from agent.core.decision import build_talk_decision
 from agent.core.goals import create_goal, list_goals
@@ -261,3 +262,47 @@ def test_native_loop_retries_after_failed_verification(monkeypatch, tmp_path):
     assert result["iterations_used"] == 2
     assert result["evidence_ledger"][0]["verification"][0]["returncode"] == 1
     assert result["evidence_ledger"][1]["verification"][0]["returncode"] == 0
+
+
+def test_self_improvement_native_loop_creates_apply_approval(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    monkeypatch.setenv("AGENT_CODEX_WORKER_ENABLED", "1")
+    monkeypatch.setenv("AGENT_CODEX_WORK_BACKEND", "native_loop")
+    monkeypatch.setenv("AGENT_WORK_LOOP_VERIFY_COMMANDS", "python -m pytest -q;python -m agent.cli.agentctl audit;python -m agent.cli.agentctl eval run")
+    monkeypatch.setattr("agent.core.capabilities.shutil.which", lambda name: "codex" if name == "codex" else None)
+    (tmp_path / "repo" / ".git").mkdir()
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["git", "rev-parse"]:
+            return SimpleNamespace(returncode=0, stdout="true\n", stderr="")
+        if args[:3] == ["git", "worktree", "add"]:
+            Path(args[-2]).mkdir(parents=True, exist_ok=True)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if args[:2] == ["git", "status"]:
+            return SimpleNamespace(returncode=0, stdout=" M agent/core/example.py\n", stderr="")
+        if args[:4] == ["python", "-m", "pytest", "-q"]:
+            return SimpleNamespace(returncode=0, stdout="1 passed\n", stderr="")
+        if args[:4] == ["python", "-m", "agent.cli.agentctl", "audit"]:
+            return SimpleNamespace(returncode=0, stdout="audit pass\n", stderr="")
+        if args[:5] == ["python", "-m", "agent.cli.agentctl", "eval", "run"]:
+            return SimpleNamespace(returncode=0, stdout="eval pass\n", stderr="")
+        assert args[:2] == ["codex", "exec"]
+        output_path = args[args.index("--output-last-message") + 1]
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write("자가개선 작업 완료. 테스트, audit, eval 통과.")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("agent.lab.codex_worker.subprocess.run", fake_run)
+
+    from agent.lab.codex_worker import run_codex_work
+
+    result = run_codex_work("Core 자가개선 코드 작업", goal_id=1, task_id=2, self_improvement=True)
+    approvals = ApprovalStore().list_pending()
+
+    assert result["status"] == "codex_work_completed"
+    assert result["code_review"]["verdict"] in {"needs_approval", "ready_for_approval"}
+    assert result["approval_id"] is not None
+    assert approvals[0]["proposal"]["action_type"] == "self_improvement_apply"
+    assert approvals[0]["proposal"]["payload"]["worktree_branch"] == result["worktree_branch"]
+    assert approvals[0]["proposal"]["payload"]["note"] == "승인 전 main에는 반영되지 않는다."

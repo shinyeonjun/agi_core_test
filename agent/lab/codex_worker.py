@@ -13,10 +13,11 @@ from uuid import uuid4
 
 from agent.codex_config import codex_exec_args, codex_exec_config
 from agent.config.defaults import env_bool, env_int, project_root, workspace_root
+from agent.core.approvals import ApprovalStore
 from agent.core.autonomy import current_profile
 from agent.core.capabilities import ALLOWED_CODEX_WORK_BACKENDS, ALLOWED_CODEX_WORK_SANDBOXES, codex_work_backend, codex_work_sandbox, codex_worker_blockers, codex_worker_enabled
 from agent.core.events import log_event
-from agent.core.policy import PolicyEngine
+from agent.core.policy import ActionProposal, PolicyEngine
 from agent.core.self_code_review import review_codex_work_result
 from agent.core.self_improvement_release import evaluate_release_candidate
 from agent.tools.full_device import redact_action_output
@@ -119,6 +120,40 @@ def _blocked_result(reason: str, *, goal_id: int | None, task_id: int | None, **
     result.update(extra)
     log_event("lab", "codex_work_blocked", reason, result, 0.72)
     return result
+
+
+def _maybe_create_self_improvement_approval(result: dict[str, Any]) -> int | None:
+    review = result.get("code_review") if isinstance(result.get("code_review"), dict) else {}
+    verdict = str(review.get("verdict") or "")
+    release_gate = review.get("release_gate") if isinstance(review.get("release_gate"), dict) else {}
+    if verdict not in {"needs_approval", "ready_for_approval"}:
+        return None
+    proposal = ActionProposal(
+        action_type="self_improvement_apply",
+        description=f"자가개선 결과 main 반영 승인: {result.get('worktree_branch') or 'worktree'}",
+        payload={
+            "goal_id": result.get("goal_id"),
+            "task_id": result.get("task_id"),
+            "worktree": result.get("worktree"),
+            "worktree_branch": result.get("worktree_branch"),
+            "changed_files": result.get("changed_files") or [],
+            "release_gate_status": release_gate.get("status"),
+            "review_verdict": verdict,
+            "rollback_plan": release_gate.get("rollback_plan"),
+            "note": "승인 전 main에는 반영되지 않는다.",
+        },
+        risk_level=str(release_gate.get("effective_risk") or (result.get("policy") or {}).get("risk_level") or "medium"),
+        requires_approval=True,
+    )
+    approval_id = ApprovalStore().create_approval(proposal)
+    log_event(
+        "approval",
+        "self_improvement_apply_approval_created",
+        str(approval_id),
+        {"approval_id": approval_id, "goal_id": result.get("goal_id"), "task_id": result.get("task_id"), "verdict": verdict},
+        0.82,
+    )
+    return approval_id
 
 
 def _work_loop_timeout() -> int:
@@ -476,6 +511,8 @@ def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: in
         "reasoning_effort": backend_result.get("reasoning_effort"),
         "timeout_seconds": backend_result.get("timeout_seconds"),
         "profile": current_profile(),
+        "goal_id": goal_id,
+        "task_id": task_id,
         "sandbox": sandbox,
         "policy": {"risk_level": policy.risk_level, "requires_approval": policy.requires_approval, "denied": policy.denied, "matched_rules": policy.matched_rules},
     }
@@ -496,6 +533,10 @@ def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: in
         secrets_touched=bool(unsafe_files),
     )
     result["code_review"] = review_codex_work_result(result, self_improvement=self_improvement)
+    if self_improvement:
+        approval_id = _maybe_create_self_improvement_approval(result)
+        if approval_id is not None:
+            result["approval_id"] = approval_id
     artifact = write_text_artifact(
         "reports",
         f"codex-work-{task_id or 'manual'}-{uuid4().hex[:8]}.md",
