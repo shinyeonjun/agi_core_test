@@ -102,18 +102,38 @@ def _open_cancel_noise() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     return [row for row in tasks if _is_cancel_noise(row)], [row for row in goals if _is_cancel_noise(row)]
 
 
+def _open_tasks_for_closed_goals() -> list[dict[str, Any]]:
+    task_status_sql = _placeholders(OPEN_TASK_STATUSES)
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT task_queue.*
+            FROM task_queue
+            JOIN goals ON goals.id = task_queue.goal_id
+            WHERE task_queue.status IN ({task_status_sql})
+              AND goals.status IN ('done', 'archived')
+            ORDER BY task_queue.id DESC
+            LIMIT 200
+            """,
+            OPEN_TASK_STATUSES,
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def cleanup_db_noise(*, apply: bool = False, stale_seconds: int = 1800) -> dict[str, Any]:
     init_db()
     cancel_tasks, cancel_goals = _open_cancel_noise()
+    closed_goal_tasks = _open_tasks_for_closed_goals()
     stale_ids = _stale_running_ids(stale_seconds)
     duplicate_discord_events = _duplicate_discord_event_count()
     result: dict[str, Any] = {
         "applied": bool(apply),
         "cancel_noise_tasks": [int(row["id"]) for row in cancel_tasks],
         "cancel_noise_goals": [int(row["id"]) for row in cancel_goals],
+        "closed_goal_tasks": [int(row["id"]) for row in closed_goal_tasks],
         "stale_running_tasks": stale_ids,
         "duplicate_discord_events": duplicate_discord_events,
-        "changed": {"tasks_skipped": 0, "goals_archived": 0, "stale_recovered": 0, "stale_blocked": 0},
+        "changed": {"tasks_skipped": 0, "closed_goal_tasks_skipped": 0, "goals_archived": 0, "stale_recovered": 0, "stale_blocked": 0},
     }
     if not apply:
         return result
@@ -139,6 +159,25 @@ def cleanup_db_noise(*, apply: bool = False, stale_seconds: int = 1800) -> dict[
                 ),
             )
             result["changed"]["tasks_skipped"] = int(cur.rowcount)
+        closed_task_ids = [int(row["id"]) for row in closed_goal_tasks]
+        if closed_task_ids:
+            cur = conn.execute(
+                f"""
+                UPDATE task_queue
+                SET status = 'skipped', updated_at = ?, completed_at = ?,
+                    locked_until = NULL, locked_by = NULL,
+                    result_json = ?
+                WHERE id IN ({_placeholders(closed_task_ids)}) AND status IN ({_placeholders(OPEN_TASK_STATUSES)})
+                """,
+                (
+                    ts,
+                    ts,
+                    json.dumps({"reason": "closed_goal"}, ensure_ascii=False),
+                    *closed_task_ids,
+                    *OPEN_TASK_STATUSES,
+                ),
+            )
+            result["changed"]["closed_goal_tasks_skipped"] = int(cur.rowcount)
         goal_ids = [int(row["id"]) for row in cancel_goals]
         archived = 0
         for row in cancel_goals:

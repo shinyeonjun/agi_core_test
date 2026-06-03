@@ -9,11 +9,12 @@ from agent.core.approvals import ApprovalStore
 from agent.core.autonomy import set_autonomy_profile
 from agent.core.database import connect, init_db
 from agent.core.db_hygiene import cleanup_db_noise
-from agent.core.goals import create_goal, list_goals
+from agent.core.goals import create_goal, list_goals, update_goal_metadata
 from agent.core.pipeline import run_talk
 from agent.core.task_lifecycle import list_task_lifecycle, task_lifecycle_summary
 from agent.core.task_queue import claim_task, doctor_tasks, enqueue_task, finish_task, list_tasks, task_status_counts
 from agent.lab.planner import run_lab_tick, run_lab_tick_if_enabled, run_user_task, sync_open_goals_to_tasks
+from agent.lab.codex_worker import _work_loop_verify_commands
 
 
 def setup_isolated(monkeypatch, tmp_path):
@@ -257,6 +258,61 @@ def test_db_cleanup_archives_cancel_request_noise(monkeypatch, tmp_path):
     assert applied["changed"]["goals_archived"] == 1
     assert tasks[task_id]["status"] == "skipped"
     assert goals[goal_id]["status"] == "archived"
+
+
+def test_goal_sync_skips_blocked_goal_without_reenqueue(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    goal_id = create_goal("Blocked code task", "blocked", goal_type="user_directed", status="active", priority=0.9, metadata={"priority_owner": "user", "task_kind": "code_change"}, dedupe=False)
+    update_goal_metadata(goal_id, {"priority_owner": "user", "task_kind": "code_change"}, status="blocked")
+
+    result = sync_open_goals_to_tasks()
+    tasks = list_tasks(limit=10, queue_type="user")
+
+    assert result["skipped"] >= 1
+    assert tasks == []
+
+
+def test_goal_sync_pauses_code_goal_after_worker_failure(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    goal_id = create_goal("Code task", "code", goal_type="user_directed", status="active", priority=0.9, metadata={"priority_owner": "user", "task_kind": "code_change"}, dedupe=False)
+    task_id = enqueue_task("user", goal_id=goal_id, task_kind="code_change", title="Code task", source="goal_sync", priority=0.9)
+    finish_task(task_id, "blocked", {"status": "codex_work_failed", "returncode": 125})
+
+    result = sync_open_goals_to_tasks()
+    goals = {goal["id"]: goal for goal in list_goals(limit=10, include_archived=True)}
+    tasks = list_tasks(limit=10, queue_type="user")
+
+    assert result["skipped"] >= 1
+    assert goals[goal_id]["status"] == "blocked"
+    assert len(tasks) == 1
+    assert tasks[0]["id"] == task_id
+
+
+def test_db_cleanup_skips_open_tasks_for_closed_goals(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    goal_id = create_goal("Closed goal", "done", goal_type="user_directed", status="done", priority=0.9, metadata={"priority_owner": "user", "task_kind": "task_note"}, dedupe=False)
+    task_id = enqueue_task("user", goal_id=goal_id, task_kind="task_note", title="Closed goal", source="test", priority=0.9)
+
+    dry_run = cleanup_db_noise(apply=False)
+    assert task_id in dry_run["closed_goal_tasks"]
+
+    applied = cleanup_db_noise(apply=True)
+    task = next(row for row in list_tasks(limit=10, queue_type="user") if row["id"] == task_id)
+
+    assert applied["changed"]["closed_goal_tasks_skipped"] == 1
+    assert task["status"] == "skipped"
+    assert task["result"]["reason"] == "closed_goal"
+
+
+def test_work_loop_default_verify_uses_current_python(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    monkeypatch.delenv("AGENT_WORK_LOOP_VERIFY_COMMANDS", raising=False)
+
+    commands = _work_loop_verify_commands()
+
+    assert commands
+    assert "pytest" in commands[0]
+    assert "python -m pytest" not in commands[0]
 
 
 def test_db_cleanup_cli_defaults_to_dry_run(monkeypatch, tmp_path, capsys):

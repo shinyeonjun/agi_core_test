@@ -5,6 +5,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -171,7 +172,7 @@ def _work_loop_worktree_enabled() -> bool:
 def _work_loop_verify_commands() -> list[str]:
     value = os.getenv("AGENT_WORK_LOOP_VERIFY_COMMANDS")
     if value is None:
-        return ["python -m pytest -q"]
+        return [f"{shlex.quote(sys.executable)} -m pytest -q"]
     stripped = value.strip()
     if stripped.lower() in {"", "0", "false", "off", "none", "skip"}:
         return []

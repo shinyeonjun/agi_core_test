@@ -13,7 +13,7 @@ from agent.core.policy import PolicyEngine
 from agent.core.self_improvement_planner import enqueue_user_self_improvement_request
 from agent.core.task_queue import list_tasks
 from agent.memory.store import add_memory
-from agent.bridge.task_notifications import notify_task_phase
+from agent.bridge.task_notifications import _finish_message, notify_task_phase
 
 
 MOJIBAKE_MARKERS = ("�", "濡", "紐", "媛", "醫", "뺤", "怨", "寃", "?꾨", "?덉")
@@ -242,6 +242,17 @@ def test_task_phase_notification_compact_mode_suppresses_noise(monkeypatch, tmp_
 
     assert result["sent"] is False
     assert result["reason"] == "compact_mode_suppressed"
+
+
+def test_task_finished_message_explains_verification_failure(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    task = {"task_kind": "code_change", "title": "대화 렌더러 복구 품질 개선", "queue_type": "user", "payload": {}}
+
+    text = _finish_message(task, 519, "blocked", {"status": "codex_work_failed", "returncode": 125, "report": "pytest failed"})
+
+    assert "코드 작업 실패" in text
+    assert "검증 명령이 실패" in text
+    assert "요약: -" not in text
 
 
 def test_daily_summary_is_human_readable(monkeypatch, tmp_path):

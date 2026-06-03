@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.config.defaults import project_root
+from agent.config.defaults import env_int, project_root
 from agent.core.autonomy import current_profile
 from agent.core.drives import compute_drives
 from agent.core.events import log_event
@@ -82,6 +82,39 @@ def _task_kind_for_goal(goal: dict[str, Any]) -> str:
     return str(metadata.get("task_kind") or goal.get("goal_type") or "general")
 
 
+def _failed_goal_sync_tasks(goal_id: int, task_kind: str) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    for task in list_tasks(limit=500):
+        if int(task.get("goal_id") or 0) != int(goal_id):
+            continue
+        if str(task.get("task_kind") or "") != task_kind:
+            continue
+        if str(task.get("source") or "") != "goal_sync":
+            continue
+        if str(task.get("status") or "") != "blocked":
+            continue
+        result = task.get("result") if isinstance(task.get("result"), dict) else {}
+        if str(result.get("status") or "") in {"codex_work_failed", "codex_work_blocked"}:
+            failures.append(task)
+    return failures
+
+
+def _pause_goal_after_worker_failures(goal: dict[str, Any], task_kind: str) -> bool:
+    if task_kind != "code_change":
+        return False
+    goal_id = int(goal["id"])
+    max_failures = max(1, env_int("AGENT_GOAL_SYNC_MAX_CODE_FAILURES", 1))
+    failures = _failed_goal_sync_tasks(goal_id, task_kind)
+    if len(failures) < max_failures:
+        return False
+    metadata = goal_metadata(goal)
+    metadata["sync_paused_reason"] = "code_worker_failed"
+    metadata["sync_paused_task_ids"] = [int(task["id"]) for task in failures[:5]]
+    metadata["next_step"] = "사용자 확인 후 새 목표로 다시 시도하거나 실패 보고서를 먼저 확인해야 함"
+    update_goal_metadata(goal_id, metadata, status="blocked")
+    return True
+
+
 def sync_open_goals_to_tasks(limit: int = 100) -> dict[str, Any]:
     priority_refresh = refresh_goal_priorities(limit=limit)
     synced = 0
@@ -90,10 +123,15 @@ def sync_open_goals_to_tasks(limit: int = 100) -> dict[str, Any]:
         status = _task_status_for_goal(goal)
         if status in {"blocked", "waiting_approval"}:
             skipped += 1
+            continue
+        task_kind = _task_kind_for_goal(goal)
+        if _pause_goal_after_worker_failures(goal, task_kind):
+            skipped += 1
+            continue
         task_id = enqueue_task(
             _queue_type_for_goal(goal),  # type: ignore[arg-type]
             goal_id=int(goal["id"]),
-            task_kind=_task_kind_for_goal(goal),
+            task_kind=task_kind,
             title=str(goal.get("title") or "Untitled task"),
             source="goal_sync",
             priority=float(goal.get("priority") or 0.5),

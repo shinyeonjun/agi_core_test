@@ -105,6 +105,17 @@ def _human_title(task: dict[str, Any] | None) -> str:
 
 def _reason_text(result: dict[str, Any]) -> str:
     reason = compact_text(result.get("reason") or result.get("denied_reason") or "")
+    status = compact_text(result.get("status") or "")
+    returncode = result.get("returncode")
+    if status == "codex_work_failed" and returncode == 125:
+        return "\ucf54\ub4dc\ub294 \ub9cc\ub4e4\uc5c8\uc9c0\ub9cc \uac80\uc99d \uba85\ub839\uc774 \uc2e4\ud328\ud574 main\uc5d0 \ubc18\uc601\ud558\uc9c0 \uc54a\uace0 \uba48\ucdc4"
+    if status == "codex_work_failed":
+        return f"\ucf54\ub4dc \uc791\uc5c5\uc790\uac00 \uc2e4\ud328\ud574 \uba48\ucdc4(returncode={returncode})"
+    if status == "codex_work_blocked":
+        unsafe = result.get("unsafe_changed_files") or []
+        if unsafe:
+            return "\ubbfc\uac10\ud558\uac70\ub098 \uc704\ud5d8\ud55c \ud30c\uc77c \ubcc0\uacbd \uac00\ub2a5\uc131\uc774 \uc788\uc5b4 \ubc18\uc601\ud558\uc9c0 \uc54a\uace0 \uba48\ucdc4"
+        return "\ucf54\ub4dc \uc791\uc5c5 \uc548\uc804 \uac8c\uc774\ud2b8\uc5d0\uc11c \uba48\ucdc4"
     if not reason:
         return "\uc0c1\uc138 \uc0ac\uc720 \ud655\uc778 \ud544\uc694"
     return REASON_LABELS.get(reason, reason.replace("_", " "))
@@ -149,10 +160,11 @@ def _finish_message(task: dict[str, Any] | None, task_id: int, status: str, resu
     kind = _task_kind_label(task)
     title = _human_title(task)
     result_status = compact_text(result.get("status") or status)
+    result_label = STATUS_LABELS.get(result_status, STATUS_LABELS.get(status, status))
     lines = [
         f"**{kind} \uacb0\uacfc #{task_id}**",
         title,
-        f"\uacb0\uacfc: {STATUS_LABELS.get(status, status)}",
+        f"\uacb0\uacfc: {result_label}",
     ]
     if status == "done":
         lines.append("\uc694\uc57d: \uc791\uc5c5\uc774 \ub05d\ub0ac\uace0 \uacb0\uacfc\ub97c \uae30\ub85d\ud588\uc5b4.")
@@ -161,6 +173,9 @@ def _finish_message(task: dict[str, Any] | None, task_id: int, status: str, resu
             lines.append(f"\ub2e4\uc74c: main \ubc18\uc601\uc740 #\uc2b9\uc778\uc5d0\uc11c #{approval_id} \ud655\uc778\uc774 \ud544\uc694\ud574.")
     elif status == "blocked":
         lines.append(f"\uc694\uc57d: {_reason_text(result)}")
+        report = compact_text(result.get("report"), "")
+        if report and report != "-":
+            lines.append(f"\ubcf4\uace0: {redact_discord_content(report[:500])}")
     elif status == "waiting_approval":
         lines.append("\uc694\uc57d: \uc2e4\ud589 \uc804\uc5d0 \uc2b9\uc778\uc774 \ud544\uc694\ud574.")
     else:
