@@ -82,6 +82,7 @@ def collect_capability_map() -> dict[str, Any]:
             {"name": "cognitive_growth_algorithms", "status": "enabled", "description": "Curiosity, utility/novelty scoring, HTN planning, case memory, Bayesian confidence, MAP-Elites, blackboard, active-inference-lite, and stigmergy signals"},
             {"name": "cognitive_growth_pipeline", "status": "enabled", "description": "Active-inference growth snapshots can create safe autonomous queue tasks while user tasks keep priority"},
             {"name": "self_improvement_release_gate", "status": "enabled", "description": "Research-backed release plans and quality gates for isolated Core self-improvement work before main integration"},
+            {"name": "self_improvement_code_planner", "status": "enabled", "description": "Creates ranked self-improvement code tickets from metrics, dependency checks, failure learning, and memory pressure"},
             {"name": "event_reactor", "status": "enabled", "description": "Wake signals and agentctl reactor once/run/status move Core toward event-driven, need-driven operation"},
             {"name": "staged_project_worker", "status": "enabled", "description": "Project plans advance through planning, implementation, verification, and reporting instead of completing as an opaque single step"},
             {"name": "self_map", "status": "enabled" if runtime else "unavailable", "description": "Safe runtime body map without secret values"},
@@ -132,7 +133,7 @@ def collect_capability_map() -> dict[str, Any]:
             "Autonomous loop currently handles observation, reports, project specs, research notes, memory hygiene, and skill review.",
             "Event reactor is available in parallel with existing timers; fixed timers should be weakened only after reactor stability is observed.",
             "Large project execution is user-triggered through the Codex work worker, not free-running autonomy.",
-            "Self-improvement code changes are staged behind worktree isolation, tests, audit, eval, review, human approval, and rollback planning.",
+            "Self-improvement code tasks can be created by Core, but execution requires native_loop worktree isolation and main integration still waits for tests, audit, eval, review, human approval, and rollback planning.",
             "The model is not fine-tuned; Core stores memories, style, tasks, reflections, and vector indexes.",
         ],
         "metrics": {

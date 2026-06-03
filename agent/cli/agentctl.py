@@ -28,6 +28,7 @@ from agent.core.project_execution import get_project_plan, list_project_plans
 from agent.core.reactor import adaptive_sleep_seconds, reactor_once, reactor_run, reactor_status
 from agent.core.research_ingestion import ingest_research_papers, list_research_paper_seeds
 from agent.core.self_improvement_release import build_self_improvement_release_plan, evaluate_release_candidate
+from agent.core.self_improvement_planner import enqueue_self_improvement_tickets, generate_self_improvement_tickets
 from agent.core.wake_signals import prune_wake_signals
 from agent.core.self_map import latest_self_map, refresh_self_map, self_map_brief
 from agent.core.state import load_state, save_state
@@ -293,6 +294,16 @@ def cmd_release(args: argparse.Namespace) -> int:
         )
         return 0
     raise ValueError(f"unknown release command: {args.release_command}")
+
+
+def cmd_self_improve(args: argparse.Namespace) -> int:
+    if args.self_improve_command == "tickets":
+        print_json({"items": generate_self_improvement_tickets(limit=args.limit)})
+        return 0
+    if args.self_improve_command == "enqueue":
+        print_json(enqueue_self_improvement_tickets(limit=args.limit))
+        return 0
+    raise ValueError(f"unknown self-improve command: {args.self_improve_command}")
 
 
 def cmd_skill_add(args: argparse.Namespace) -> int:
@@ -794,6 +805,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("release"); release_sub = p.add_subparsers(dest="release_command", required=True)
     p_release_plan = release_sub.add_parser("plan"); p_release_plan.add_argument("title"); p_release_plan.add_argument("--request"); p_release_plan.add_argument("--risk-level", default="medium", choices=["low", "medium", "high", "critical"]); p_release_plan.add_argument("--owner", default="user"); p_release_plan.set_defaults(func=cmd_release)
     p_release_gate = release_sub.add_parser("gate"); p_release_gate.add_argument("--changed-file", action="append"); p_release_gate.add_argument("--worktree", default="isolated", choices=["isolated", "main"]); p_release_gate.add_argument("--risk-level", default="medium", choices=["low", "medium", "high", "critical"]); p_release_gate.add_argument("--tests-passed", action="store_true"); p_release_gate.add_argument("--audit-passed", action="store_true"); p_release_gate.add_argument("--eval-passed", action="store_true"); p_release_gate.add_argument("--review-passed", action="store_true"); p_release_gate.add_argument("--approval", default="pending", choices=["pending", "approved", "rejected"]); p_release_gate.add_argument("--rollback-plan"); p_release_gate.add_argument("--secrets-touched", action="store_true"); p_release_gate.add_argument("--destructive-change", action="store_true"); p_release_gate.set_defaults(func=cmd_release)
+    p = sub.add_parser("self-improve"); self_improve_sub = p.add_subparsers(dest="self_improve_command", required=True)
+    p_self_tickets = self_improve_sub.add_parser("tickets"); p_self_tickets.add_argument("--limit", type=int, default=5); p_self_tickets.set_defaults(func=cmd_self_improve)
+    p_self_enqueue = self_improve_sub.add_parser("enqueue"); p_self_enqueue.add_argument("--limit", type=int, default=1); p_self_enqueue.set_defaults(func=cmd_self_improve)
     p = sub.add_parser("skill"); skill_sub = p.add_subparsers(dest="skill_command", required=True)
     p_skill_add = skill_sub.add_parser("add"); p_skill_add.add_argument("name"); p_skill_add.add_argument("trigger"); p_skill_add.add_argument("procedure", nargs="+"); p_skill_add.add_argument("--tags", nargs="*"); p_skill_add.set_defaults(func=cmd_skill_add)
     p_skill_promote = skill_sub.add_parser("promote"); p_skill_promote.add_argument("--limit", type=int, default=5); p_skill_promote.add_argument("--min-evidence", type=int, default=3); p_skill_promote.add_argument("--dry-run", action="store_true"); p_skill_promote.set_defaults(func=cmd_skill_promote)

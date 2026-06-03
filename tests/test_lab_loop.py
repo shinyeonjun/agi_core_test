@@ -248,6 +248,31 @@ def test_self_improvement_proposal_creates_report_only(monkeypatch, tmp_path):
     assert list_action_runs(5) == []
 
 
+def test_self_improvement_code_goal_requires_native_loop(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    monkeypatch.setenv("AGENT_CODEX_WORKER_ENABLED", "1")
+    monkeypatch.setenv("AGENT_CODEX_WORK_BACKEND", "codex")
+    monkeypatch.setattr("agent.core.capabilities.shutil.which", lambda name: "codex" if name == "codex" else None)
+    goal_id = create_goal(
+        "Core 자가개선 코드 작업",
+        "Core 자가개선 코드를 안전하게 만들어줘",
+        goal_type="self_improvement_proposal",
+        status="active",
+        metadata={"task_kind": "code_change", "raw_user_text": "Core 자가개선 코드를 안전하게 만들어줘", "requires_native_loop": True},
+        dedupe=False,
+    )
+
+    result = run_lab_tick()
+    goal = next(item for item in list_goals(limit=20, include_archived=True) if item["id"] == goal_id)
+
+    assert result["status"] == "codex_work_blocked"
+    assert result["reason"] == "self_improvement_requires_native_loop"
+    assert result["self_improvement"] is True
+    assert goal["status"] == "active"
+    assert list_action_runs(5) == []
+
+
 def test_project_incubation_creates_project_spec(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     set_autonomy_profile("full_device_lab")

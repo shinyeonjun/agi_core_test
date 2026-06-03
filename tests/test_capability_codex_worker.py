@@ -116,6 +116,23 @@ def test_codex_worker_blocks_invalid_sandbox(monkeypatch, tmp_path):
     assert "invalid_codex_work_sandbox" in result["blockers"]
 
 
+def test_self_improvement_requires_native_loop_backend(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    set_autonomy_profile("full_device_lab")
+    monkeypatch.setenv("AGENT_CODEX_WORKER_ENABLED", "1")
+    monkeypatch.setenv("AGENT_CODEX_WORK_BACKEND", "codex")
+    monkeypatch.setattr("agent.core.capabilities.shutil.which", lambda name: "codex" if name == "codex" else None)
+
+    from agent.lab.codex_worker import run_codex_work
+
+    result = run_codex_work("Core 자가개선 코드를 만들어줘", goal_id=1, task_id=2, self_improvement=True)
+
+    assert result["status"] == "codex_work_blocked"
+    assert result["reason"] == "self_improvement_requires_native_loop"
+    assert result["backend"] == "codex"
+    assert result["executed"] is False
+
+
 def test_codex_worker_marks_unsafe_changed_files_blocked(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     set_autonomy_profile("full_device_lab")

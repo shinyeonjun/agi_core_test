@@ -264,30 +264,13 @@ def _handle_user_directed_goal(goal: dict[str, Any], drives: dict[str, float], *
     if task_kind == "code_change":
         if project_plan_id is not None:
             mark_project_step(int(project_plan_id), "implementation", "running", {"task_id": task_id})
-        result = run_codex_work(user_text, goal_id=int(goal["id"]) if goal.get("id") is not None else None, task_id=task_id)
-        if result.get("status") == "codex_work_completed":
-            if project_plan_id is not None:
-                mark_project_step_done(int(project_plan_id), "implementation", result)
-                mark_project_step(int(project_plan_id), "verification", "running", {"task_id": task_id, "source": "codex_worker_report"})
-                mark_project_step_done(int(project_plan_id), "verification", result)
-                mark_project_step(int(project_plan_id), "reporting", "running", {"task_id": task_id})
-            mark_goal_done(int(goal["id"]))
-            reflection_id = create_reflection(
-                "Codex work worker completed a user-directed code-change task.",
-                goal_id=goal.get("id"),
-                learned={"artifact_id": result.get("artifact_id"), "task_kind": task_kind, "returncode": result.get("returncode")},
-                confidence=0.82,
-            )
-            result["reflection_id"] = reflection_id
-        final = {
-            **result,
-            "profile": current_profile(),
-            "goal_id": goal.get("id"),
-            "task_kind": task_kind,
-            "artifact_type": "codex_work_report",
-        }
+        final = _handle_code_change_goal(goal, user_text, task_kind=task_kind, task_id=task_id, self_improvement=False)
         if project_plan_id is not None:
-            if result.get("status") == "codex_work_completed":
+            if final.get("status") == "codex_work_completed":
+                mark_project_step_done(int(project_plan_id), "implementation", final)
+                mark_project_step(int(project_plan_id), "verification", "running", {"task_id": task_id, "source": "codex_worker_report"})
+                mark_project_step_done(int(project_plan_id), "verification", final)
+                mark_project_step(int(project_plan_id), "reporting", "running", {"task_id": task_id})
                 mark_project_step_done(int(project_plan_id), "reporting", final)
                 final["project_plan"] = project_plan_brief(complete_project_plan(int(project_plan_id), final))
             else:
@@ -346,14 +329,59 @@ def _handle_user_directed_goal(goal: dict[str, Any], drives: dict[str, float], *
     return result
 
 
+def _handle_code_change_goal(
+    goal: dict[str, Any],
+    request_text: str,
+    *,
+    task_kind: str,
+    task_id: int | None = None,
+    self_improvement: bool = False,
+) -> dict[str, Any]:
+    result = run_codex_work(
+        request_text,
+        goal_id=int(goal["id"]) if goal.get("id") is not None else None,
+        task_id=task_id,
+        self_improvement=self_improvement,
+    )
+    if result.get("status") == "codex_work_completed":
+        mark_goal_done(int(goal["id"]))
+        reflection_id = create_reflection(
+            "Codex work worker completed a self-improvement code task." if self_improvement else "Codex work worker completed a user-directed code-change task.",
+            goal_id=goal.get("id"),
+            learned={
+                "artifact_id": result.get("artifact_id"),
+                "task_kind": task_kind,
+                "returncode": result.get("returncode"),
+                "self_improvement": self_improvement,
+                "review_verdict": (result.get("code_review") or {}).get("verdict"),
+                "release_status": ((result.get("code_review") or {}).get("release_gate") or result.get("release_gate") or {}).get("status"),
+            },
+            confidence=0.82 if not self_improvement else 0.86,
+        )
+        result["reflection_id"] = reflection_id
+    return {
+        **result,
+        "profile": current_profile(),
+        "goal_id": goal.get("id"),
+        "task_kind": task_kind,
+        "artifact_type": "codex_work_report",
+        "self_improvement": self_improvement,
+    }
+
+
 def _handle_artifact_goal(goal: dict[str, Any], drives: dict[str, float], *, task_id: int | None = None) -> dict[str, Any] | None:
     kind = str(goal.get("goal_type") or "")
     if kind in SHELL_PLANNED_GOAL_TYPES:
         return None
     if goal.get("status") not in {"active", "proposed"}:
         return None
+    metadata = goal_metadata(goal)
+    task_kind = str(metadata.get("task_kind") or kind)
     if kind == "user_directed":
         return _handle_user_directed_goal(goal, drives, task_id=task_id)
+    if kind == "self_improvement_proposal" and task_kind == "code_change":
+        request_text = str(metadata.get("raw_user_text") or goal.get("description") or goal.get("title") or "")
+        return _handle_code_change_goal(goal, request_text, task_kind=task_kind, task_id=task_id, self_improvement=True)
     metrics = collect_metrics()
     if kind == "workspace_experiment":
         artifact = create_status_report("Workspace experiment report", metrics=metrics, drives=drives)

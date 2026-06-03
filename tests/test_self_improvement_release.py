@@ -151,3 +151,4 @@ def test_capability_map_mentions_release_gate(monkeypatch, tmp_path):
     capabilities = collect_capability_map()
 
     assert any(item["name"] == "self_improvement_release_gate" for item in capabilities["direct"])
+    assert any(item["name"] == "self_improvement_code_planner" for item in capabilities["direct"])

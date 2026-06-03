@@ -17,6 +17,7 @@ from agent.core.autonomy import current_profile
 from agent.core.capabilities import ALLOWED_CODEX_WORK_BACKENDS, ALLOWED_CODEX_WORK_SANDBOXES, codex_work_backend, codex_work_sandbox, codex_worker_blockers, codex_worker_enabled
 from agent.core.events import log_event
 from agent.core.policy import PolicyEngine
+from agent.core.self_code_review import review_codex_work_result
 from agent.core.self_improvement_release import evaluate_release_candidate
 from agent.tools.full_device import redact_action_output
 from agent.workspace.executor import write_text_artifact
@@ -416,7 +417,7 @@ def _run_native_loop_backend(root: Path, user_request: str, *, goal_id: int | No
     }
 
 
-def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: int | None = None) -> dict[str, Any]:
+def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: int | None = None, self_improvement: bool = False) -> dict[str, Any]:
     root = project_root()
     blockers = codex_worker_blockers()
     if blockers:
@@ -432,6 +433,8 @@ def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: in
     backend = codex_work_backend()
     if backend not in ALLOWED_CODEX_WORK_BACKENDS:
         return _blocked_result("invalid_codex_work_backend", goal_id=goal_id, task_id=task_id, backend=backend)
+    if self_improvement and backend != "native_loop":
+        return _blocked_result("self_improvement_requires_native_loop", goal_id=goal_id, task_id=task_id, backend=backend)
 
     policy = PolicyEngine(profile="safe").classify_decision(user_request, action_type="codex_work")
     if policy.denied or policy.requires_approval:
@@ -492,6 +495,7 @@ def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: in
         rollback_plan=f"remove worktree branch {backend_result.get('worktree_branch')}" if backend_result.get("worktree_branch") else None,
         secrets_touched=bool(unsafe_files),
     )
+    result["code_review"] = review_codex_work_result(result, self_improvement=self_improvement)
     artifact = write_text_artifact(
         "reports",
         f"codex-work-{task_id or 'manual'}-{uuid4().hex[:8]}.md",
