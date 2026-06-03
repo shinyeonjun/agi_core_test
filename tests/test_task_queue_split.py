@@ -1,4 +1,5 @@
 import json
+import sys
 from datetime import datetime, timedelta, timezone
 
 from agent.bridge.auth import DiscordAuthConfig
@@ -312,7 +313,8 @@ def test_work_loop_default_verify_uses_current_python(monkeypatch, tmp_path):
 
     assert commands
     assert "pytest" in commands[0]
-    assert "python -m pytest" not in commands[0]
+    assert sys.executable in commands[0]
+    assert commands[0] != "python -m pytest -q"
 
 
 def test_db_cleanup_cli_defaults_to_dry_run(monkeypatch, tmp_path, capsys):
