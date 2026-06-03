@@ -200,7 +200,8 @@ def _short_goal_title(value: object) -> str:
         "Improve action failure critic": "작업 실패 원인 분류 개선",
         "Promote reflection patterns into skills": "반복 회고를 배워둘 규칙으로 정리",
         "Write a research note on autonomous goal quality": "자율 목표 품질 연구 메모 작성",
-        "Review recent action patterns for skill growth": "최근 작업 패턴을 보고 스킬 후보 찾기",
+        "Review recent action patterns for skill growth": "최근 작업 패턴을 보고 배워둘 규칙 후보 찾기",
+        "Propose a safe Core self-improvement plan": "안전한 Core 개선안 작성",
         "Review memory retrieval quality": "기억 검색 품질 점검",
         "Consolidate memory and reflection pressure": "쌓인 기억과 회고 정리",
         "Self maintenance": "Core 상태 정리",
@@ -213,7 +214,7 @@ def _short_goal_title(value: object) -> str:
         "memory_retrieval": "기억 검색 품질",
         "memory_hygiene": "기억 정리",
         "action_failure": "작업 실패 분석",
-        "skill_promotion": "스킬 승격",
+        "skill_promotion": "배워둘 규칙 정리",
     }
     for raw, pretty in replacements.items():
         if title.startswith(raw):
@@ -263,10 +264,13 @@ def _plain_count(value: object) -> int:
 def _human_sentence(value: object) -> str:
     text = compact_text(value)
     replacements = {
+        "저장된 스킬 수가 낮음": "아직 배워둔 규칙이 적음",
+        "저장된 skill 수가 낮음": "아직 배워둔 규칙이 적음",
         "action": "작업",
         "Action": "작업",
         "skill": "스킬",
         "Skill": "스킬",
+        "스킬": "배워둔 규칙",
         "tick": "정기 점검",
         "Tick": "정기 점검",
         "lab": "장비 점검",
@@ -356,7 +360,7 @@ def build_observation_dashboard() -> str:
     if memory_candidates:
         notes.append(f"기억/회고가 쌓여서 정리 후보 {len(memory_candidates)}건이 있어.")
     if skill_items:
-        notes.append(f"반복된 작업 패턴에서 배워둘 후보 {len(skill_items)}건을 찾았어.")
+        notes.append(f"반복된 작업 패턴에서 배워둘 규칙 후보 {len(skill_items)}건을 찾았어.")
     if not notes:
         notes.append("지금 당장 눈에 띄는 문제는 없어.")
     lines.extend(f"- {note}" for note in notes[:5])
