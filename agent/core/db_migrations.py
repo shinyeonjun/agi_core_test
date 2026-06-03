@@ -337,6 +337,20 @@ def _migration_0011_wake_signals_reactor(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0012_discord_message_dedupe(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        DELETE FROM discord_events
+        WHERE id NOT IN (
+            SELECT MIN(id)
+            FROM discord_events
+            GROUP BY channel_id, user_id, message_id
+        )
+        """
+    )
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_discord_events_message_unique ON discord_events(channel_id, user_id, message_id)")
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("0001_existing_db_repairs", "Backfill approval task links and memory FTS schema", _migration_0001_existing_db_repairs),
     Migration("0002_task_queue_locks", "Add task queue lease, idempotency, and scheduling fields", _migration_0002_task_queue_locks),
@@ -349,6 +363,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0009_pipeline_kernel", "Align schema for pipeline trace and typed decision routing runtime", _migration_0009_pipeline_kernel),
     Migration("0010_cognitive_growth_algorithms", "Add blackboard, stigmergy, MAP-Elites, and cognitive snapshot storage", _migration_0010_cognitive_growth_algorithms),
     Migration("0011_wake_signals_reactor", "Add wake signal storage for event-driven reactor runtime", _migration_0011_wake_signals_reactor),
+    Migration("0012_discord_message_dedupe", "Deduplicate Discord events and enforce message idempotency", _migration_0012_discord_message_dedupe),
 )
 
 

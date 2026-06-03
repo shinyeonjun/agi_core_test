@@ -7,11 +7,12 @@ from agent.bridge.reports import build_activity_summary, build_daily_summary, bu
 from agent.bridge.router import DiscordEvent, channel_role, route_discord_event
 from agent.cli.agentctl import main
 from agent.core.approvals import ApprovalStore
-from agent.core.database import init_db
-from agent.core.goals import list_goals
+from agent.core.database import connect, init_db
+from agent.core.goals import create_goal, list_goals
 from agent.core.policy import PolicyEngine
 from agent.core.self_improvement_planner import enqueue_user_self_improvement_request
 from agent.core.task_queue import list_tasks
+from agent.memory.store import add_memory
 from agent.bridge.task_notifications import notify_task_phase
 
 
@@ -89,7 +90,8 @@ def test_webhook_only_channels_do_not_chat(monkeypatch, tmp_path):
     event = DiscordEvent(None, "30", "1", "m4", False, False, "hello")
     output = route_discord_event(event, config)
     assert output
-    assert "\uc6f9\ud6c5" in output[0]
+    assert "\ub300\ud654\ub294 #\ub300\ud654" in output[0]
+    assert "\uc2b9\uc778\uc740 #\uc2b9\uc778" in output[0]
 
 
 def test_summary_and_update_redact_secrets(monkeypatch, tmp_path):
@@ -141,10 +143,84 @@ def test_work_command_shows_user_task_state(monkeypatch, tmp_path):
 
     output = "\n".join(route_discord_event(event, control_config()))
 
-    assert "진행 중인 작업" in output
+    assert "\uc791\uc5c5\ud310" in output
     assert f"#{created['task_id']}" in output
     assert "자가개선" in output
     assert "승인 대기" in output
+
+
+def test_tasks_command_is_work_alias(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    enqueue_user_self_improvement_request("Core 자가개선 진행", source_event_id=123, limit=1)
+    work_event = DiscordEvent(None, "10", "1", "m-work-alias-1", False, False, "!work")
+    tasks_event = DiscordEvent(None, "10", "1", "m-work-alias-2", False, False, "!tasks")
+
+    work_output = "\n".join(route_discord_event(work_event, control_config()))
+    tasks_output = "\n".join(route_discord_event(tasks_event, control_config()))
+
+    assert tasks_output == work_output
+    assert "\uc791\uc5c5\ud310" in tasks_output
+
+
+def test_duplicate_discord_message_is_ignored(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    event = DiscordEvent(None, "10", "1", "m-duplicate", False, False, "!state")
+
+    first = route_discord_event(event, control_config())
+    second = route_discord_event(event, control_config())
+
+    assert first
+    assert second == []
+    with connect() as conn:
+        count = conn.execute("SELECT COUNT(*) AS count FROM discord_events WHERE message_id = ?", ("m-duplicate",)).fetchone()["count"]
+    assert count == 1
+
+
+def test_tick_command_is_human_readable(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "agent.bridge.router.run_tick",
+        lambda: {"result": {"created_goal_id": None, "processed_events": 3, "cognitive_growth": {"mode": "observe", "top_curiosity": "memory_hygiene"}}},
+    )
+    event = DiscordEvent(None, "10", "1", "m-tick-readable", False, False, "!tick")
+
+    output = "\n".join(route_discord_event(event, control_config()))
+
+    assert "\uc810\uac80 \uc644\ub8cc" in output
+    assert "\uc815\ub9ac\ud55c \uc774\ubca4\ud2b8: 3\uac74" in output
+    assert "event=#" not in output
+    assert "reflection=#" not in output
+
+
+def test_memory_command_hides_internal_scores(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    add_memory(
+        "digital agi korean memory abc",
+        "Core를 AI용 운영체제로 키우는 방향을 사용자가 선호한다.",
+        "project_context",
+        tags=["core"],
+    )
+    event = DiscordEvent(None, "10", "1", "m-memory-readable", False, False, "!memories core")
+
+    output = "\n".join(route_discord_event(event, control_config()))
+
+    assert "\uae30\uc5b5 \uc694\uc57d" in output
+    assert "Core를 AI용 운영체제" in output
+    assert "score=" not in output
+    assert "project_context" not in output
+
+
+def test_goals_command_hides_internal_priority(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    goal_id = create_goal("Core UX 개선", "명령 출력 정리", priority=1.0, dedupe=False)
+    event = DiscordEvent(None, "10", "1", "m-goal-readable", False, False, "!goals")
+
+    output = "\n".join(route_discord_event(event, control_config()))
+
+    assert "\ubaa9\ud45c \uc694\uc57d" in output
+    assert f"#{goal_id}" in output
+    assert "\uc9c4\ud589 \uc911" in output
+    assert "priority=" not in output
 
 
 def test_task_phase_notification_missing_webhook_is_safe(monkeypatch, tmp_path):
