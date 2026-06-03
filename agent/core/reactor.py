@@ -18,6 +18,7 @@ from agent.scheduler.idle_policy import run_idle_policy
 
 def adaptive_sleep_seconds(status: dict[str, Any] | None = None, *, jitter: bool = True) -> int:
     status = status or reactor_status()
+    profile = str(status.get("profile") or current_profile())
     pending = int((status.get("wake_signals") or {}).get("pending") or 0)
     user_waiting = int((status.get("task_counts") or {}).get("user:queued") or 0)
     autonomous_waiting = int((status.get("task_counts") or {}).get("autonomous:queued") or 0)
@@ -27,7 +28,10 @@ def adaptive_sleep_seconds(status: dict[str, Any] | None = None, *, jitter: bool
     elif pending_approvals:
         base = 8
     elif autonomous_waiting:
-        base = 20
+        if profile == "full_device_lab":
+            base = env_int("AGENT_REACTOR_AUTONOMOUS_SLEEP_SECONDS", 20)
+        else:
+            base = env_int("AGENT_REACTOR_SAFE_AUTONOMOUS_BACKOFF_SECONDS", 900)
     else:
         base = 300
     if jitter:

@@ -8,6 +8,10 @@ build/
 .pytest_cache/
 .coverage
 htmlcov/
+data/
+logs/
+renderer_workspace/
+.tmp*/
 data/agent.db*
 logs/*.log
 renderer_workspace/input.json

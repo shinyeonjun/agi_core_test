@@ -25,6 +25,7 @@ from agent.core.policy import ActionProposal, PolicyEngine
 from agent.core.process_table import get_process, list_processes, process_snapshot
 from agent.core.project_execution import get_project_plan, list_project_plans
 from agent.core.reactor import adaptive_sleep_seconds, reactor_once, reactor_run, reactor_status
+from agent.core.wake_signals import prune_wake_signals
 from agent.core.self_map import latest_self_map, refresh_self_map, self_map_brief
 from agent.core.state import load_state, save_state
 from agent.core.style import add_style_example, apply_style_feedback, get_active_style_profile, list_style_examples, list_style_feedback, seed_default_style_profile, style_directives
@@ -535,6 +536,9 @@ def cmd_reactor(args: argparse.Namespace) -> int:
         status["next_sleep_seconds"] = adaptive_sleep_seconds(status, jitter=False)
         print_json(status)
         return 0
+    if args.reactor_command == "prune":
+        print_json(prune_wake_signals(done_older_than_hours=args.done_older_than_hours, expired_older_than_hours=args.expired_older_than_hours))
+        return 0
     raise ValueError(f"unknown reactor command: {args.reactor_command}")
 
 
@@ -802,6 +806,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_reactor_once = reactor_sub.add_parser("once"); p_reactor_once.add_argument("--dry-run", action="store_true"); p_reactor_once.set_defaults(func=cmd_reactor)
     p_reactor_run = reactor_sub.add_parser("run"); p_reactor_run.add_argument("--cycles", type=int); p_reactor_run.add_argument("--dry-run", action="store_true"); p_reactor_run.set_defaults(func=cmd_reactor)
     p_reactor_status = reactor_sub.add_parser("status"); p_reactor_status.set_defaults(func=cmd_reactor)
+    p_reactor_prune = reactor_sub.add_parser("prune"); p_reactor_prune.add_argument("--done-older-than-hours", type=int, default=168); p_reactor_prune.add_argument("--expired-older-than-hours", type=int, default=24); p_reactor_prune.set_defaults(func=cmd_reactor)
     p = sub.add_parser("intelligence"); intelligence_sub = p.add_subparsers(dest="intelligence_command", required=True)
     p_int_snapshot = intelligence_sub.add_parser("snapshot"); p_int_snapshot.add_argument("--persist", action="store_true"); p_int_snapshot.add_argument("--refresh", action="store_true"); p_int_snapshot.set_defaults(func=cmd_intelligence)
     p_int_priorities = intelligence_sub.add_parser("priorities"); p_int_priorities.add_argument("--limit", type=int, default=20); p_int_priorities.add_argument("--refresh", action="store_true"); p_int_priorities.set_defaults(func=cmd_intelligence)

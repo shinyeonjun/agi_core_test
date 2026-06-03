@@ -68,7 +68,7 @@ def _release_single_instance_lock(path: Path) -> None:
 
 
 def _acquire_single_instance_lock() -> Path | None:
-    lock_path = data_dir() / "discord_bot.pid"
+    lock_path = Path(os.environ.get("AGENT_DISCORD_LOCK_PATH", data_dir() / "discord_bot.pid")).expanduser().resolve()
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     while True:
         try:

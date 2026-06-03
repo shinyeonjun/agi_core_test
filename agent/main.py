@@ -16,7 +16,7 @@ def main() -> int:
         print(result["message"])
         return 0
     if args.mode == "daemon":
-        print("agentd daemon is not implemented in v0.1. Use agentctl tick.")
+        print("agent.main daemon is a compatibility entrypoint. Use `agentctl reactor run` or the systemd reactor service.")
         return 0
     return agentctl_main(rest)
 

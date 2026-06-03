@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from agent.config.defaults import KST, now_kst
@@ -189,6 +189,35 @@ def wake_signal_counts() -> dict[str, int]:
     with connect() as conn:
         rows = conn.execute("SELECT status, COUNT(*) AS count FROM wake_signals GROUP BY status").fetchall()
     return {str(row["status"]): int(row["count"]) for row in rows}
+
+
+def prune_wake_signals(*, done_older_than_hours: int = 168, expired_older_than_hours: int = 24) -> dict[str, int]:
+    init_db()
+    ts = now_kst()
+    done_cutoff = (datetime.now(KST) - timedelta(hours=max(1, int(done_older_than_hours)))).isoformat(timespec="seconds")
+    expired_cutoff = (datetime.now(KST) - timedelta(hours=max(1, int(expired_older_than_hours)))).isoformat(timespec="seconds")
+    with connect() as conn:
+        done = conn.execute(
+            """
+            DELETE FROM wake_signals
+            WHERE status IN ('done', 'skipped', 'failed')
+              AND updated_at < ?
+            """,
+            (done_cutoff,),
+        ).rowcount
+        expired = conn.execute(
+            """
+            DELETE FROM wake_signals
+            WHERE status = 'expired'
+              AND updated_at < ?
+            """,
+            (expired_cutoff,),
+        ).rowcount
+        conn.commit()
+    result = {"done_pruned": int(done), "expired_pruned": int(expired)}
+    if done or expired:
+        log_event("reactor", "wake_signals_pruned", str(result), {"created_at": ts, **result}, 0.45)
+    return result
 
 
 def latest_signal_age_seconds() -> float | None:

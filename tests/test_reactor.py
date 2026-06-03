@@ -1,9 +1,9 @@
 from agent.core.autonomy import set_autonomy_profile
-from agent.core.database import init_db
+from agent.core.database import connect, init_db
 from agent.core.goals import create_goal, get_goal
 from agent.core.reactor import adaptive_sleep_seconds, reactor_once
 from agent.core.task_queue import enqueue_task, list_tasks
-from agent.core.wake_signals import claim_wake_signal, emit_wake_signal, list_wake_signals, wake_signal_counts
+from agent.core.wake_signals import claim_wake_signal, complete_wake_signal, emit_wake_signal, list_wake_signals, prune_wake_signals, wake_signal_counts
 
 
 def test_wake_signal_dedupes_pending_signals():
@@ -87,3 +87,24 @@ def test_adaptive_sleep_is_shorter_for_pending_work():
     busy = adaptive_sleep_seconds({"wake_signals": {"pending": 1}, "task_counts": {}, "metrics": {}}, jitter=False)
 
     assert busy < idle
+
+
+def test_adaptive_sleep_backoffs_safe_mode_autonomous_queue():
+    full_device = adaptive_sleep_seconds({"profile": "full_device_lab", "wake_signals": {}, "task_counts": {"autonomous:queued": 1}, "metrics": {}}, jitter=False)
+    safe = adaptive_sleep_seconds({"profile": "safe", "wake_signals": {}, "task_counts": {"autonomous:queued": 1}, "metrics": {}}, jitter=False)
+
+    assert full_device == 20
+    assert safe >= 300
+
+
+def test_prune_wake_signals_removes_completed_history():
+    init_db()
+    signal_id = emit_wake_signal("test_signal", "test", dedupe_key="prune-me")
+    assert complete_wake_signal(signal_id, status="done", result={"action": "test"})
+    with connect() as conn:
+        conn.execute("UPDATE wake_signals SET updated_at = '2000-01-01T00:00:00+09:00' WHERE id = ?", (signal_id,))
+        conn.commit()
+
+    result = prune_wake_signals(done_older_than_hours=1, expired_older_than_hours=1)
+    assert result["done_pruned"] == 1
+    assert list_wake_signals(status="done") == []

@@ -34,7 +34,9 @@ def test_daily_and_activity_summary_timers_are_separate():
 def test_reactor_service_runs_without_replacing_timers():
     service = _read("agent-core-reactor.service")
     assert "agentctl reactor run" in service
+    assert "EnvironmentFile=-/home/ubuntu/agent_core/.env" in service
     assert "Restart=always" in service
+    assert "NoNewPrivileges=true" in service
     assert "WantedBy=default.target" in service
 
 
