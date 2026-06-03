@@ -75,7 +75,7 @@ def test_decision_and_summary_use_latest_self_map(monkeypatch, tmp_path):
 
     assert decision["runtime_self_map"] is not None
     assert decision["runtime_self_map"]["summary"]
-    assert "self-map" in summary
+    assert "장비 상태" in summary
     assert "DISCORD_BOT_TOKEN" not in summary
 
 

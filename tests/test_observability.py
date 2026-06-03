@@ -118,6 +118,6 @@ def test_activity_summary_contains_observability_sections(monkeypatch, tmp_path)
 
     text = build_activity_summary()
 
-    assert "실패/차단 원인" in text
-    assert "작업 큐 상태" in text
+    assert "주의할 점" in text
+    assert "최근 처리" in text
     assert "profile_not_full_device_lab" not in text

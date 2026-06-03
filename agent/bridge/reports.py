@@ -45,13 +45,14 @@ def _ko_status(value: object) -> str:
         "running": "진행 중",
         "proposed": "제안됨",
         "executed": "실행됨",
-        "rejected": "탈락",
+        "rejected": "보류",
         "dry_run": "미리보기",
         "candidate": "후보",
         "safe": "안전 모드",
         "full_device_lab": "장비 실험 모드",
         "workspace": "작업공간 모드",
         "queued": "대기",
+        "active": "진행 중",
         "done": "완료",
         "waiting_approval": "승인 대기",
     }
@@ -92,18 +93,22 @@ def _ko_event(row: dict[str, Any] | None) -> str:
         return "없음"
     key = f"{row.get('source')}/{row.get('event_type')}"
     mapping = {
-        "scheduler/idle_tick": "자동 tick 실행",
-        "lab/lab_tick_skipped": "lab tick 제안 생성",
-        "lab/lab_tick_timer_skipped": "lab timer 실행 건너뜀",
-        "lab/lab_tick_executed": "lab action 실행",
-        "lab/lab_tick_blocked": "lab 실행 후보 없음",
+        "scheduler/idle_tick": "정기 점검 실행",
+        "lab/lab_tick_skipped": "장비 점검 후보 생성",
+        "lab/lab_tick_timer_skipped": "장비 점검 건너뜀",
+        "lab/lab_tick_executed": "장비 점검 실행",
+        "lab/lab_tick_blocked": "실행할 장비 점검 없음",
         "workspace/workspace_artifact_created": "작업공간 파일 생성",
         "policy/policy_check": "정책 검사 수행",
         "discord/discord_chat_reply": "대화 응답",
-        "discord/action_update_notify_failed": "action 알림 실패",
+        "discord/action_update_notify_failed": "작업 알림 실패",
         "core/assistant_output": "Core 대화 응답 생성",
         "core/decision_created": "Core 판단 기록 생성",
         "learner/reflection_created": "회고 기록 생성",
+        "goal/root_objectives_seeded": "기본 목표 목록 갱신",
+        "reactor/wake_signal_completed": "루프 신호 처리 완료",
+        "reactor/reactor_cycle_completed": "대기 중인 작업 확인 완료",
+        "reactor/reactor_sleep": "다음 확인까지 대기",
     }
     return mapping.get(key, key)
 
@@ -112,9 +117,9 @@ def _reflection_summary(value: object) -> str:
     raw = compact_text(value)
     mapping = {
         "Recorded talk feedback, selected goal, and retrieved context.": "대화 피드백과 목표/기억 맥락 저장",
-        "Recorded idle action and cooldown state after tick.": "자동 tick 결과와 쿨다운 저장",
-        "Lab tick generated proposals but did not execute because profile is not full_device_lab.": "lab tick이 제안만 만들고 실행은 건너뜀",
-        "Lab tick executed one approved local action and recorded the result.": "lab tick이 승인된 로컬 action 1개 실행",
+        "Recorded idle action and cooldown state after tick.": "정기 점검 결과 저장",
+        "Lab tick generated proposals but did not execute because profile is not full_device_lab.": "장비 점검 후보만 만들고 실행은 건너뜀",
+        "Lab tick executed one approved local action and recorded the result.": "승인된 로컬 점검 1개 실행",
     }
     return mapping.get(raw, raw)
 
@@ -143,10 +148,10 @@ def _action_label(row: dict[str, Any]) -> str:
     if "systemctl --failed" in command:
         return "실패한 서비스 확인"
     if command.startswith("printf "):
-        return "테스트 action 실행"
+        return "테스트 작업 실행"
     if row.get("status") == "blocked":
-        return "정책에 의해 action 차단"
-    return "로컬 action 처리"
+        return "정책에 의해 작업 차단"
+    return "로컬 작업 처리"
 
 
 def _proposal_label(row: dict[str, Any]) -> str:
@@ -180,7 +185,7 @@ def _state_note(profile: object, autonomy: dict[str, Any]) -> str:
 
 
 def _interesting_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    noisy = {"discord_message", "discord_chat_reply", "webhook_sent", "webhook_missing", "discord_command_output"}
+    noisy = {"discord_message", "discord_chat_reply", "webhook_sent", "webhook_missing", "discord_command_output", "root_objectives_seeded"}
     return [event for event in events if event.get("event_type") not in noisy]
 
 
@@ -192,13 +197,93 @@ def _short_goal_title(value: object) -> str:
         "Draft a small project candidate from recent Core observations": "최근 관찰로 작은 프로젝트 후보 만들기",
         "Review recent Core state and cleanup opportunities": "Core 상태와 정리 후보 검토",
         "Create a workspace experiment report from recent Core activity": "최근 활동 기반 작업공간 리포트 만들기",
-        "Improve action failure critic": "action 실패 원인 분류 개선",
-        "Promote reflection patterns into skills": "반복 회고를 skill로 승격",
+        "Improve action failure critic": "작업 실패 원인 분류 개선",
+        "Promote reflection patterns into skills": "반복 회고를 배워둘 규칙으로 정리",
+        "Write a research note on autonomous goal quality": "자율 목표 품질 연구 메모 작성",
+        "Review recent action patterns for skill growth": "최근 작업 패턴을 보고 스킬 후보 찾기",
+        "Review memory retrieval quality": "기억 검색 품질 점검",
+        "Consolidate memory and reflection pressure": "쌓인 기억과 회고 정리",
+        "Self maintenance": "Core 상태 정리",
+        "System observation": "장비 상태 관찰",
+        "Workspace experiment": "작업공간 실험",
+        "Project incubation": "작은 프로젝트 후보 만들기",
+        "Self-improvement proposal": "Core 개선안 작성",
+        "Skill growth": "스킬 성장 후보 검토",
+        "Research loop": "연구 메모 작성",
+        "memory_retrieval": "기억 검색 품질",
+        "memory_hygiene": "기억 정리",
+        "action_failure": "작업 실패 분석",
+        "skill_promotion": "스킬 승격",
     }
     for raw, pretty in replacements.items():
         if title.startswith(raw):
             return pretty
     return title
+
+
+def _ko_goal_candidate_reason(candidate: dict[str, Any]) -> str:
+    reason = compact_text(candidate.get("rejection_reason") or candidate.get("reason"), "")
+    mapping = {
+        "cooldown": "최근에 비슷한 후보를 이미 봐서 잠시 보류",
+        "duplicate_open_goal": "이미 열린 비슷한 목표가 있어서 보류",
+        "duplicate_recent_candidate": "최근에 나온 후보라 중복 방지",
+        "low_score": "지금 우선순위가 낮음",
+        "unsafe": "안전 기준에 맞지 않음",
+        "": "지금은 실행하지 않고 후보로만 기록",
+    }
+    return mapping.get(reason, reason.replace("_", " ") if reason else mapping[""])
+
+
+def _human_self_map(self_map: dict[str, Any] | None) -> str | None:
+    if not self_map:
+        return None
+    os_name = compact_text(self_map.get("os"), "")
+    host = compact_text(self_map.get("hostname"), "")
+    profile = _ko_status(self_map.get("autonomy_profile"))
+    services = self_map.get("services") or {}
+    active_count = len([state for state in services.values() if state == "active"])
+    eval_row = self_map.get("latest_eval") or {}
+    eval_text = f"{eval_row.get('result')} / {eval_row.get('score')}" if eval_row else "기록 없음"
+    parts = []
+    if os_name:
+        parts.append(os_name if not host else f"{host}의 {os_name}")
+    parts.append(f"{profile}로 실행 중")
+    parts.append(f"상주 루프 {active_count}개")
+    parts.append(f"최근 평가 {eval_text}")
+    return ", ".join(parts)
+
+
+def _plain_count(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _human_sentence(value: object) -> str:
+    text = compact_text(value)
+    replacements = {
+        "action": "작업",
+        "Action": "작업",
+        "skill": "스킬",
+        "Skill": "스킬",
+        "tick": "정기 점검",
+        "Tick": "정기 점검",
+        "lab": "장비 점검",
+        "Lab": "장비 점검",
+        "scheduler": "자동 루프",
+        "Scheduler": "자동 루프",
+        "self-map": "장비 상태",
+        "Self-map": "장비 상태",
+        "자율 스케줄러": "뒤쪽 자동 루프",
+        "memory": "기억",
+        "Memory": "기억",
+        "reflection": "회고",
+        "Reflection": "회고",
+    }
+    for raw, pretty in replacements.items():
+        text = text.replace(raw, pretty)
+    return text.replace("_", " ")
 
 
 def build_observation_dashboard() -> str:
@@ -225,94 +310,86 @@ def build_observation_dashboard() -> str:
     profile = metrics.get("current_autonomy_profile")
 
     lines = [
-        "**Core 관제판**",
-        "오렌지파이에서 Core 루프가 돌고 있어.",
+        "**Core 상태 요약**",
+        "오렌지파이에서 정상적으로 돌고 있어.",
         "",
-        "**한눈에**",
+        "**현재 상태**",
         _line("모드", f"{_ko_status(profile)} - {_state_note(profile, autonomy)}"),
         _line("평가", f"{metrics.get('last_eval_result') or '없음'} / {metrics.get('last_eval_score') if metrics.get('last_eval_score') is not None else '-'}"),
         _line("승인 대기", f"{len(approvals)}건"),
-        _line("최근 작업", f"#{last_action.get('id')} {_action_label(last_action)} - {_ko_status(last_action.get('status'))}" if last_action else "없음"),
-        _line("최근 이벤트", f"#{last_event.get('id')} {_ko_event(last_event)}" if last_event else "없음"),
     ]
     if self_map:
-        services = self_map.get("services") or {}
-        active_count = len([state for state in services.values() if state == "active"])
-        lines.append(_line("몸 상태", self_map.get("summary")))
-        lines.append(_line("상주 루프", f"{active_count}개 active / self-map #{self_map.get('id')}"))
+        lines.append(_line("장비 상태", _human_self_map(self_map)))
 
-    lines.extend([
-        "",
-        "**24시간 지표**",
-        _line("tick", f"{metrics.get('tick_count_24h')}회"),
-        _line("Discord", f"{metrics.get('discord_messages_24h')}건"),
-        _line("action 성공률", f"실행 {_format_rate(metrics.get('action_execution_success_rate_24h'))} / 전체 {_format_rate(metrics.get('action_success_rate_24h'))}"),
-        _line("계획된 차단", _format_rate(metrics.get("action_planned_block_rate_24h"))),
-        _line("차단/시간초과", f"{metrics.get('action_blocked_count_24h')}건 / {metrics.get('action_timeout_count_24h')}건"),
-        _line("사용자 큐", f"대기 {task_counts.get('user:queued', 0)} / 실행 {task_counts.get('user:running', 0)}"),
-        _line("자율 큐", f"대기 {task_counts.get('autonomous:queued', 0)} / 실행 {task_counts.get('autonomous:running', 0)}"),
-    ])
-
-    lines.extend(["", "**실패/차단 원인**"])
-    if action_breakdown:
-        for category, count in sorted(action_breakdown.items()):
-            lines.append(f"- {category}: {count}건")
+    lines.extend(["", "**최근 처리**"])
+    recent_lines: list[str] = []
+    if last_action:
+        recent_lines.append(f"#{last_action.get('id')} {_action_label(last_action)} - {_ko_status(last_action.get('status'))}")
+    for task in recent_tasks[:2]:
+        observed_task = task_observation(task)
+        recent_lines.append(f"#{observed_task['id']} {_short_goal_title(observed_task['title'])} - {_human_sentence(observed_task['waiting_reason'])}")
+    if last_event and len(recent_lines) < 3:
+        recent_lines.append(f"#{last_event.get('id')} {_ko_event(last_event)}")
+    if recent_lines:
+        lines.extend(f"- {line}" for line in recent_lines[:3])
     else:
-        lines.append("- 최근 action에는 실패/차단 원인이 없어.")
+        lines.append("- 아직 새로 처리한 일이 없어.")
 
-    lines.extend(["", "**작업 큐 상태**"])
-    if recent_tasks:
-        for task in recent_tasks[:3]:
-            observed_task = task_observation(task)
-            lifecycle = observed_task.get("lifecycle") or {}
-            phase = lifecycle.get("last_label") or lifecycle.get("last_phase") or "기록 없음"
-            lines.append(f"- #{observed_task['id']} {_short_goal_title(observed_task['title'])}: {observed_task['waiting_reason']} / {phase}")
-    else:
-        lines.append("- 현재 작업 큐가 비어 있어.")
+    user_waiting = _plain_count(task_counts.get("user:queued")) + _plain_count(task_counts.get("user:running"))
+    autonomous_waiting = _plain_count(task_counts.get("autonomous:queued")) + _plain_count(task_counts.get("autonomous:running"))
+    blocked_count = _plain_count(metrics.get("action_blocked_count_24h"))
+    timeout_count = _plain_count(metrics.get("action_timeout_count_24h"))
 
-    lines.extend(["", "**최근 action**"])
-    if actions:
-        for action in actions[:3]:
-            observed_action = action_observation(action)
-            lines.append(f"- #{action.get('id')} {_action_label(action)}: {observed_action['label']} / {observed_action['summary_label']}")
-    else:
-        lines.append("- 아직 기록된 action이 없어.")
+    improvements = intelligence.get("next_improvement_candidates") or []
+    memory_candidates = intelligence.get("memory_hygiene_candidates") or []
+    skill_items = intelligence.get("skill_candidates") or []
+    lines.extend(["", "**주의할 점**"])
+    notes: list[str] = []
+    if user_waiting:
+        notes.append(f"사용자 작업 {user_waiting}건이 아직 처리 중이거나 대기 중이야.")
+    if autonomous_waiting:
+        notes.append(f"뒤에서 처리할 자율 작업 {autonomous_waiting}건이 남아 있어.")
+    if approvals:
+        notes.append(f"사람 승인이 필요한 항목 {len(approvals)}건이 있어.")
+    if blocked_count or timeout_count:
+        notes.append(f"최근 24시간에 차단 {blocked_count}건, 시간 초과 {timeout_count}건이 있었어.")
+    if memory_candidates:
+        notes.append(f"기억/회고가 쌓여서 정리 후보 {len(memory_candidates)}건이 있어.")
+    if skill_items:
+        notes.append(f"반복된 작업 패턴에서 배워둘 후보 {len(skill_items)}건을 찾았어.")
+    if not notes:
+        notes.append("지금 당장 눈에 띄는 문제는 없어.")
+    lines.extend(f"- {note}" for note in notes[:5])
+
+    lines.extend(["", "**자동 제안 기준**"])
+    lines.append("- 최근 기록, 실패/성공 패턴, 기억 누적, 열린 목표를 보고 안전한 후보만 만든다.")
+    lines.append("- 중복이거나 우선순위가 낮거나 지금 실행할 필요가 없으면 보류로 남긴다.")
 
     lines.extend(["", "**다음 후보**"])
     if goal_candidates:
         for candidate in goal_candidates[:3]:
-            lines.append(f"- #{candidate.get('id')} {_short_goal_title(candidate.get('title'))} ({_ko_status(candidate.get('status'))})")
+            lines.append(f"- #{candidate.get('id')} {_short_goal_title(candidate.get('title'))}: {_ko_status(candidate.get('status'))} - {_ko_goal_candidate_reason(candidate)}")
     else:
         lines.append("- 새 목표 후보가 없어.")
 
-    improvements = intelligence.get("next_improvement_candidates") or []
-    lines.extend(["", "**운영 지능**"])
+    lines.extend(["", "**운영 판단**"])
     if improvements:
-        for item in improvements[:3]:
-            lines.append(f"- {_short_goal_title(item.get('title'))}: {compact_text(item.get('reason'))}")
+        for item in improvements[:2]:
+            lines.append(f"- {_short_goal_title(item.get('title'))}: {_human_sentence(item.get('reason'))}")
     else:
         lines.append("- 지금 당장 급한 개선 후보는 없어.")
     critics = intelligence.get("action_critics") or []
     if critics:
         top_critic = next((row for row in critics if row.get("category") != "success"), critics[0])
-        lines.append(f"- action critic: {compact_text(top_critic.get('label'))} / {compact_text(top_critic.get('recommendation'))}")
-    memory_candidates = intelligence.get("memory_hygiene_candidates") or []
-    if memory_candidates:
-        lines.append(f"- memory: 압축/정리 후보 {len(memory_candidates)}건")
-    skill_items = intelligence.get("skill_candidates") or []
-    if skill_items:
-        lines.append(f"- skill: 승격 후보 {len(skill_items)}건")
+        lines.append(f"- 최근 작업 판단: {_human_sentence(top_critic.get('recommendation'))}")
     inference = growth.get("active_inference") or {}
     curiosity = growth.get("curiosity") or []
-    map_elites = growth.get("map_elites") or []
     if inference:
-        lines.append(f"- 성장 루프: {_ko_growth_mode(inference.get('mode'))} / 압력 {inference.get('free_energy')}")
+        lines.append(f"- 자율 개선 방향: {_ko_growth_mode(inference.get('mode'))}")
     if curiosity:
-        lines.append(f"- 호기심: {compact_text(curiosity[0].get('topic'))} / 압력 {curiosity[0].get('pressure')}")
-    if map_elites:
-        lines.append(f"- 다양성 archive: {len(map_elites)}개 셀 유지")
+        lines.append(f"- 지금 가장 살펴보는 주제: {_short_goal_title(curiosity[0].get('topic'))}")
 
-    lines.extend(["", "**제안 큐**"])
+    lines.extend(["", "**실행 제안**"])
     if pending_proposals:
         active_counts = {status: count for status, count in proposal_counts.items() if status not in {"executed", "rejected"}}
         count_text = ", ".join(f"{_ko_status(status)} {count}" for status, count in sorted(active_counts.items())) or "없음"
@@ -320,9 +397,9 @@ def build_observation_dashboard() -> str:
         for proposal in pending_proposals[:3]:
             lines.append(f"- #{proposal.get('id')} {_proposal_label(proposal)}: {_ko_status(proposal.get('status'))}")
     else:
-        lines.append("- 현재 처리 대기 중인 action 제안은 없어.")
+        lines.append("- 지금 바로 실행 대기 중인 제안은 없어.")
 
-    lines.extend(["", "**학습/회고**"])
+    lines.extend(["", "**최근 배운 것**"])
     if reflections:
         for reflection in reflections[:2]:
             lines.append(f"- #{reflection.get('id')} {_reflection_summary(reflection.get('summary'))}")

@@ -280,18 +280,24 @@ def test_dangerous_chat_task_is_blocked_goal(monkeypatch, tmp_path):
 def test_activity_summary_reports_current_work(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     text = build_activity_summary()
-    assert "Core \uad00\uc81c\ud310" in text
-    assert "\ud55c\ub208\uc5d0" in text
-    assert "24\uc2dc\uac04 \uc9c0\ud45c" in text
-    assert "\ucd5c\uadfc action" in text
-    assert "\ubaa9\ud45c \ud6c4\ubcf4" in text
-    assert "\uc81c\uc548 \ud050" in text
+    assert "Core 상태 요약" in text
+    assert "현재 상태" in text
+    assert "최근 처리" in text
+    assert "자동 제안 기준" in text
+    assert "다음 후보" in text
+    assert "실행 제안" in text
     assert "\ub2e4\uc74c\uc5d0 \ubcfc \uac83" in text
     assert "proposed_payload_json" not in text
     assert "DISCORD_BOT_TOKEN" not in text
     assert "secret goal summary marker" not in text
     assert "ssh_key_access_denied" not in text
     assert "completed / rc=0" not in text
+    assert "tick" not in text.lower()
+    assert "lab" not in text.lower()
+    assert "action" not in text.lower()
+    assert "skill" not in text.lower()
+    assert "압력" not in text
+    assert "archive" not in text.lower()
     assert_no_mojibake(text)
 
 

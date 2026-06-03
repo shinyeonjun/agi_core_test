@@ -100,5 +100,5 @@ def test_intelligence_cli_and_summary(monkeypatch, tmp_path, capsys):
     assert "items" in priorities
 
     text = build_activity_summary()
-    assert "운영 지능" in text
-    assert "성장 루프" in text
+    assert "운영 판단" in text
+    assert "자율 개선 방향" in text
