@@ -82,14 +82,12 @@ def _task_kind_for_goal(goal: dict[str, Any]) -> str:
     return str(metadata.get("task_kind") or goal.get("goal_type") or "general")
 
 
-def _failed_goal_sync_tasks(goal_id: int, task_kind: str) -> list[dict[str, Any]]:
+def _failed_code_tasks_for_goal(goal_id: int, task_kind: str) -> list[dict[str, Any]]:
     failures: list[dict[str, Any]] = []
     for task in list_tasks(limit=500):
         if int(task.get("goal_id") or 0) != int(goal_id):
             continue
         if str(task.get("task_kind") or "") != task_kind:
-            continue
-        if str(task.get("source") or "") != "goal_sync":
             continue
         if str(task.get("status") or "") != "blocked":
             continue
@@ -104,7 +102,7 @@ def _pause_goal_after_worker_failures(goal: dict[str, Any], task_kind: str) -> b
         return False
     goal_id = int(goal["id"])
     max_failures = max(1, env_int("AGENT_GOAL_SYNC_MAX_CODE_FAILURES", 1))
-    failures = _failed_goal_sync_tasks(goal_id, task_kind)
+    failures = _failed_code_tasks_for_goal(goal_id, task_kind)
     if len(failures) < max_failures:
         return False
     metadata = goal_metadata(goal)
@@ -113,6 +111,21 @@ def _pause_goal_after_worker_failures(goal: dict[str, Any], task_kind: str) -> b
     metadata["next_step"] = "사용자 확인 후 새 목표로 다시 시도하거나 실패 보고서를 먼저 확인해야 함"
     update_goal_metadata(goal_id, metadata, status="blocked")
     return True
+
+
+def _mark_goal_blocked_by_code_worker(goal: dict[str, Any], result: dict[str, Any]) -> None:
+    goal_id = int(goal["id"])
+    metadata = goal_metadata(goal)
+    metadata["sync_paused_reason"] = "code_worker_failed"
+    metadata["last_code_worker_failure"] = {
+        "task_id": result.get("task_id"),
+        "status": result.get("status"),
+        "returncode": result.get("returncode"),
+        "reason": result.get("reason"),
+        "artifact_id": result.get("artifact_id"),
+    }
+    metadata["next_step"] = "실패 보고서를 확인한 뒤 사용자가 새 목표로 다시 시도해야 함"
+    update_goal_metadata(goal_id, metadata, status="blocked")
 
 
 def sync_open_goals_to_tasks(limit: int = 100) -> dict[str, Any]:
@@ -397,6 +410,8 @@ def _handle_code_change_goal(
             confidence=0.82 if not self_improvement else 0.86,
         )
         result["reflection_id"] = reflection_id
+    elif result.get("status") in {"codex_work_failed", "codex_work_blocked"}:
+        _mark_goal_blocked_by_code_worker(goal, result)
     return {
         **result,
         "profile": current_profile(),

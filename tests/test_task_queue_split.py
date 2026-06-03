@@ -289,6 +289,22 @@ def test_goal_sync_pauses_code_goal_after_worker_failure(monkeypatch, tmp_path):
     assert tasks[0]["id"] == task_id
 
 
+def test_goal_sync_pauses_after_discord_self_improvement_failure(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    goal_id = create_goal("Self improvement", "code", goal_type="self_improvement_proposal", status="active", priority=0.95, metadata={"priority_owner": "user", "task_kind": "code_change"}, dedupe=False)
+    task_id = enqueue_task("user", goal_id=goal_id, task_kind="code_change", title="Self improvement", source="discord_self_improvement", priority=0.95)
+    finish_task(task_id, "blocked", {"status": "codex_work_failed", "returncode": 125})
+
+    result = sync_open_goals_to_tasks()
+    goals = {goal["id"]: goal for goal in list_goals(limit=10, include_archived=True)}
+    tasks = list_tasks(limit=10, queue_type="user")
+
+    assert result["skipped"] >= 1
+    assert goals[goal_id]["status"] == "blocked"
+    assert len(tasks) == 1
+    assert tasks[0]["id"] == task_id
+
+
 def test_db_cleanup_skips_open_tasks_for_closed_goals(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     goal_id = create_goal("Closed goal", "done", goal_type="user_directed", status="done", priority=0.9, metadata={"priority_owner": "user", "task_kind": "task_note"}, dedupe=False)

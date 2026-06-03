@@ -269,7 +269,7 @@ def test_self_improvement_code_goal_requires_native_loop(monkeypatch, tmp_path):
     assert result["status"] == "codex_work_blocked"
     assert result["reason"] == "self_improvement_requires_native_loop"
     assert result["self_improvement"] is True
-    assert goal["status"] == "active"
+    assert goal["status"] == "blocked"
     assert list_action_runs(5) == []
 
 
