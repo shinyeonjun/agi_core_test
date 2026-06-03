@@ -22,9 +22,12 @@ def _verification_passed(result: dict[str, Any]) -> bool:
     return bool(verification) and all(item.get("returncode") == 0 for item in verification)
 
 
-def _ran_command(result: dict[str, Any], needle: str) -> bool:
-    text = " ".join(str(item.get("command") or "") for item in _latest_verification(result)).lower()
-    return needle.lower() in text
+def _command_passed(result: dict[str, Any], needle: str) -> bool:
+    lowered = needle.lower()
+    return any(
+        lowered in str(item.get("command") or "").lower() and item.get("returncode") == 0
+        for item in _latest_verification(result)
+    )
 
 
 def review_codex_work_result(result: dict[str, Any], *, self_improvement: bool = False) -> dict[str, Any]:
@@ -34,8 +37,8 @@ def review_codex_work_result(result: dict[str, Any], *, self_improvement: bool =
     report = str(result.get("report") or "").strip()
     worktree_isolated = result.get("worktree_status") == "created" or str(result.get("integration_status") or "") == "worktree_pending_review"
     tests_passed = _verification_passed(result)
-    audit_passed = _ran_command(result, "agentctl audit")
-    eval_passed = _ran_command(result, "agentctl eval run")
+    audit_passed = _command_passed(result, "agentctl audit")
+    eval_passed = _command_passed(result, "agentctl eval run")
     review_passed = bool(changed_files) and not unsafe and bool(report) and status == "codex_work_completed" and (worktree_isolated or not self_improvement)
     release_gate = evaluate_release_candidate(
         changed_files=changed_files,

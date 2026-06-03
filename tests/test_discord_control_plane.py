@@ -248,11 +248,28 @@ def test_task_finished_message_explains_verification_failure(monkeypatch, tmp_pa
     setup_isolated(monkeypatch, tmp_path)
     task = {"task_kind": "code_change", "title": "대화 렌더러 복구 품질 개선", "queue_type": "user", "payload": {}}
 
-    text = _finish_message(task, 519, "blocked", {"status": "codex_work_failed", "returncode": 125, "report": "pytest failed"})
+    text = _finish_message(
+        task,
+        519,
+        "blocked",
+        {
+            "status": "codex_work_failed",
+            "returncode": 125,
+            "report": "pytest failed",
+            "changed_files": [" M agent/renderer/fallback_renderer.py"],
+            "worktree": "/tmp/worktree",
+            "evidence_ledger": [{"verification": [{"command": "python -m pytest -q", "returncode": 127, "stderr": "FileNotFoundError"}]}],
+        },
+    )
 
     assert "코드 작업 실패" in text
     assert "검증 명령이 실패" in text
+    assert "테스트: 실행 파일을 찾지 못함" in text
+    assert "격리 작업공간" in text
     assert "요약: -" not in text
+    assert "Plan" not in text
+    assert "/tmp/worktree" not in text
+    assert "python -m pytest" not in text
 
 
 def test_daily_summary_is_human_readable(monkeypatch, tmp_path):

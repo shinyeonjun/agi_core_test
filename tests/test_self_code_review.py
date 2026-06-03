@@ -62,3 +62,28 @@ def test_self_code_review_reports_missing_audit_and_eval():
 
     assert review["verdict"] == "needs_validation"
     assert {"audit_missing", "eval_missing"} <= codes
+
+
+def test_self_code_review_requires_successful_audit_and_eval_commands():
+    result = {
+        "status": "codex_work_completed",
+        "changed_files": [" M agent/core/example.py"],
+        "unsafe_changed_files": [],
+        "report": "?섏젙 ?꾨즺",
+        "worktree_status": "created",
+        "evidence_ledger": [
+            {
+                "verification": [
+                    {"command": "python -m pytest -q", "returncode": 0, "stdout": "ok", "stderr": ""},
+                    {"command": "python -m agent.cli.agentctl audit", "returncode": 127, "stdout": "", "stderr": "FileNotFoundError"},
+                    {"command": "python -m agent.cli.agentctl eval run", "returncode": 127, "stdout": "", "stderr": "FileNotFoundError"},
+                ]
+            }
+        ],
+    }
+
+    review = review_codex_work_result(result, self_improvement=True)
+    codes = {item["code"] for item in review["findings"]}
+
+    assert review["verdict"] == "needs_validation"
+    assert {"audit_missing", "eval_missing"} <= codes

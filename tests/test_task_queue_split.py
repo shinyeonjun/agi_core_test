@@ -333,6 +333,22 @@ def test_work_loop_default_verify_uses_current_python(monkeypatch, tmp_path):
     assert commands[0] != "python -m pytest -q"
 
 
+def test_work_loop_env_verify_normalizes_python_aliases(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    monkeypatch.setenv(
+        "AGENT_WORK_LOOP_VERIFY_COMMANDS",
+        "python -m pytest -q;python3 -m agent.cli.agentctl audit",
+    )
+
+    commands = _work_loop_verify_commands()
+
+    assert len(commands) == 2
+    assert all(sys.executable in command for command in commands)
+    assert all(not command.startswith(("python ", "python3 ")) for command in commands)
+    assert "pytest" in commands[0]
+    assert "agent.cli.agentctl audit" in commands[1]
+
+
 def test_db_cleanup_cli_defaults_to_dry_run(monkeypatch, tmp_path, capsys):
     setup_isolated(monkeypatch, tmp_path)
     goal_id = create_goal("remove goal #999", "remove this goal", goal_type="user_directed", status="active", priority=0.7, dedupe=False)

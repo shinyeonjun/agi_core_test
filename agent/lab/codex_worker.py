@@ -172,11 +172,21 @@ def _work_loop_worktree_enabled() -> bool:
 def _work_loop_verify_commands() -> list[str]:
     value = os.getenv("AGENT_WORK_LOOP_VERIFY_COMMANDS")
     if value is None:
-        return [f"{shlex.quote(sys.executable)} -m pytest -q"]
+        return [_normalize_verification_command(f"{shlex.quote(sys.executable)} -m pytest -q")]
     stripped = value.strip()
     if stripped.lower() in {"", "0", "false", "off", "none", "skip"}:
         return []
-    return [part.strip() for part in stripped.split(";") if part.strip()]
+    return [_normalize_verification_command(part.strip()) for part in stripped.split(";") if part.strip()]
+
+
+def _normalize_verification_command(command: str) -> str:
+    try:
+        args = shlex.split(command)
+    except ValueError:
+        return command
+    if len(args) >= 2 and args[0] in {"python", "python3"} and args[1] == "-m":
+        args[0] = sys.executable
+    return shlex.join(args)
 
 
 def _worker_prompt(user_request: str, *, goal_id: int | None, task_id: int | None) -> str:
@@ -305,6 +315,7 @@ def _run_codex_exec_backend(root: Path, user_request: str, *, goal_id: int | Non
 
 
 def _run_verification_command(root: Path, command: str, *, timeout: int) -> dict[str, Any]:
+    command = _normalize_verification_command(command)
     try:
         args = shlex.split(command)
     except ValueError as exc:

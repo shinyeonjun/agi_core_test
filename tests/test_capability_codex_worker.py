@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -184,7 +185,7 @@ def test_native_loop_backend_uses_worktree_and_verification(monkeypatch, tmp_pat
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if args[:2] == ["git", "status"]:
             return SimpleNamespace(returncode=0, stdout=" M agent/core/example.py\n", stderr="")
-        if args[:4] == ["python", "-m", "pytest", "-q"]:
+        if args[:4] == [sys.executable, "-m", "pytest", "-q"]:
             calls["verify"] = {"args": args, "cwd": kwargs["cwd"], "timeout": kwargs["timeout"]}
             return SimpleNamespace(returncode=0, stdout="1 passed\n", stderr="")
         assert args[:2] == ["codex", "exec"]
@@ -212,7 +213,9 @@ def test_native_loop_backend_uses_worktree_and_verification(monkeypatch, tmp_pat
     assert calls["worktree"] == result["worktree"]
     assert result["changed_files"] == [" M agent/core/example.py"]
     assert result["iterations_used"] == 1
-    assert result["verification_commands"] == ["python -m pytest -q"]
+    assert len(result["verification_commands"]) == 1
+    assert sys.executable in result["verification_commands"][0]
+    assert "pytest" in result["verification_commands"][0]
     assert result["integration_status"] == "worktree_pending_review"
     assert result["evidence_ledger"][0]["verification"][0]["returncode"] == 0
 
@@ -236,7 +239,7 @@ def test_native_loop_retries_after_failed_verification(monkeypatch, tmp_path):
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if args[:2] == ["git", "status"]:
             return SimpleNamespace(returncode=0, stdout=" M agent/core/example.py\n", stderr="")
-        if args[:4] == ["python", "-m", "pytest", "-q"]:
+        if args[:4] == [sys.executable, "-m", "pytest", "-q"]:
             calls["verify"] += 1
             if calls["verify"] == 1:
                 return SimpleNamespace(returncode=1, stdout="", stderr="failed")
@@ -281,11 +284,11 @@ def test_self_improvement_native_loop_creates_apply_approval(monkeypatch, tmp_pa
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if args[:2] == ["git", "status"]:
             return SimpleNamespace(returncode=0, stdout=" M agent/core/example.py\n", stderr="")
-        if args[:4] == ["python", "-m", "pytest", "-q"]:
+        if args[:4] == [sys.executable, "-m", "pytest", "-q"]:
             return SimpleNamespace(returncode=0, stdout="1 passed\n", stderr="")
-        if args[:4] == ["python", "-m", "agent.cli.agentctl", "audit"]:
+        if args[:4] == [sys.executable, "-m", "agent.cli.agentctl", "audit"]:
             return SimpleNamespace(returncode=0, stdout="audit pass\n", stderr="")
-        if args[:5] == ["python", "-m", "agent.cli.agentctl", "eval", "run"]:
+        if args[:5] == [sys.executable, "-m", "agent.cli.agentctl", "eval", "run"]:
             return SimpleNamespace(returncode=0, stdout="eval pass\n", stderr="")
         assert args[:2] == ["codex", "exec"]
         output_path = args[args.index("--output-last-message") + 1]

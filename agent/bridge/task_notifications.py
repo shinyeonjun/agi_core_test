@@ -121,6 +121,44 @@ def _reason_text(result: dict[str, Any]) -> str:
     return REASON_LABELS.get(reason, reason.replace("_", " "))
 
 
+def _verification_label(command: object) -> str:
+    text = compact_text(command, "").lower()
+    if "pytest" in text:
+        return "테스트"
+    if "agentctl audit" in text:
+        return "감사 점검"
+    if "agentctl eval run" in text:
+        return "자체 평가"
+    return "검증"
+
+
+def _verification_failure_text(result: dict[str, Any]) -> str:
+    evidence = result.get("evidence_ledger")
+    if not isinstance(evidence, list):
+        return ""
+    latest: list[dict[str, Any]] = []
+    for item in reversed(evidence):
+        verification = item.get("verification") if isinstance(item, dict) else None
+        if isinstance(verification, list) and verification:
+            latest = [entry for entry in verification if isinstance(entry, dict)]
+            break
+    failed = [entry for entry in latest if entry.get("returncode") not in {0, None}]
+    if not failed:
+        return ""
+    first = failed[0]
+    command = _verification_label(first.get("command"))
+    stderr = compact_text(first.get("stderr"), "")
+    if "FileNotFoundError" in stderr:
+        cause = "실행 파일을 찾지 못함"
+    elif first.get("returncode") == 124:
+        cause = "시간 초과"
+    else:
+        cause = "실패"
+    if len(failed) > 1:
+        cause += f", 추가 실패 {len(failed) - 1}건"
+    return redact_discord_content(f"{command}: {cause}")
+
+
 def _should_notify_phase(phase: str, status: str) -> bool:
     if _verbose():
         return phase != "learned"
@@ -173,9 +211,15 @@ def _finish_message(task: dict[str, Any] | None, task_id: int, status: str, resu
             lines.append(f"\ub2e4\uc74c: main \ubc18\uc601\uc740 #\uc2b9\uc778\uc5d0\uc11c #{approval_id} \ud655\uc778\uc774 \ud544\uc694\ud574.")
     elif status == "blocked":
         lines.append(f"\uc694\uc57d: {_reason_text(result)}")
-        report = compact_text(result.get("report"), "")
-        if report and report != "-":
-            lines.append(f"\ubcf4\uace0: {redact_discord_content(report[:500])}")
+        verification = _verification_failure_text(result)
+        if verification:
+            lines.append(f"\uac80\uc99d: {verification}")
+        changed = result.get("changed_files") if isinstance(result.get("changed_files"), list) else []
+        if changed:
+            lines.append(f"\ubcc0\uacbd: {len(changed)}\uac1c \ud30c\uc77c\uc740 \uaca9\ub9ac \uc791\uc5c5\uacf5\uac04\uc5d0\ub9cc \ub0a8\uc544 \uc788\uc5b4.")
+        worktree = compact_text(result.get("worktree"), "")
+        if worktree:
+            lines.append("\ub2e4\uc74c: \uc2e4\ud328 \ubcf4\uace0\ub97c \ud655\uc778\ud558\uace0 \uc0c8 \ubaa9\ud45c\ub85c \ub2e4\uc2dc \uc2dc\ub3c4\ud574\uc57c \ud574.")
     elif status == "waiting_approval":
         lines.append("\uc694\uc57d: \uc2e4\ud589 \uc804\uc5d0 \uc2b9\uc778\uc774 \ud544\uc694\ud574.")
     else:
