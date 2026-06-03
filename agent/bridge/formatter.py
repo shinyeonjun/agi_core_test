@@ -336,7 +336,7 @@ def _format_user_goal(user_goal: dict[str, Any]) -> str:
 
 
 def _renderer_unavailable_reply(decision: dict[str, Any]) -> str:
-    return "Core 답변 생성이 안정적으로 끝나지 않았어. 입력은 기록해뒀어."
+    return "이번 답변 생성이 실패했어. 입력은 기록했지만, 기다려도 자동으로 이어서 보내지진 않아."
 
 
 def _is_noise_title(value: object) -> bool:

@@ -56,7 +56,7 @@ def test_chat_channel_routes_to_core(monkeypatch, tmp_path):
     event = DiscordEvent(None, "10", "1", "m1", False, False, "\uc9c0\uae08 \uc0c1\ud0dc \uc54c\ub824\uc918")
     chunks = route_discord_event(event, control_config())
     assert chunks
-    assert "Core 답변 생성" in chunks[0]
+    assert "이번 답변 생성이 실패" in chunks[0]
     assert "지어내진" not in chunks[0]
     assert "잠깐만" not in chunks[0]
     assert "fallback renderer" not in chunks[0]
@@ -207,7 +207,7 @@ def test_chat_channel_hides_internal_debug_output(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     event = DiscordEvent(None, "10", "1", "m5", False, False, "\u314e\u3147")
     output = "\n".join(route_discord_event(event, control_config()))
-    assert "Core 답변 생성" in output
+    assert "이번 답변 생성이 실패" in output
     assert "fallback renderer" not in output
     assert "related_memories" not in output
     assert "selected_goal" not in output
@@ -218,7 +218,7 @@ def test_chat_status_does_not_fall_back_to_template_and_command_state_keeps_deta
     setup_isolated(monkeypatch, tmp_path)
     event = DiscordEvent(None, "10", "1", "m6", False, False, "\uc9c0\uae08 \uc0c1\ud0dc \uc54c\ub824\uc918")
     output = "\n".join(route_discord_event(event, control_config()))
-    assert "Core 답변 생성" in output
+    assert "이번 답변 생성이 실패" in output
     assert "지어내진" not in output
     assert "잠깐만" not in output
     assert "Relevant skills" not in output
@@ -252,7 +252,7 @@ def test_chat_architecture_question_does_not_use_canned_formatter_template(monke
     monkeypatch.setenv("AGENT_LANGUAGE_ENGINE", "rule")
     event = DiscordEvent(None, "10", "1", "m-arch", False, False, "그 너 코어 어떻게 이루어져있어?")
     output = "\n".join(route_discord_event(event, control_config()))
-    assert "Core 답변 생성" in output
+    assert "이번 답변 생성이 실패" in output
     assert "Core는 LanguageEngine, PolicyEngine" not in output
     assert "더 구체적" not in output
 
@@ -262,7 +262,7 @@ def test_chat_capability_question_is_not_style_feedback(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_LANGUAGE_ENGINE", "rule")
     event = DiscordEvent(None, "10", "1", "m-cap", False, False, "너가할 수 있는거 냉정하게 뭐뭐 할 수 있는지 궁금해")
     output = "\n".join(route_discord_event(event, control_config()))
-    assert "Core 답변 생성" in output
+    assert "이번 답변 생성이 실패" in output
     assert "말투 피드백" not in output
 
 

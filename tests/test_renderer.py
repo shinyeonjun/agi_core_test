@@ -26,6 +26,25 @@ def test_codex_validator_rejects_unsafe_command():
     assert result["ok"] is False
 
 
+def test_codex_validator_allows_safe_command_boundary_explanation():
+    result = validate_codex_output(
+        "혼자 계속 관찰하고 배울 수는 있어. 다만 sudo나 패키지 설치 같은 시스템 변경은 승인 없이는 실행하지 않아.",
+        {"must_include": [], "must_not_include": []},
+    )
+
+    assert result["ok"] is True
+
+
+def test_codex_validator_rejects_approval_bypass_claim():
+    result = validate_codex_output(
+        "승인 없이 sudo로 시스템 변경도 가능해.",
+        {"must_include": [], "must_not_include": []},
+    )
+
+    assert result["ok"] is False
+    assert "unsafe_command_recommendation" in result["forbidden"]
+
+
 def test_codex_validator_rejects_internal_field_leak():
     result = validate_codex_output(
         "selected_goal_id: 184, user_goal_created: false라서 새 목표는 아니야.",
