@@ -2,7 +2,7 @@ import json
 
 from agent.bridge.auth import DiscordAuthConfig
 from agent.bridge.formatter import format_action_update, format_approval_card, redact_discord_content
-from agent.bridge.notifier import post_webhook
+from agent.bridge.notifier import post_bot_channel, post_webhook
 from agent.bridge.reports import build_activity_summary, build_daily_summary, build_observation_dashboard, notify_test_summary, notify_test_update
 from agent.bridge.router import DiscordEvent, channel_role, route_discord_event
 from agent.cli.agentctl import main
@@ -44,6 +44,26 @@ def control_config():
         update_channel_id="40",
         user_cooldown_seconds=0,
     )
+
+
+
+
+def test_external_notifications_are_blocked_in_isolated_runtime(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("DISCORD_APPROVAL_CHANNEL_ID", "123")
+    monkeypatch.setenv("DISCORD_UPDATE_WEBHOOK_URL", "https://discord.example/webhook")
+
+    def fail_urlopen(*args, **kwargs):
+        raise AssertionError("external Discord request should not be attempted from isolated runtime")
+
+    monkeypatch.setattr("urllib.request.urlopen", fail_urlopen)
+
+    approval = post_bot_channel("approval", "승인 필요 #1")
+    update = post_webhook("update", "테스트 알림")
+
+    assert approval["reason"] == "external_notifications_disabled"
+    assert update["reason"] == "external_notifications_disabled"
 
 
 def test_channel_roles_are_explicit():

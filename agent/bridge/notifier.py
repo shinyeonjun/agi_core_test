@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from agent.bridge.formatter import redact_discord_content, split_for_discord
-from agent.config.defaults import env_path
+from agent.config.defaults import db_path, env_bool, env_path, project_root
 from agent.core.events import log_event
 
 WebhookKind = Literal["summary", "update"]
@@ -21,6 +21,19 @@ BOT_CHANNEL_ENV = {
     "chat": "DISCORD_CHAT_CHANNEL_ID",
     "approval": "DISCORD_APPROVAL_CHANNEL_ID",
 }
+
+
+def external_notifications_allowed() -> bool:
+    if env_bool("AGENT_DISABLE_EXTERNAL_NOTIFICATIONS", False):
+        return False
+    if env_bool("AGENT_ALLOW_EXTERNAL_NOTIFICATIONS", False):
+        return True
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return False
+    root = project_root()
+    expected_db = (root / "data" / "agent.db").resolve()
+    expected_env = (root / ".env").resolve()
+    return db_path() == expected_db and env_path() == expected_env
 
 
 def load_env_file(path: Path | None = None) -> None:
@@ -57,6 +70,8 @@ def post_webhook(kind: WebhookKind, content: str, *, username: str = "Agent Core
         return result
     if dry_run:
         return {"sent": False, "kind": kind, "reason": "dry_run", "chunks": len(chunks), "preview": chunks[0] if chunks else ""}
+    if not external_notifications_allowed():
+        return {"sent": False, "kind": kind, "reason": "external_notifications_disabled", "chunks": len(chunks), "preview": chunks[0] if chunks else ""}
     sent = 0
     for chunk in chunks:
         payload = json.dumps({"username": username, "content": chunk}, ensure_ascii=False).encode("utf-8")
@@ -82,6 +97,8 @@ def post_bot_channel(kind: BotChannelKind, content: str, *, dry_run: bool = Fals
         return {"sent": False, "kind": kind, "reason": "missing_bot_token_or_channel", "chunks": len(chunks), "preview": chunks[0] if chunks else ""}
     if dry_run:
         return {"sent": False, "kind": kind, "reason": "dry_run", "chunks": len(chunks), "preview": chunks[0] if chunks else ""}
+    if not external_notifications_allowed():
+        return {"sent": False, "kind": kind, "reason": "external_notifications_disabled", "chunks": len(chunks), "preview": chunks[0] if chunks else ""}
     sent = 0
     for chunk in chunks:
         payload = json.dumps({"content": chunk}, ensure_ascii=False).encode("utf-8")
