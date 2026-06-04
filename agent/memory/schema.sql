@@ -590,6 +590,76 @@ CREATE TABLE IF NOT EXISTS cognitive_snapshots (
 CREATE INDEX IF NOT EXISTS idx_cognitive_snapshots_created ON cognitive_snapshots(created_at);
 CREATE INDEX IF NOT EXISTS idx_cognitive_snapshots_type ON cognitive_snapshots(snapshot_type);
 
+
+CREATE TABLE IF NOT EXISTS cognitive_nodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    node_type TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT,
+    importance REAL DEFAULT 0.5,
+    confidence REAL DEFAULT 0.7,
+    freshness REAL DEFAULT 0.5,
+    risk REAL DEFAULT 0.0,
+    success_rate REAL,
+    revisit_score REAL DEFAULT 0.5,
+    metadata_json TEXT,
+    archived INTEGER DEFAULT 0,
+    UNIQUE(node_type, source_type, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_cognitive_nodes_type ON cognitive_nodes(node_type);
+CREATE INDEX IF NOT EXISTS idx_cognitive_nodes_source ON cognitive_nodes(source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_cognitive_nodes_revisit ON cognitive_nodes(revisit_score);
+CREATE INDEX IF NOT EXISTS idx_cognitive_nodes_updated ON cognitive_nodes(updated_at);
+CREATE INDEX IF NOT EXISTS idx_cognitive_nodes_archived ON cognitive_nodes(archived);
+
+CREATE TABLE IF NOT EXISTS cognitive_edges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    from_node_id INTEGER NOT NULL,
+    to_node_id INTEGER NOT NULL,
+    edge_type TEXT NOT NULL,
+    weight REAL DEFAULT 0.5,
+    confidence REAL DEFAULT 0.7,
+    evidence_json TEXT,
+    archived INTEGER DEFAULT 0,
+    UNIQUE(from_node_id, to_node_id, edge_type)
+);
+CREATE INDEX IF NOT EXISTS idx_cognitive_edges_from ON cognitive_edges(from_node_id);
+CREATE INDEX IF NOT EXISTS idx_cognitive_edges_to ON cognitive_edges(to_node_id);
+CREATE INDEX IF NOT EXISTS idx_cognitive_edges_type ON cognitive_edges(edge_type);
+CREATE INDEX IF NOT EXISTS idx_cognitive_edges_weight ON cognitive_edges(weight);
+
+CREATE TABLE IF NOT EXISTS cognitive_activations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    node_id INTEGER NOT NULL,
+    context TEXT,
+    reason TEXT,
+    score REAL NOT NULL,
+    components_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_cognitive_activations_created ON cognitive_activations(created_at);
+CREATE INDEX IF NOT EXISTS idx_cognitive_activations_node ON cognitive_activations(node_id);
+CREATE INDEX IF NOT EXISTS idx_cognitive_activations_score ON cognitive_activations(score);
+
+CREATE TABLE IF NOT EXISTS cognitive_traces (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    trace_type TEXT NOT NULL,
+    decision_id TEXT,
+    root_node_id INTEGER,
+    summary TEXT,
+    trace_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cognitive_traces_created ON cognitive_traces(created_at);
+CREATE INDEX IF NOT EXISTS idx_cognitive_traces_type ON cognitive_traces(trace_type);
+CREATE INDEX IF NOT EXISTS idx_cognitive_traces_decision ON cognitive_traces(decision_id);
+
 CREATE TABLE IF NOT EXISTS wake_signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
@@ -624,4 +694,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR REPLACE INTO schema_meta (key, value)
-VALUES ('schema_version', '0.19.0-alpha');
+VALUES ('schema_version', '0.20.0-alpha');

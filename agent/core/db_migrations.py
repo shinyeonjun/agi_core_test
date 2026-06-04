@@ -351,6 +351,96 @@ def _migration_0012_discord_message_dedupe(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_discord_events_message_unique ON discord_events(channel_id, user_id, message_id)")
 
 
+def _migration_0013_cognitive_graph_layer(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS cognitive_nodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            node_type TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            summary TEXT,
+            importance REAL DEFAULT 0.5,
+            confidence REAL DEFAULT 0.7,
+            freshness REAL DEFAULT 0.5,
+            risk REAL DEFAULT 0.0,
+            success_rate REAL,
+            revisit_score REAL DEFAULT 0.5,
+            metadata_json TEXT,
+            archived INTEGER DEFAULT 0,
+            UNIQUE(node_type, source_type, source_id)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_nodes_type ON cognitive_nodes(node_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_nodes_source ON cognitive_nodes(source_type, source_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_nodes_revisit ON cognitive_nodes(revisit_score)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_nodes_updated ON cognitive_nodes(updated_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_nodes_archived ON cognitive_nodes(archived)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS cognitive_edges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            from_node_id INTEGER NOT NULL,
+            to_node_id INTEGER NOT NULL,
+            edge_type TEXT NOT NULL,
+            weight REAL DEFAULT 0.5,
+            confidence REAL DEFAULT 0.7,
+            evidence_json TEXT,
+            archived INTEGER DEFAULT 0,
+            UNIQUE(from_node_id, to_node_id, edge_type)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_edges_from ON cognitive_edges(from_node_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_edges_to ON cognitive_edges(to_node_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_edges_type ON cognitive_edges(edge_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_edges_weight ON cognitive_edges(weight)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS cognitive_activations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            node_id INTEGER NOT NULL,
+            context TEXT,
+            reason TEXT,
+            score REAL NOT NULL,
+            components_json TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_activations_created ON cognitive_activations(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_activations_node ON cognitive_activations(node_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_activations_score ON cognitive_activations(score)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS cognitive_traces (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            trace_type TEXT NOT NULL,
+            decision_id TEXT,
+            root_node_id INTEGER,
+            summary TEXT,
+            trace_json TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_traces_created ON cognitive_traces(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_traces_type ON cognitive_traces(trace_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_cognitive_traces_decision ON cognitive_traces(decision_id)")
+    conn.execute(
+        """
+        INSERT INTO schema_meta (key, value) VALUES ('schema_version', '0.20.0-alpha')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("0001_existing_db_repairs", "Backfill approval task links and memory FTS schema", _migration_0001_existing_db_repairs),
     Migration("0002_task_queue_locks", "Add task queue lease, idempotency, and scheduling fields", _migration_0002_task_queue_locks),
@@ -364,6 +454,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0010_cognitive_growth_algorithms", "Add blackboard, stigmergy, MAP-Elites, and cognitive snapshot storage", _migration_0010_cognitive_growth_algorithms),
     Migration("0011_wake_signals_reactor", "Add wake signal storage for event-driven reactor runtime", _migration_0011_wake_signals_reactor),
     Migration("0012_discord_message_dedupe", "Deduplicate Discord events and enforce message idempotency", _migration_0012_discord_message_dedupe),
+    Migration("0013_cognitive_graph_layer", "Add cognitive graph nodes, edges, activations, and traces", _migration_0013_cognitive_graph_layer),
 )
 
 

@@ -28,6 +28,7 @@ INTEGRATION_TESTS = [
     "tests/test_capability_codex_worker.py",
     "tests/test_codex_worker_policy.py",
     "tests/test_cognitive_engine.py",
+    "tests/test_cognitive_graph.py",
     "tests/test_cognitive_pipeline.py",
     "tests/test_core_pipeline.py",
     "tests/test_dashboard.py",

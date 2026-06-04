@@ -11,6 +11,7 @@ from agent.core.autonomy import arm_catastrophic_destruction, disarm_catastrophi
 from agent.core.approvals import ApprovalStore
 from agent.core.capabilities import collect_capability_map, capability_summary_lines
 from agent.core.cognitive_engine import add_blackboard_item, add_stigmergy_marker, cognitive_growth_snapshot, list_blackboard_items, list_stigmergy_markers
+from agent.core.cognitive_graph import activate_graph, graph_snapshot, sync_graph, trace_decision
 from agent.core.database import check_migrations, get_schema_version, init_db, migrate_db
 from agent.core.db_hygiene import cleanup_db_noise
 from agent.core.dependency_doctor import dependency_doctor, install_missing_python_dependencies
@@ -675,6 +676,20 @@ def cmd_intelligence(args: argparse.Namespace) -> int:
             )
         })
         return 0
+    if args.intelligence_command == "graph":
+        if args.graph_action == "sync":
+            print_json(sync_graph(limit=args.limit))
+            return 0
+        if args.graph_action == "snapshot":
+            print_json(graph_snapshot(limit=args.limit))
+            return 0
+        if args.graph_action == "activate":
+            print_json(activate_graph(args.query, limit=args.limit, sync=bool(args.sync)))
+            return 0
+        if args.graph_action == "trace":
+            print_json(trace_decision(args.trace_type, args.summary, query=args.query, decision_id=args.decision_id))
+            return 0
+        raise ValueError(f"unknown graph action: {args.graph_action}")
     raise ValueError(f"unknown intelligence command: {args.intelligence_command}")
 
 
@@ -932,6 +947,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_int_skills = intelligence_sub.add_parser("skills"); p_int_skills.add_argument("--limit", type=int, default=20); p_int_skills.set_defaults(func=cmd_intelligence)
     p_int_maintain = intelligence_sub.add_parser("maintain"); p_int_maintain.add_argument("--dry-run", action="store_true"); p_int_maintain.set_defaults(func=cmd_intelligence)
     p_int_growth = intelligence_sub.add_parser("growth"); p_int_growth.add_argument("--persist", action="store_true"); p_int_growth.add_argument("--limit", type=int, default=8); p_int_growth.set_defaults(func=cmd_intelligence)
+    p_int_graph = intelligence_sub.add_parser("graph"); p_int_graph_sub = p_int_graph.add_subparsers(dest="graph_action", required=True)
+    p_int_graph_sync = p_int_graph_sub.add_parser("sync"); p_int_graph_sync.add_argument("--limit", type=int, default=80); p_int_graph_sync.set_defaults(func=cmd_intelligence)
+    p_int_graph_snapshot = p_int_graph_sub.add_parser("snapshot"); p_int_graph_snapshot.add_argument("--limit", type=int, default=10); p_int_graph_snapshot.set_defaults(func=cmd_intelligence)
+    p_int_graph_activate = p_int_graph_sub.add_parser("activate"); p_int_graph_activate.add_argument("query"); p_int_graph_activate.add_argument("--limit", type=int, default=8); p_int_graph_activate.add_argument("--sync", action="store_true"); p_int_graph_activate.set_defaults(func=cmd_intelligence)
+    p_int_graph_trace = p_int_graph_sub.add_parser("trace"); p_int_graph_trace.add_argument("summary"); p_int_graph_trace.add_argument("--query"); p_int_graph_trace.add_argument("--trace-type", default="manual"); p_int_graph_trace.add_argument("--decision-id"); p_int_graph_trace.set_defaults(func=cmd_intelligence)
     p_int_blackboard = intelligence_sub.add_parser("blackboard"); p_int_blackboard_sub = p_int_blackboard.add_subparsers(dest="blackboard_action", required=True)
     p_int_blackboard_list = p_int_blackboard_sub.add_parser("list"); p_int_blackboard_list.add_argument("--limit", type=int, default=20); p_int_blackboard_list.add_argument("--status", default="open"); p_int_blackboard_list.set_defaults(func=cmd_intelligence)
     p_int_blackboard_add = p_int_blackboard_sub.add_parser("add"); p_int_blackboard_add.add_argument("topic"); p_int_blackboard_add.add_argument("content"); p_int_blackboard_add.add_argument("--source", default="agentctl"); p_int_blackboard_add.add_argument("--confidence", type=float, default=0.5); p_int_blackboard_add.add_argument("--tags", nargs="*"); p_int_blackboard_add.set_defaults(func=cmd_intelligence)
