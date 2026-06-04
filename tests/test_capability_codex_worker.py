@@ -287,6 +287,8 @@ def test_self_improvement_native_loop_creates_apply_approval(monkeypatch, tmp_pa
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if args[:2] == ["git", "status"]:
             return SimpleNamespace(returncode=0, stdout=" M agent/core/example.py\n", stderr="")
+        if args[:6] == [sys.executable, "-m", "agent.cli.agentctl", "test", "run", "fast"]:
+            return SimpleNamespace(returncode=0, stdout="fast pass\n", stderr="")
         if args[:4] == [sys.executable, "-m", "pytest", "-q"]:
             return SimpleNamespace(returncode=0, stdout="1 passed\n", stderr="")
         if args[:4] == [sys.executable, "-m", "agent.cli.agentctl", "audit"]:

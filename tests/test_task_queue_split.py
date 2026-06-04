@@ -375,3 +375,40 @@ def test_db_cleanup_cli_defaults_to_dry_run(monkeypatch, tmp_path, capsys):
     applied = json.loads(capsys.readouterr().out)
     assert applied["applied"] is True
     assert applied["changed"]["tasks_skipped"] == 1
+
+
+def test_self_improvement_verify_defaults_to_board_safe_chain(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    monkeypatch.delenv("AGENT_SELF_IMPROVEMENT_VERIFY_COMMANDS", raising=False)
+    monkeypatch.setenv("AGENT_WORK_LOOP_VERIFY_COMMANDS", "python -m pytest -q;python -m agent.cli.agentctl audit")
+
+    commands = _work_loop_verify_commands(self_improvement=True)
+
+    assert len(commands) == 3
+    assert "agent.cli.agentctl test run fast" in commands[0]
+    assert "agent.cli.agentctl audit" in commands[1]
+    assert "agent.cli.agentctl eval run" in commands[2]
+    assert all("pytest -q" not in command for command in commands)
+
+
+def test_self_improvement_verify_downgrades_full_pytest_when_inherited(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    monkeypatch.setenv("AGENT_SELF_IMPROVEMENT_INHERIT_VERIFY_COMMANDS", "1")
+    monkeypatch.setenv("AGENT_WORK_LOOP_VERIFY_COMMANDS", "python -m pytest -q;python3 -m agent.cli.agentctl audit")
+
+    commands = _work_loop_verify_commands(self_improvement=True)
+
+    assert "agent.cli.agentctl test run fast" in commands[0]
+    assert "pytest -q" not in commands[0]
+    assert "agent.cli.agentctl audit" in commands[1]
+
+
+def test_self_improvement_verify_can_keep_targeted_pytest(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    monkeypatch.setenv("AGENT_SELF_IMPROVEMENT_VERIFY_COMMANDS", "python -m pytest tests/test_renderer.py -q")
+
+    commands = _work_loop_verify_commands(self_improvement=True)
+
+    assert len(commands) == 1
+    assert "tests/test_renderer.py" in commands[0]
+    assert sys.executable in commands[0]

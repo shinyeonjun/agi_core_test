@@ -162,7 +162,14 @@ def _work_loop_timeout() -> int:
     return max(30, min(3600, env_int("AGENT_WORK_LOOP_TIMEOUT", env_int("AGENT_CODEX_WORK_TIMEOUT", 600))))
 
 
-def _work_loop_iterations() -> int:
+def _self_improvement_timeout() -> int:
+    default = min(_work_loop_timeout(), 300)
+    return max(60, min(600, env_int("AGENT_SELF_IMPROVEMENT_WORK_LOOP_TIMEOUT", default)))
+
+
+def _work_loop_iterations(*, self_improvement: bool = False) -> int:
+    if self_improvement:
+        return max(1, min(2, env_int("AGENT_SELF_IMPROVEMENT_WORK_LOOP_ITERATIONS", 1)))
     return max(1, min(5, env_int("AGENT_WORK_LOOP_ITERATIONS", 2)))
 
 
@@ -170,14 +177,32 @@ def _work_loop_worktree_enabled() -> bool:
     return env_bool("AGENT_WORK_LOOP_WORKTREE", True)
 
 
-def _work_loop_verify_commands() -> list[str]:
-    value = os.getenv("AGENT_WORK_LOOP_VERIFY_COMMANDS")
+def _default_work_loop_verify_commands(*, self_improvement: bool = False) -> list[str]:
+    commands = [f"{shlex.quote(sys.executable)} -m agent.cli.agentctl test run fast --json"]
+    if self_improvement:
+        commands.extend(
+            [
+                f"{shlex.quote(sys.executable)} -m agent.cli.agentctl audit",
+                f"{shlex.quote(sys.executable)} -m agent.cli.agentctl eval run",
+            ]
+        )
+    return [_normalize_verification_command(command) for command in commands]
+
+
+def _work_loop_verify_commands(*, self_improvement: bool = False) -> list[str]:
+    env_name = "AGENT_SELF_IMPROVEMENT_VERIFY_COMMANDS" if self_improvement else "AGENT_WORK_LOOP_VERIFY_COMMANDS"
+    value = os.getenv(env_name)
+    if self_improvement and value is None and env_bool("AGENT_SELF_IMPROVEMENT_INHERIT_VERIFY_COMMANDS", False):
+        value = os.getenv("AGENT_WORK_LOOP_VERIFY_COMMANDS")
     if value is None:
-        return [_normalize_verification_command(f"{shlex.quote(sys.executable)} -m agent.cli.agentctl test run fast --json")]
+        return _default_work_loop_verify_commands(self_improvement=self_improvement)
     stripped = value.strip()
     if stripped.lower() in {"", "0", "false", "off", "none", "skip"}:
         return []
-    return [_normalize_verification_command(part.strip()) for part in stripped.split(";") if part.strip()]
+    commands = [_normalize_verification_command(part.strip()) for part in stripped.split(";") if part.strip()]
+    if self_improvement and not env_bool("AGENT_SELF_IMPROVEMENT_ALLOW_FULL_PYTEST", False):
+        commands = _downgrade_full_pytest_commands(commands)
+    return _dedupe_commands(commands)
 
 
 def _normalize_verification_command(command: str) -> str:
@@ -188,6 +213,53 @@ def _normalize_verification_command(command: str) -> str:
     if len(args) >= 2 and args[0] in {"python", "python3"} and args[1] == "-m":
         args[0] = sys.executable
     return shlex.join(args)
+
+
+def _dedupe_commands(commands: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for command in commands:
+        if command not in seen:
+            seen.add(command)
+            result.append(command)
+    return result
+
+
+def _looks_like_full_pytest(command: str) -> bool:
+    try:
+        args = shlex.split(command)
+    except ValueError:
+        return False
+    if not args:
+        return False
+    pytest_index: int | None = None
+    for index, arg in enumerate(args):
+        if arg == "pytest":
+            pytest_index = index
+            break
+        if index >= 2 and args[index - 2 : index] == ["-m", "pytest"]:
+            pytest_index = index
+            break
+    if pytest_index is None:
+        return False
+    tail = args[pytest_index + 1 :]
+    if not tail:
+        return True
+    has_test_target = any((part.startswith("tests/") or (part.startswith("test") and part.endswith(".py"))) for part in tail)
+    has_selection = any(part in {"-k", "-m"} or part.startswith(("--pyargs", "--ignore", "--ignore-glob")) for part in tail)
+    return not has_test_target and not has_selection
+
+
+def _downgrade_full_pytest_commands(commands: list[str]) -> list[str]:
+    safe_fast = _default_work_loop_verify_commands(self_improvement=False)[0]
+    return [safe_fast if _looks_like_full_pytest(command) else command for command in commands]
+
+
+def _verification_timeout(timeout_seconds: int, *, self_improvement: bool = False) -> int:
+    if self_improvement:
+        default = min(max(60, timeout_seconds // 2), 120)
+        return max(30, min(180, env_int("AGENT_SELF_IMPROVEMENT_VERIFY_TIMEOUT", default)))
+    return max(30, min(300, timeout_seconds // 2))
 
 
 def _worker_prompt(user_request: str, *, goal_id: int | None, task_id: int | None) -> str:
@@ -368,9 +440,9 @@ def _verification_passed(evidence: list[dict[str, Any]]) -> bool:
 def _run_native_loop_backend(root: Path, user_request: str, *, goal_id: int | None, task_id: int | None, sandbox: str, self_improvement: bool = False) -> dict[str, Any]:
     worktree, branch, worktree_status = _create_native_worktree(root, task_id)
     config = codex_exec_config("WORK", default_reasoning="high", default_timeout=120)
-    timeout_seconds = _work_loop_timeout()
-    max_iterations = _work_loop_iterations()
-    verify_commands = _work_loop_verify_commands()
+    timeout_seconds = _self_improvement_timeout() if self_improvement else _work_loop_timeout()
+    max_iterations = _work_loop_iterations(self_improvement=self_improvement)
+    verify_commands = _work_loop_verify_commands(self_improvement=self_improvement)
     contract = build_work_harness_contract(
         user_request,
         goal_id=goal_id,
@@ -437,7 +509,7 @@ def _run_native_loop_backend(root: Path, user_request: str, *, goal_id: int | No
         status_lines = _git_status(worktree)
         unsafe_files = _unsafe_changed_files(status_lines)
         verification = [
-            _run_verification_command(worktree, command, timeout=max(30, min(300, timeout_seconds // 2)))
+            _run_verification_command(worktree, command, timeout=_verification_timeout(timeout_seconds, self_improvement=self_improvement))
             for command in verify_commands
         ]
         verification_failed = any(item.get("returncode") not in {0, None} for item in verification)
