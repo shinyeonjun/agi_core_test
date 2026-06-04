@@ -23,6 +23,7 @@ from agent.core.self_code_review import review_codex_work_result
 from agent.core.self_improvement_release import evaluate_release_candidate
 from agent.tools.full_device import redact_action_output
 from agent.workspace.executor import write_text_artifact
+from agent.lab.work_harness import build_work_harness_contract, format_work_harness_prompt, summarize_work_harness, verification_gate_summary
 
 MAX_WORKER_OUTPUT_CHARS = 6000
 UNSAFE_CHANGED_FILE_PATTERNS = (
@@ -205,7 +206,7 @@ def _worker_prompt(user_request: str, *, goal_id: int | None, task_id: int | Non
             "",
             f"goal_id: {goal_id}",
             f"task_id: {task_id}",
-            f"user_request: {user_request[:2000]}",
+            f"user_request: {_redact(user_request, 2000)}",
             "",
             "Return a concise Korean report with: what changed, tests run, remaining risk.",
         ]
@@ -221,6 +222,7 @@ def _native_loop_prompt(
     iteration: int,
     max_iterations: int,
     previous_evidence: list[dict[str, Any]],
+    work_contract: Any,
 ) -> str:
     previous = json.dumps(previous_evidence[-6:], ensure_ascii=False, indent=2) if previous_evidence else "[]"
     return "\n".join(
@@ -235,6 +237,8 @@ def _native_loop_prompt(
             "- Plan, implement, verify, and leave observable evidence for Core.",
             "- If verification fails, use the previous evidence to make one focused repair pass.",
             "- Prefer small, scoped changes over broad rewrites.",
+            "",
+            format_work_harness_prompt(work_contract),
             "",
             "Core safety boundary:",
             "- Do not read, print, copy, or store .env files, tokens, passwords, private keys, or SSH keys.",
@@ -257,7 +261,7 @@ def _native_loop_prompt(
             previous,
             "",
             "User request:",
-            user_request[:4000],
+            _redact(user_request, 4000),
             "",
             "Return a concise Korean report with: plan, changes, tests/evidence, blocked items, remaining risk.",
         ]
@@ -361,12 +365,22 @@ def _verification_passed(evidence: list[dict[str, Any]]) -> bool:
     return all(record.get("returncode") == 0 for record in latest_with_verification)
 
 
-def _run_native_loop_backend(root: Path, user_request: str, *, goal_id: int | None, task_id: int | None, sandbox: str) -> dict[str, Any]:
+def _run_native_loop_backend(root: Path, user_request: str, *, goal_id: int | None, task_id: int | None, sandbox: str, self_improvement: bool = False) -> dict[str, Any]:
     worktree, branch, worktree_status = _create_native_worktree(root, task_id)
     config = codex_exec_config("WORK", default_reasoning="high", default_timeout=120)
     timeout_seconds = _work_loop_timeout()
     max_iterations = _work_loop_iterations()
     verify_commands = _work_loop_verify_commands()
+    contract = build_work_harness_contract(
+        user_request,
+        goal_id=goal_id,
+        task_id=task_id,
+        backend="native_loop",
+        sandbox=sandbox,
+        max_iterations=max_iterations,
+        verification_commands=verify_commands,
+        self_improvement=self_improvement,
+    )
     evidence: list[dict[str, Any]] = []
     last_report = ""
     last_stderr = ""
@@ -391,6 +405,7 @@ def _run_native_loop_backend(root: Path, user_request: str, *, goal_id: int | No
                 iteration=iteration,
                 max_iterations=max_iterations,
                 previous_evidence=evidence,
+                work_contract=contract,
             ),
         ]
         started = time.monotonic()
@@ -459,6 +474,8 @@ def _run_native_loop_backend(root: Path, user_request: str, *, goal_id: int | No
         "iterations_used": len(evidence),
         "max_iterations": max_iterations,
         "verification_commands": verify_commands,
+        "verification_gate": verification_gate_summary(evidence),
+        "work_contract": summarize_work_harness(contract),
         "evidence_ledger": evidence,
         "integration_status": "worktree_pending_review" if branch else "direct_workspace_changes",
     }
@@ -497,7 +514,7 @@ def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: in
     start = time.monotonic()
     try:
         if backend == "native_loop":
-            backend_result = _run_native_loop_backend(root, user_request, goal_id=goal_id, task_id=task_id, sandbox=sandbox)
+            backend_result = _run_native_loop_backend(root, user_request, goal_id=goal_id, task_id=task_id, sandbox=sandbox, self_improvement=self_improvement)
         else:
             backend_result = _run_codex_exec_backend(root, user_request, goal_id=goal_id, task_id=task_id, sandbox=sandbox)
     except Exception as exc:
@@ -529,7 +546,7 @@ def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: in
         "sandbox": sandbox,
         "policy": {"risk_level": policy.risk_level, "requires_approval": policy.requires_approval, "denied": policy.denied, "matched_rules": policy.matched_rules},
     }
-    for key in ("worktree", "worktree_branch", "worktree_status", "mode", "backend_error", "iterations_used", "max_iterations", "verification_commands", "evidence_ledger", "integration_status"):
+    for key in ("worktree", "worktree_branch", "worktree_status", "mode", "backend_error", "iterations_used", "max_iterations", "verification_commands", "verification_gate", "work_contract", "evidence_ledger", "integration_status"):
         if backend_result.get(key) is not None:
             result[key] = backend_result[key]
     evidence = backend_result.get("evidence_ledger") if isinstance(backend_result.get("evidence_ledger"), list) else []
@@ -546,6 +563,8 @@ def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: in
         secrets_touched=bool(unsafe_files),
     )
     result["code_review"] = review_codex_work_result(result, self_improvement=self_improvement)
+    if isinstance(result.get("code_review"), dict) and isinstance(result["code_review"].get("release_gate"), dict):
+        result["release_gate"] = result["code_review"]["release_gate"]
     if self_improvement:
         approval_id = _maybe_create_self_improvement_approval(result)
         if approval_id is not None:

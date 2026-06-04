@@ -217,6 +217,9 @@ def test_native_loop_backend_uses_worktree_and_verification(monkeypatch, tmp_pat
     assert sys.executable in result["verification_commands"][0]
     assert "pytest" in result["verification_commands"][0]
     assert result["integration_status"] == "worktree_pending_review"
+    assert result["work_contract"]["mode"] == "native_work_harness"
+    assert result["work_contract"]["verification_count"] == 1
+    assert result["verification_gate"]["passed"] is True
     assert result["evidence_ledger"][0]["verification"][0]["returncode"] == 0
 
 
@@ -309,3 +312,5 @@ def test_self_improvement_native_loop_creates_apply_approval(monkeypatch, tmp_pa
     assert approvals[0]["proposal"]["action_type"] == "self_improvement_apply"
     assert approvals[0]["proposal"]["payload"]["worktree_branch"] == result["worktree_branch"]
     assert approvals[0]["proposal"]["payload"]["note"] == "승인 전 main에는 반영되지 않는다."
+    assert result["work_contract"]["self_improvement"] is True
+    assert "approve" in result["work_contract"]["phases"]
