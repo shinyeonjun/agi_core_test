@@ -217,9 +217,14 @@ def _finish_message(task: dict[str, Any] | None, task_id: int, status: str, resu
         changed = result.get("changed_files") if isinstance(result.get("changed_files"), list) else []
         if changed:
             lines.append(f"\ubcc0\uacbd: {len(changed)}\uac1c \ud30c\uc77c\uc740 \uaca9\ub9ac \uc791\uc5c5\uacf5\uac04\uc5d0\ub9cc \ub0a8\uc544 \uc788\uc5b4.")
-        worktree = compact_text(result.get("worktree"), "")
-        if worktree:
-            lines.append("\ub2e4\uc74c: \uc2e4\ud328 \ubcf4\uace0\ub97c \ud655\uc778\ud558\uace0 \uc0c8 \ubaa9\ud45c\ub85c \ub2e4\uc2dc \uc2dc\ub3c4\ud574\uc57c \ud574.")
+        recovery = result.get("recovery_plan") if isinstance(result.get("recovery_plan"), dict) else {}
+        next_action = compact_text(recovery.get("next_action"), "")
+        if next_action:
+            lines.append(f"다음: {redact_discord_content(next_action)}")
+        else:
+            worktree = compact_text(result.get("worktree"), "")
+            if worktree:
+                lines.append("다음: 실패 보고서를 확인하고 새 목표로 다시 시도해야 해.")
     elif status == "waiting_approval":
         lines.append("\uc694\uc57d: \uc2e4\ud589 \uc804\uc5d0 \uc2b9\uc778\uc774 \ud544\uc694\ud574.")
     else:
@@ -237,7 +242,7 @@ def notify_task_finished(task_id: int, status: str, result: dict[str, Any] | Non
     content = _finish_message(task, task_id, status, payload)
     update_result = post_webhook("update", content) if webhook_url("update") else {"sent": False, "reason": "missing_update_webhook"}
     summary_result = {"sent": False, "reason": "not_summary_worthy"}
-    report = compact_text(payload.get("report"), "")
+    report = compact_text(payload.get("operator_summary") or payload.get("report"), "")
     if status == "done" and report and webhook_url("summary"):
         summary_content = "\n".join([f"**\uc791\uc5c5 \uacb0\uacfc \uc694\uc57d #{task_id}**", _human_title(task), "", redact_discord_content(report[:1600])])
         summary_result = post_webhook("summary", summary_content)

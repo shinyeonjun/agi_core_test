@@ -5,6 +5,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from agent.core.failure import failure_report
+
 CONTRACT_VERSION = "0.1"
 
 DEFAULT_PHASES = ("scope", "isolate", "implement", "verify", "review", "report")
@@ -146,3 +148,75 @@ def verification_gate_summary(evidence: list[dict[str, Any]]) -> dict[str, Any]:
         "total": len(latest),
         "failed": [str(row.get("command") or "") for row in latest if row.get("returncode") != 0],
     }
+
+
+def build_work_recovery_plan(result: dict[str, Any]) -> dict[str, Any]:
+    status = str(result.get("status") or "")
+    review = result.get("code_review") if isinstance(result.get("code_review"), dict) else {}
+    release_gate = result.get("release_gate") if isinstance(result.get("release_gate"), dict) else review.get("release_gate") if isinstance(review.get("release_gate"), dict) else {}
+    verification_gate = result.get("verification_gate") if isinstance(result.get("verification_gate"), dict) else verification_gate_summary(result.get("evidence_ledger") if isinstance(result.get("evidence_ledger"), list) else [])
+    failure = failure_report(result)
+    approval_id = result.get("approval_id")
+    changed_files = result.get("changed_files") if isinstance(result.get("changed_files"), list) else []
+    unsafe_files = result.get("unsafe_changed_files") if isinstance(result.get("unsafe_changed_files"), list) else []
+
+    if status == "codex_work_completed" and approval_id:
+        phase = "approval"
+        next_action = f"#승인 채널에서 승인 #{approval_id}을 확인한 뒤 main 반영 여부를 결정"
+        retryable = False
+    elif status == "codex_work_completed" and release_gate.get("status") in {"needs_review", "needs_validation"}:
+        phase = "review"
+        next_action = str(review.get("next_action") or release_gate.get("next_action") or "검증/리뷰 증거를 보강")
+        retryable = True
+    elif status == "codex_work_completed":
+        phase = "done"
+        next_action = "작업 보고서와 변경 파일을 확인"
+        retryable = False
+    elif unsafe_files:
+        phase = "blocked"
+        next_action = "민감 파일 변경을 제거하고 허용 범위 안에서 새 작업으로 다시 시도"
+        retryable = False
+    elif not verification_gate.get("passed") and verification_gate.get("total", 0) > 0:
+        phase = "repair"
+        failed = verification_gate.get("failed") or []
+        target = failed[0] if failed else "검증 명령"
+        next_action = f"실패한 검증부터 최소 재현으로 고치기: {target}"
+        retryable = True
+    elif status in {"codex_work_failed", "codex_work_blocked"}:
+        phase = "blocked"
+        next_action = failure.get("recovery_hint") or "실패 보고서를 확인하고 범위를 줄여 재시도"
+        retryable = failure.get("category") in {"verification_failed", "tool_error", "timeout", "environment_issue", "unknown"}
+    else:
+        phase = "review"
+        next_action = "작업 결과와 증거를 확인"
+        retryable = False
+
+    return {
+        "phase": phase,
+        "failure_category": failure.get("category"),
+        "recovery_hint": failure.get("recovery_hint"),
+        "next_action": next_action,
+        "retryable": bool(retryable),
+        "approval_id": approval_id,
+        "changed_file_count": len(changed_files),
+        "unsafe_file_count": len(unsafe_files),
+        "verification": verification_gate,
+        "release_gate_status": release_gate.get("status"),
+        "review_verdict": review.get("verdict"),
+    }
+
+
+def build_work_operator_summary(result: dict[str, Any]) -> str:
+    plan = result.get("recovery_plan") if isinstance(result.get("recovery_plan"), dict) else build_work_recovery_plan(result)
+    status = str(result.get("status") or "")
+    if status == "codex_work_completed" and plan.get("approval_id"):
+        return f"코드는 격리 작업공간에 만들어졌고, main 반영은 승인 #{plan['approval_id']} 대기 중이야."
+    if status == "codex_work_completed":
+        return "코드 작업은 끝났고, 검증/리뷰 결과를 기록했어."
+    if plan.get("phase") == "repair":
+        return f"코드는 만들었지만 검증이 실패했어. 다음은 {plan.get('next_action')}"
+    if status == "codex_work_blocked":
+        return f"안전 게이트에서 멈췄어. 다음은 {plan.get('next_action')}"
+    if status == "codex_work_failed":
+        return f"작업자가 실패했어. 다음은 {plan.get('next_action')}"
+    return str(plan.get("next_action") or "작업 결과 확인 필요")

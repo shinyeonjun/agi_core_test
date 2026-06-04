@@ -1,4 +1,4 @@
-from agent.lab.work_harness import build_work_harness_contract, format_work_harness_prompt, summarize_work_harness, verification_gate_summary
+from agent.lab.work_harness import build_work_harness_contract, build_work_operator_summary, build_work_recovery_plan, format_work_harness_prompt, summarize_work_harness, verification_gate_summary
 
 
 def test_work_harness_contract_carries_scope_and_gates():
@@ -48,3 +48,37 @@ def test_verification_gate_summary_uses_latest_evidence():
     result = verification_gate_summary(evidence)
 
     assert result == {"passed": True, "total": 2, "failed": []}
+
+
+def test_work_recovery_plan_points_to_failed_verification():
+    result = {
+        "status": "codex_work_failed",
+        "returncode": 125,
+        "changed_files": [" M agent/core/example.py"],
+        "unsafe_changed_files": [],
+        "verification_gate": {"passed": False, "total": 1, "failed": ["python -m pytest -q"]},
+    }
+
+    plan = build_work_recovery_plan(result)
+
+    assert plan["phase"] == "repair"
+    assert plan["retryable"] is True
+    assert "pytest" in plan["next_action"]
+
+
+def test_work_operator_summary_mentions_approval_wait():
+    result = {
+        "status": "codex_work_completed",
+        "approval_id": 42,
+        "changed_files": [" M agent/core/example.py"],
+        "unsafe_changed_files": [],
+        "verification_gate": {"passed": True, "total": 3, "failed": []},
+        "release_gate": {"status": "needs_approval"},
+        "code_review": {"verdict": "needs_approval"},
+    }
+    result["recovery_plan"] = build_work_recovery_plan(result)
+
+    summary = build_work_operator_summary(result)
+
+    assert "승인 #42" in summary
+    assert "main 반영" in summary

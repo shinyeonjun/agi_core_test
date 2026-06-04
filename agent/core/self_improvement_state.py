@@ -42,7 +42,8 @@ def classify_self_improvement_phase(task: dict[str, Any]) -> dict[str, Any]:
         next_step = "완료 기록을 확인하면 돼."
     elif status == "blocked":
         phase = "blocked"
-        next_step = str(result.get("reason") or (review.get("next_action") if review else "") or "막힌 이유를 확인해야 해.")
+        recovery = result.get("recovery_plan") if isinstance(result.get("recovery_plan"), dict) else {}
+        next_step = str(recovery.get("next_action") or result.get("reason") or (review.get("next_action") if review else "") or "막힌 이유를 확인해야 해.")
     else:
         phase = "unknown"
         next_step = "상태 확인이 필요해."

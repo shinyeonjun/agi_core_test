@@ -23,7 +23,7 @@ from agent.core.self_code_review import review_codex_work_result
 from agent.core.self_improvement_release import evaluate_release_candidate
 from agent.tools.full_device import redact_action_output
 from agent.workspace.executor import write_text_artifact
-from agent.lab.work_harness import build_work_harness_contract, format_work_harness_prompt, summarize_work_harness, verification_gate_summary
+from agent.lab.work_harness import build_work_harness_contract, build_work_operator_summary, build_work_recovery_plan, format_work_harness_prompt, summarize_work_harness, verification_gate_summary
 
 MAX_WORKER_OUTPUT_CHARS = 6000
 UNSAFE_CHANGED_FILE_PATTERNS = (
@@ -569,6 +569,8 @@ def run_codex_work(user_request: str, *, goal_id: int | None = None, task_id: in
         approval_id = _maybe_create_self_improvement_approval(result)
         if approval_id is not None:
             result["approval_id"] = approval_id
+    result["recovery_plan"] = build_work_recovery_plan(result)
+    result["operator_summary"] = build_work_operator_summary(result)
     artifact = write_text_artifact(
         "reports",
         f"codex-work-{task_id or 'manual'}-{uuid4().hex[:8]}.md",
