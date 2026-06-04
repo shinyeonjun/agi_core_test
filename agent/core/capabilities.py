@@ -83,6 +83,8 @@ def collect_capability_map() -> dict[str, Any]:
             {"name": "cognitive_growth_pipeline", "status": "enabled", "description": "Active-inference growth snapshots can create safe autonomous queue tasks while user tasks keep priority"},
             {"name": "self_improvement_release_gate", "status": "enabled", "description": "Research-backed release plans and quality gates for isolated Core self-improvement work before main integration"},
             {"name": "self_improvement_code_planner", "status": "enabled", "description": "Creates ranked self-improvement code tickets from metrics, dependency checks, failure learning, and memory pressure"},
+            {"name": "researcher_loop", "status": "enabled", "description": "Turns Core observations and research seeds into questions, hypotheses, bounded experiments, evidence, and improvement proposals"},
+            {"name": "self_capability_grounding", "status": "enabled", "description": "Grounds self-description and improvement claims in git change logs, capability evidence, tests, metrics, and known limits"},
             {"name": "self_improvement_state_machine", "status": "enabled", "description": "Tracks self-improvement code work through queued, executing, review, approval, done, and blocked phases"},
             {"name": "event_reactor", "status": "enabled", "description": "Wake signals and agentctl reactor once/run/status move Core toward event-driven, need-driven operation"},
             {"name": "staged_project_worker", "status": "enabled", "description": "Project plans advance through planning, implementation, verification, and reporting instead of completing as an opaque single step"},

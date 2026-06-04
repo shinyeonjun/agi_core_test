@@ -36,6 +36,7 @@ from agent.core.self_improvement_planner import enqueue_self_improvement_tickets
 from agent.core.self_improvement_state import self_improvement_status
 from agent.core.wake_signals import prune_wake_signals
 from agent.core.self_map import latest_self_map, refresh_self_map, self_map_brief
+from agent.core.self_report import build_self_report_context, capture_git_change, list_capability_evidence, list_change_log, refresh_capability_evidence, sync_recent_changes
 from agent.core.state import load_state, save_state
 from agent.core.style import add_style_example, apply_style_feedback, get_active_style_profile, list_style_examples, list_style_feedback, seed_default_style_profile, style_directives
 from agent.core.task_lifecycle import list_task_lifecycle, task_lifecycle_summary
@@ -486,6 +487,28 @@ def cmd_metrics(args: argparse.Namespace) -> int:
         for key, value in metrics.items():
             print(f"{key}: {value}")
     return 0
+
+
+def cmd_self_report(args: argparse.Namespace) -> int:
+    if args.self_report_command == "sync":
+        print_json(sync_recent_changes(limit=args.limit))
+        return 0
+    if args.self_report_command == "changes":
+        print_json({"items": list_change_log(limit=args.limit)})
+        return 0
+    if args.self_report_command == "capabilities":
+        if args.refresh:
+            refresh_capability_evidence()
+        print_json({"items": list_capability_evidence(limit=args.limit)})
+        return 0
+    if args.self_report_command == "context":
+        print_json(build_self_report_context(args.message, limit=args.limit))
+        return 0
+    if args.self_report_command == "capture":
+        verification = {"result": args.result, "tests": args.test or []}
+        print_json(capture_git_change(args.commit, verification=verification, source="agentctl"))
+        return 0
+    raise ValueError(f"unknown self-report command: {args.self_report_command}")
 
 
 def cmd_self_map(args: argparse.Namespace) -> int:
@@ -948,6 +971,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("snapshot"); p.set_defaults(func=cmd_snapshot)
     p = sub.add_parser("backup"); p.add_argument("--label", default="manual"); p.set_defaults(func=cmd_backup)
     p = sub.add_parser("metrics"); p.add_argument("--json", action="store_true"); p.set_defaults(func=cmd_metrics)
+    p = sub.add_parser("self-report"); self_report_sub = p.add_subparsers(dest="self_report_command", required=True)
+    p_self_report_sync = self_report_sub.add_parser("sync"); p_self_report_sync.add_argument("--limit", type=int, default=5); p_self_report_sync.set_defaults(func=cmd_self_report)
+    p_self_report_changes = self_report_sub.add_parser("changes"); p_self_report_changes.add_argument("--limit", type=int, default=5); p_self_report_changes.set_defaults(func=cmd_self_report)
+    p_self_report_caps = self_report_sub.add_parser("capabilities"); p_self_report_caps.add_argument("--limit", type=int, default=20); p_self_report_caps.add_argument("--refresh", action="store_true"); p_self_report_caps.set_defaults(func=cmd_self_report)
+    p_self_report_context = self_report_sub.add_parser("context"); p_self_report_context.add_argument("message"); p_self_report_context.add_argument("--limit", type=int, default=5); p_self_report_context.set_defaults(func=cmd_self_report)
+    p_self_report_capture = self_report_sub.add_parser("capture"); p_self_report_capture.add_argument("--commit", default="HEAD"); p_self_report_capture.add_argument("--result", default="PASS"); p_self_report_capture.add_argument("--test", action="append"); p_self_report_capture.set_defaults(func=cmd_self_report)
     p = sub.add_parser("self-map"); self_map_sub = p.add_subparsers(dest="self_map_command", required=True)
     p_self_map_refresh = self_map_sub.add_parser("refresh"); p_self_map_refresh.add_argument("--full", action="store_true"); p_self_map_refresh.set_defaults(func=cmd_self_map)
     p_self_map_show = self_map_sub.add_parser("show"); p_self_map_show.add_argument("--full", action="store_true"); p_self_map_show.set_defaults(func=cmd_self_map)

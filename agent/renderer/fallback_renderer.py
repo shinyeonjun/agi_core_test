@@ -3,7 +3,35 @@ from __future__ import annotations
 from typing import Any
 
 
+def _grounded_self_report(decision: dict[str, Any]) -> str | None:
+    context = decision.get("self_report_context") if isinstance(decision.get("self_report_context"), dict) else {}
+    if not context:
+        return None
+    focus = str(context.get("focus") or "general")
+    if focus not in {"change", "capability", "status", "failure", "research"}:
+        return None
+    changes = context.get("recent_changes") if isinstance(context.get("recent_changes"), list) else []
+    caps = context.get("top_capabilities") if isinstance(context.get("top_capabilities"), list) else []
+    weak = context.get("weak_points") if isinstance(context.get("weak_points"), list) else []
+    lines = ["상태 기록 기준으로 보면, 지금은 근거를 꽤 붙여서 말할 수 있는 단계야."]
+    if changes:
+        first = changes[0]
+        lines.append(f"최근 큰 변화: {first.get('feature_name') or 'Core 변경'}")
+        if first.get("short_hash"):
+            lines.append(f"근거 커밋: {first.get('short_hash')}")
+    if caps:
+        named = ", ".join(str(item.get("name")) for item in caps[:3] if item.get("name"))
+        lines.append(f"확인된 능력 근거: {named}")
+    if weak:
+        lines.append(f"아직 약한 점: {weak[0]}")
+    lines.append("즉, 감으로 '좋아졌다'가 아니라 변경 이력, capability evidence, 테스트/평가 기록을 보고 답하는 쪽으로 바뀌는 중이야.")
+    return "\n".join(lines)
+
+
 def _chat_fallback(decision: dict[str, Any]) -> str:
+    grounded = _grounded_self_report(decision)
+    if grounded:
+        return grounded
     interpretation = decision.get("language_interpretation") if isinstance(decision.get("language_interpretation"), dict) else {}
     target = str(interpretation.get("target") or "")
     user_input = str(decision.get("user_input") or "")

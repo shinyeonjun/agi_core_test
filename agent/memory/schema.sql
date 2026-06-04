@@ -802,6 +802,42 @@ CREATE INDEX IF NOT EXISTS idx_research_proposals_status ON research_proposals(s
 CREATE INDEX IF NOT EXISTS idx_research_proposals_priority ON research_proposals(priority);
 CREATE INDEX IF NOT EXISTS idx_research_proposals_experiment ON research_proposals(experiment_id);
 
+
+CREATE TABLE IF NOT EXISTS core_change_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    commit_hash TEXT NOT NULL UNIQUE,
+    short_hash TEXT,
+    source TEXT NOT NULL,
+    feature_name TEXT NOT NULL,
+    human_summary TEXT NOT NULL,
+    changed_files_json TEXT NOT NULL,
+    capability_delta_json TEXT,
+    verification_json TEXT,
+    status TEXT NOT NULL DEFAULT 'recorded'
+);
+CREATE INDEX IF NOT EXISTS idx_core_change_log_created ON core_change_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_core_change_log_feature ON core_change_log(feature_name);
+CREATE INDEX IF NOT EXISTS idx_core_change_log_status ON core_change_log(status);
+
+CREATE TABLE IF NOT EXISTS capability_evidence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    capability_key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    evidence_files_json TEXT NOT NULL,
+    verification_tests_json TEXT NOT NULL,
+    confidence REAL DEFAULT 0.5,
+    last_verified_at TEXT,
+    limits_json TEXT,
+    metadata_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_capability_evidence_status ON capability_evidence(status);
+CREATE INDEX IF NOT EXISTS idx_capability_evidence_confidence ON capability_evidence(confidence);
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL,
@@ -814,4 +850,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR REPLACE INTO schema_meta (key, value)
-VALUES ('schema_version', '0.22.0-alpha');
+VALUES ('schema_version', '0.23.0-alpha');

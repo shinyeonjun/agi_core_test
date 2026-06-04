@@ -24,6 +24,7 @@ LEARNING_TESTS = [
     "tests/test_cognitive_graph.py",
     "tests/test_advanced_learning.py",
     "tests/test_research_loop.py",
+    "tests/test_self_report.py",
 ]
 
 CHAT_TESTS = [

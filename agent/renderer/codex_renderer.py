@@ -21,7 +21,7 @@ _ALLOWED_DECISION_KEYS = {
     "drive_scores", "policy_summary", "core_judgment", "confidence", "decision_confidence",
     "risk_level", "metrics", "runtime_self_map", "decision_trace", "must_include", "must_not_include", "renderer_hint", "renderer",
     "language_interpretation", "style_profile", "style_directives", "style_feedback",
-    "user_directed_goal", "user_goal_created", "capability_map",
+    "user_directed_goal", "user_goal_created", "capability_map", "self_report_context",
 }
 _ALLOWED_MEMORY_KEYS = {"id", "title", "memory_type", "importance", "confidence", "score", "tags_json"}
 _ALLOWED_SKILL_KEYS = {"id", "name", "trigger", "confidence", "score", "tags_json"}

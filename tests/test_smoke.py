@@ -7,7 +7,7 @@ from agent.scheduler.tick import run_tick
 
 def test_state_and_memory_smoke():
     init_db()
-    assert get_schema_version() == "0.22.0-alpha"
+    assert get_schema_version() == "0.23.0-alpha"
     state = load_state()
     assert state["version"] == "0.17"
     memory_id = add_memory("test memory", "Core smoke test memory", tags=["test", "core"])
@@ -26,6 +26,7 @@ def test_talk_pipeline_creates_v017_output(monkeypatch):
     assert result["validation"]["ok"] is True
     assert result["decision"]["decision_schema"]["kind"] == "talk_response"
     assert result["decision"]["pipeline_trace"]["missing"] == []
+    assert "self_report_context" in result["decision"]
 
 
 def test_tick_creates_reflection():

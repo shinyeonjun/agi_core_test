@@ -586,6 +586,50 @@ def _migration_0015_researcher_loop(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _migration_0016_self_capability_grounding(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS core_change_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            commit_hash TEXT NOT NULL UNIQUE,
+            short_hash TEXT,
+            source TEXT NOT NULL,
+            feature_name TEXT NOT NULL,
+            human_summary TEXT NOT NULL,
+            changed_files_json TEXT NOT NULL,
+            capability_delta_json TEXT,
+            verification_json TEXT,
+            status TEXT NOT NULL DEFAULT 'recorded'
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_core_change_log_created ON core_change_log(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_core_change_log_feature ON core_change_log(feature_name)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_core_change_log_status ON core_change_log(status)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS capability_evidence (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            capability_key TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            evidence_files_json TEXT NOT NULL,
+            verification_tests_json TEXT NOT NULL,
+            confidence REAL DEFAULT 0.5,
+            last_verified_at TEXT,
+            limits_json TEXT,
+            metadata_json TEXT
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_capability_evidence_status ON capability_evidence(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_capability_evidence_confidence ON capability_evidence(confidence)")
+    conn.execute("""
+        INSERT INTO schema_meta (key, value) VALUES ('schema_version', '0.23.0-alpha')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    """)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("0001_existing_db_repairs", "Backfill approval task links and memory FTS schema", _migration_0001_existing_db_repairs),
     Migration("0002_task_queue_locks", "Add task queue lease, idempotency, and scheduling fields", _migration_0002_task_queue_locks),
@@ -602,6 +646,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0013_cognitive_graph_layer", "Add cognitive graph nodes, edges, activations, and traces", _migration_0013_cognitive_graph_layer),
     Migration("0014_advanced_learning_loops", "Add memory rollups, graph summaries, failure cases, and circuit breakers", _migration_0014_advanced_learning_loops),
     Migration("0015_researcher_loop", "Add research questions, hypotheses, experiments, evidence, and proposals", _migration_0015_researcher_loop),
+    Migration("0016_self_capability_grounding", "Add change log and capability evidence for grounded self reports", _migration_0016_self_capability_grounding),
 )
 
 

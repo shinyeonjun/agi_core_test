@@ -15,6 +15,7 @@ from agent.core.policy import PolicyEngine
 from agent.core.decision_schema import build_decision_schema
 from agent.core.routing import memory_route, skill_route, tool_routes
 from agent.core.self_map import self_map_brief
+from agent.core.self_report import build_self_report_context
 from agent.core.style import apply_style_feedback, get_active_style_profile, style_directives
 from agent.core.user_goals import maybe_create_user_goal
 from agent.language.engine import interpret_user_message
@@ -33,6 +34,7 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
     metrics = collect_metrics()
     runtime_self_map = self_map_brief()
     capability_map = collect_capability_map()
+    self_report_context = build_self_report_context(user_message, capability_map=capability_map, metrics=metrics)
     policy = PolicyEngine().classify_decision(user_message, action_type="user_message")
     skills = retrieve_skills(user_message, tags=["talk", "core"], limit=3)
     routing = {
@@ -65,6 +67,7 @@ def build_talk_decision(user_message: str, source_event_id: int | None = None) -
         "metrics": metrics,
         "runtime_self_map": runtime_self_map,
         "capability_map": capability_map,
+        "self_report_context": self_report_context,
         "routing": routing,
         "policy_summary": {"risk_level": policy.risk_level, "requires_approval": policy.requires_approval, "denied": policy.denied, "reason": policy.reason, "matched_rules": policy.matched_rules},
         "core_judgment": "Core stored the input as an event and used memory, skill, goal, and state to build a verifiable response.",

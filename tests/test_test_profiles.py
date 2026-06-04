@@ -84,3 +84,10 @@ def test_agentctl_test_plan_cli(capsys):
     assert code == 0
     assert data["name"] == "fast"
     assert data["steps"][0]["type"] == "pytest"
+
+
+def test_learning_profile_includes_self_report_grounding():
+    from agent.core.test_profiles import plan_test_profile
+
+    commands = "\n".join(step["command"] for step in plan_test_profile("learning")["steps"])
+    assert "tests/test_self_report.py" in commands
