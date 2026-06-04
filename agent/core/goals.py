@@ -9,6 +9,7 @@ from agent.config.defaults import KST, now_kst
 from agent.core.database import connect, init_db
 
 OPEN_STATUSES = ("proposed", "active", "waiting_approval", "blocked")
+DEDUPABLE_STATUSES = ("proposed", "active", "waiting_approval")
 NOISE_GOAL_TYPES = {"answer_user", "test", "debug", "debug_smoke", "smoke"}
 NOISE_TITLE_TOKENS = ("answer user input", "secret goal summary marker", "apply user negative feedback")
 
@@ -19,10 +20,11 @@ def similar(a: str, b: str) -> float:
 
 def find_duplicate_goal(title: str, goal_type: str, threshold: float = 0.85) -> dict[str, Any] | None:
     init_db()
+    placeholders = ",".join("?" for _ in DEDUPABLE_STATUSES)
     with connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM goals WHERE goal_type = ? AND status IN ('proposed', 'active', 'waiting_approval', 'blocked')",
-            (goal_type,),
+            f"SELECT * FROM goals WHERE goal_type = ? AND status IN ({placeholders})",
+            (goal_type, *DEDUPABLE_STATUSES),
         ).fetchall()
     for row in rows:
         item = dict(row)

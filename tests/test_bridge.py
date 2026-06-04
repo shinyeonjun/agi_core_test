@@ -130,7 +130,8 @@ def test_route_chat_hides_fallback_renderer():
     output = "\n".join(route_discord_event(event, config()))
     assert "fallback renderer" not in output
     assert "goal:" not in output
-    assert "Core가 지금 입력은 기록해뒀어" in output
+    assert "들었어" in output
+    assert "Core가 지금 입력" not in output
     assert "잠깐만" not in output
     assert "천천히" not in output
 
@@ -164,4 +165,4 @@ def test_format_chat_reply_rejects_internal_renderer_text():
 
     assert "selected_goal_id" not in output
     assert "user_goal_created" not in output
-    assert "Core가 지금 입력은 기록해뒀어" in output
+    assert "답변 생성이 잠깐 매끄럽지 않았어" in output

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -117,12 +118,36 @@ def _short_text(value: object, default: str = "없음", limit: int = 90) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
+def _clean_memory_surface(text: str) -> str:
+    cleaned_lines: list[str] = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lowered = line.lower()
+        if lowered.startswith("source_memory_ids:"):
+            continue
+        if lowered.startswith("compacted ") and "related memories" in lowered:
+            continue
+        if line.startswith("핵심 요약:"):
+            line = line.split(":", 1)[1].strip()
+        line = re.sub(r"\s*nonce=[0-9a-fA-F]+", "", line).strip()
+        if line:
+            cleaned_lines.append(line)
+    text = " ".join(cleaned_lines).strip()
+    lowered = text.lower()
+    if lowered.startswith("core remembers digital agi") or lowered.startswith("core remembers 디지털"):
+        return "디지털 AGI 프로젝트 맥락을 기억하고 있어."
+    return text
+
+
 def _memory_text(row: dict[str, Any]) -> str:
     title = compact_text(row.get("title"), "")
     content = compact_text(row.get("content"), "")
     lowered = title.lower()
     generic_title = lowered.startswith("summary:") or "digital agi korean memory" in lowered or lowered in {"test memory", "audit memory"}
-    return _short_text(content if generic_title and content else title or content, "기억 내용 없음", 110)
+    candidate = content if generic_title and content else title or content
+    return _short_text(_clean_memory_surface(candidate), "기억 내용 없음", 110)
 
 
 def _state_summary() -> str:
@@ -262,7 +287,11 @@ def handle_command(text: str, *, role: ChannelRole = "chat") -> str | None:
         return f"승인 완료: #{arg.strip()}\n연결된 작업이 있으면 다시 진행시킬게." if ok else "승인할 항목이 없거나 이미 처리됐어."
     if command == "!reject" and arg.strip().isdigit():
         ok = ApprovalStore().reject(int(arg.strip()))
-        return f"거절 완료: #{arg.strip()}\n연결된 작업이 있으면 차단 상태로 정리했어." if ok else "거절할 항목이 없거나 이미 처리됐어."
+        if ok:
+            return f"거절 완료: #{arg.strip()}\n연결된 작업이 있으면 차단 상태로 정리했어."
+        if role != "approval":
+            return _cancel_summary(f"!cancel {arg.strip()}")
+        return "거절할 항목이 없거나 이미 처리됐어."
     return "알 수 없는 명령이야. 사용 가능: `!state`, `!work`, `!goals`, `!tick`, `!memories`, `!approvals`, `!cancel <id>`, `!approve <id>`, `!reject <id>`."
 
 
@@ -301,15 +330,15 @@ def route_discord_event(event: DiscordEvent, config: DiscordAuthConfig) -> list[
     if role == "approval" and not text.startswith("!"):
         log_event("discord", "discord_approval_chat_blocked", text, {"message_id": event.message_id}, 0.55)
         return ["여기는 승인 전용 채널이야. `!approvals`, `!approve <id>`, `!reject <id>`만 사용할 수 있어."]
+    command_output = handle_command(text, role=role)
+    if command_output is not None:
+        log_event("discord", "discord_command_output", command_output, {"message_id": event.message_id, "channel_role": role}, 0.6)
+        return split_for_discord(command_output, config.max_response_chars)
     ready, wait = is_ready(f"discord_answer:{event.user_id}", config.user_cooldown_seconds)
     if not ready:
         log_event("discord", "discord_chat_cooldown_suppressed", "", {"message_id": event.message_id, "channel_role": role, "wait_seconds": wait}, 0.35)
         return []
     mark(f"discord_answer:{event.user_id}", config.user_cooldown_seconds, {"channel_id": event.channel_id, "channel_role": role})
-    command_output = handle_command(text, role=role)
-    if command_output is not None:
-        log_event("discord", "discord_command_output", command_output, {"message_id": event.message_id, "channel_role": role}, 0.6)
-        return split_for_discord(command_output, config.max_response_chars)
     if role == "approval":
         return ["승인 채널에서는 일반 대화를 처리하지 않아. `!approvals`로 대기 목록을 확인해줘."]
     result = run_talk(text, source="discord", source_event_id=core_event_id, metadata={"message_id": event.message_id, "channel_role": role})

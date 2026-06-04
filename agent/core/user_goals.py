@@ -198,7 +198,25 @@ def maybe_create_user_goal(text: str, *, source_event_id: int | None = None, met
 
     if (interpretation or {}).get("intent") == "self_improvement_request":
         result = enqueue_user_self_improvement_request(text, source_event_id=source_event_id, limit=1)
-        item = (result.get("created") or [{}])[0]
+        created = result.get("created") or []
+        if not created:
+            return {
+                "id": None,
+                "task_id": None,
+                "status": "blocked",
+                "goal_type": "self_improvement_proposal",
+                "title": "Core self-improvement",
+                "task_kind": "code_change",
+                "risk_level": "medium",
+                "requires_approval": False,
+                "approval_id": None,
+                "project_plan_id": None,
+                "denied": False,
+                "reason": "self_improvement_not_created",
+                "self_improvement": True,
+                "ticket": {},
+            }
+        item = created[0]
         ticket = item.get("ticket") or {}
         return {
             "id": item.get("goal_id"),

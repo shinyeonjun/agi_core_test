@@ -60,7 +60,7 @@ def test_chat_channel_routes_to_core(monkeypatch, tmp_path):
     event = DiscordEvent(None, "10", "1", "m1", False, False, "\uc9c0\uae08 \uc0c1\ud0dc \uc54c\ub824\uc918")
     chunks = route_discord_event(event, control_config())
     assert chunks
-    assert "지금 입력은 기록해뒀어" in chunks[0]
+    assert "상태 확인은 가능해" in chunks[0]
     assert "지어내진" not in chunks[0]
     assert "잠깐만" not in chunks[0]
     assert "fallback renderer" not in chunks[0]
@@ -210,6 +210,25 @@ def test_memory_command_hides_internal_scores(monkeypatch, tmp_path):
     assert "project_context" not in output
 
 
+def test_memory_command_hides_compaction_internals(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    add_memory(
+        "summary: digital agi korean memory",
+        "Compacted 52 related memories.\nsource_memory_ids: [241, 237, 233]\n\n핵심 요약:\ncore remembers 디지털 agi context.",
+        "summary",
+        tags=["memory_summary", "compacted", "core"],
+    )
+    event = DiscordEvent(None, "10", "1", "m-memory-compacted", False, False, "!memories core")
+
+    output = "\n".join(route_discord_event(event, control_config()))
+
+    assert "기억 요약" in output
+    assert "디지털 AGI 프로젝트 맥락" in output
+    assert "Compacted" not in output
+    assert "source_memory_ids" not in output
+    assert "[241" not in output
+
+
 def test_goals_command_hides_internal_priority(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     goal_id = create_goal("Core UX 개선", "명령 출력 정리", priority=1.0, dedupe=False)
@@ -221,6 +240,37 @@ def test_goals_command_hides_internal_priority(monkeypatch, tmp_path):
     assert f"#{goal_id}" in output
     assert "\uc9c4\ud589 \uc911" in output
     assert "priority=" not in output
+
+
+def test_reject_command_in_chat_can_remove_goal(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    goal_id = create_goal("사용자 요청 자가개선: 대화 렌더러 복구 품질 개선", "blocked", goal_type="self_improvement_proposal", status="blocked", priority=0.9, dedupe=False)
+    event = DiscordEvent(None, "10", "1", "m-reject-goal", False, False, f"!reject {goal_id}")
+
+    output = "\n".join(route_discord_event(event, control_config()))
+    goals = list_goals(limit=10, include_archived=True)
+    goal = next(row for row in goals if int(row["id"]) == goal_id)
+
+    assert "목록에서 뺐어" in output
+    assert goal["status"] == "archived"
+
+
+def test_commands_bypass_chat_cooldown(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    config = DiscordAuthConfig(
+        allowed_user_ids={"1"},
+        allowed_channel_ids={"10", "20"},
+        chat_channel_id="10",
+        approval_channel_id="20",
+        user_cooldown_seconds=60,
+    )
+    first = DiscordEvent(None, "10", "1", "m-cooldown-chat", False, False, "ㅎㅇ")
+    command = DiscordEvent(None, "10", "1", "m-cooldown-command", False, False, "!state")
+
+    route_discord_event(first, config)
+    output = "\n".join(route_discord_event(command, config))
+
+    assert "Core 상태" in output
 
 
 def test_task_phase_notification_missing_webhook_is_safe(monkeypatch, tmp_path):
@@ -348,7 +398,8 @@ def test_chat_channel_hides_internal_debug_output(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     event = DiscordEvent(None, "10", "1", "m5", False, False, "\u314e\u3147")
     output = "\n".join(route_discord_event(event, control_config()))
-    assert "지금 입력은 기록해뒀어" in output
+    assert "들었어" in output
+    assert "Core가 지금 입력" not in output
     assert "fallback renderer" not in output
     assert "related_memories" not in output
     assert "selected_goal" not in output
@@ -359,7 +410,7 @@ def test_chat_status_does_not_fall_back_to_template_and_command_state_keeps_deta
     setup_isolated(monkeypatch, tmp_path)
     event = DiscordEvent(None, "10", "1", "m6", False, False, "\uc9c0\uae08 \uc0c1\ud0dc \uc54c\ub824\uc918")
     output = "\n".join(route_discord_event(event, control_config()))
-    assert "지금 입력은 기록해뒀어" in output
+    assert "상태 확인은 가능해" in output
     assert "지어내진" not in output
     assert "잠깐만" not in output
     assert "Relevant skills" not in output
@@ -396,7 +447,7 @@ def test_chat_architecture_question_does_not_use_canned_formatter_template(monke
     monkeypatch.setenv("AGENT_LANGUAGE_ENGINE", "rule")
     event = DiscordEvent(None, "10", "1", "m-arch", False, False, "그 너 코어 어떻게 이루어져있어?")
     output = "\n".join(route_discord_event(event, control_config()))
-    assert "지금 입력은 기록해뒀어" in output
+    assert "나뉘어 돌아가는 구조" in output
     assert "Core는 LanguageEngine, PolicyEngine" not in output
     assert "더 구체적" not in output
 
@@ -406,8 +457,20 @@ def test_chat_capability_question_is_not_style_feedback(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_LANGUAGE_ENGINE", "rule")
     event = DiscordEvent(None, "10", "1", "m-cap", False, False, "너가할 수 있는거 냉정하게 뭐뭐 할 수 있는지 궁금해")
     output = "\n".join(route_discord_event(event, control_config()))
-    assert "지금 입력은 기록해뒀어" in output
+    assert "가능한 건" in output
     assert "말투 피드백" not in output
+
+
+def test_chat_autonomous_life_question_gets_direct_fallback(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    monkeypatch.setenv("AGENT_CHAT_RENDERER", "fallback")
+    event = DiscordEvent(None, "10", "1", "m-autonomous-life", False, False, "그럼 자율 생명체 ㄷㄷ 이정도 까지는 기술적으로 안돼?")
+
+    output = "\n".join(route_discord_event(event, control_config()))
+
+    assert "자율 에이전트처럼 운용" in output
+    assert "Core가 지금 입력" not in output
+    assert "현재 기준 목표" not in output
 
 
 def test_dangerous_chat_task_is_blocked_goal(monkeypatch, tmp_path):

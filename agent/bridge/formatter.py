@@ -277,6 +277,7 @@ def _core_chat_text(core_result: dict[str, Any]) -> str | None:
         "must_not_include",
         "요청은 core 작업 흐름",
         "core 답변 렌더러",
+        "core가 지금 입력은 기록",
     )
     if any(marker in lowered for marker in internal_markers):
         return None
@@ -343,6 +344,14 @@ def _format_user_goal(user_goal: dict[str, Any]) -> str:
         return f"정리했어. 작업 {tasks}개를 멈추고, 목표 {goals}개를 목록에서 뺐어."
     if user_goal.get("self_improvement"):
         ticket = user_goal.get("ticket") if isinstance(user_goal.get("ticket"), dict) else {}
+        if user_goal.get("status") == "blocked" or not user_goal.get("task_id"):
+            return "\n".join(
+                [
+                    "자가개선 작업은 새로 접수하지 못했어.",
+                    f"이유: {compact_text(user_goal.get('reason'), '생성 결과 없음')}",
+                    "다음: 막힌 목표를 정리한 뒤 다시 시도해야 해.",
+                ]
+            )
         return "\n".join(
             [
                 f"자가개선 작업 #{compact_text(user_goal.get('task_id'))} 접수했어.",
@@ -379,7 +388,18 @@ def _format_user_goal(user_goal: dict[str, Any]) -> str:
 
 
 def _renderer_unavailable_reply(decision: dict[str, Any]) -> str:
-    return "Core가 지금 입력은 기록해뒀어. 필요한 작업이면 이어서 처리할게."
+    interpretation = decision.get("language_interpretation") if isinstance(decision.get("language_interpretation"), dict) else {}
+    target = str(interpretation.get("target") or "")
+    user_input = compact_text(decision.get("user_input"), "")
+    if "자율" in user_input and "생명체" in user_input:
+        return "완전한 생명체나 의식은 아니야. 다만 목표, 기억, 실행, 검증, 실패 학습 루프를 강화해서 자율 에이전트처럼 운용하는 건 가능해."
+    if target == "capabilities":
+        return "가능한 건 대화, 기억 검색, 목표/작업 관리, 안전한 로컬 점검, 코드 작업 위임이야. 위험한 시스템 변경은 승인 없이는 못 해."
+    if target == "architecture":
+        return "Core는 대화 해석, 기억, 목표/작업 큐, 정책 게이트, 장비 관찰, Codex 작업 워커가 나뉘어 돌아가는 구조야."
+    if target == "status":
+        return "상태 확인은 가능해. 현재 작업은 `!work`, 열린 목표는 `!goals`, 장비 상태는 `!state`로 보면 돼."
+    return "답변 생성이 잠깐 매끄럽지 않았어. 그래도 입력은 받았고, 작업 지시면 `!work`에서 진행 여부를 확인하면 돼."
 
 
 def _is_noise_title(value: object) -> bool:

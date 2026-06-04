@@ -69,8 +69,12 @@ def _existing_idempotent_task(idempotency_key: str | None) -> dict[str, Any] | N
     if not idempotency_key:
         return None
     init_db()
+    placeholders = ",".join("?" for _ in OPEN_TASK_STATUSES)
     with connect() as conn:
-        row = conn.execute("SELECT * FROM task_queue WHERE idempotency_key = ? ORDER BY id DESC LIMIT 1", (idempotency_key,)).fetchone()
+        row = conn.execute(
+            f"SELECT * FROM task_queue WHERE idempotency_key = ? AND status IN ({placeholders}) ORDER BY id DESC LIMIT 1",
+            (idempotency_key, *OPEN_TASK_STATUSES),
+        ).fetchone()
     return _decode(dict(row)) if row else None
 
 
