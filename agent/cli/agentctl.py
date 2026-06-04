@@ -42,7 +42,8 @@ from agent.core.control_snapshot import control_snapshot
 from agent.core.test_profiles import PROFILE_NAMES, compact_test_result_lines, list_test_profiles, plan_test_profile, run_test_profile
 from agent.eval.harness import list_eval_runs, list_tasks as list_eval_tasks, run_suite
 from agent.language.engine import get_language_engine, interpret_user_message, language_cache_stats, list_interpretation_logs
-from agent.memory.store import add_memory, list_memories, rebuild_memory_fts, search_memories
+from agent.memory.retrieval import adaptive_chunks
+from agent.memory.store import add_memory, build_memory_context, list_memories, rebuild_memory_fts, search_memories
 from agent.memory.sparse_vector import backfill_memory_vectors, search_memory_vectors, vector_status
 from agent.ops.backup import create_backup
 from agent.scheduler.tick import run_tick
@@ -179,8 +180,22 @@ def cmd_memory_add(args: argparse.Namespace) -> int:
     return 0
 
 
+def _joined_arg(value: object) -> str:
+    return " ".join(str(item) for item in value) if isinstance(value, list) else str(value or "")
+
+
 def cmd_memory_search(args: argparse.Namespace) -> int:
-    print_json(search_memories(args.query, args.limit))
+    print_json(search_memories(_joined_arg(args.query), args.limit))
+    return 0
+
+
+def cmd_memory_context(args: argparse.Namespace) -> int:
+    print_json(build_memory_context(_joined_arg(args.query), limit=args.limit, max_chars=args.max_chars, per_item_chars=args.per_item_chars))
+    return 0
+
+
+def cmd_memory_chunks(args: argparse.Namespace) -> int:
+    print_json({"chunks": adaptive_chunks(_joined_arg(args.text), target_chars=args.target_chars, max_chars=args.max_chars, min_chars=args.min_chars)})
     return 0
 
 
@@ -831,7 +846,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("memories"); p.add_argument("--limit", type=int, default=20); p.set_defaults(func=cmd_memories)
     p = sub.add_parser("memory"); memory_sub = p.add_subparsers(dest="memory_command", required=True)
     p_add = memory_sub.add_parser("add"); p_add.add_argument("title"); p_add.add_argument("content"); p_add.add_argument("--type", default="fact"); p_add.add_argument("--tags", nargs="*"); p_add.add_argument("--importance", type=float, default=0.5); p_add.add_argument("--confidence", type=float, default=0.7); p_add.set_defaults(func=cmd_memory_add)
-    p_search = memory_sub.add_parser("search"); p_search.add_argument("query"); p_search.add_argument("--limit", type=int, default=10); p_search.set_defaults(func=cmd_memory_search)
+    p_search = memory_sub.add_parser("search"); p_search.add_argument("query", nargs="+"); p_search.add_argument("--limit", type=int, default=10); p_search.set_defaults(func=cmd_memory_search)
+    p_context = memory_sub.add_parser("context"); p_context.add_argument("query", nargs="+"); p_context.add_argument("--limit", type=int, default=8); p_context.add_argument("--max-chars", type=int, default=3200); p_context.add_argument("--per-item-chars", type=int, default=700); p_context.set_defaults(func=cmd_memory_context)
+    p_chunks = memory_sub.add_parser("chunks"); p_chunks.add_argument("text", nargs="+"); p_chunks.add_argument("--target-chars", type=int, default=900); p_chunks.add_argument("--max-chars", type=int, default=1400); p_chunks.add_argument("--min-chars", type=int, default=160); p_chunks.set_defaults(func=cmd_memory_chunks)
     p_fts = memory_sub.add_parser("rebuild-fts"); p_fts.set_defaults(func=cmd_memory_rebuild_fts)
     p_memory_compact = memory_sub.add_parser("compact"); p_memory_compact.add_argument("--limit", type=int, default=5); p_memory_compact.add_argument("--min-size", type=int, default=3); p_memory_compact.add_argument("--dry-run", action="store_true"); p_memory_compact.set_defaults(func=cmd_memory_compact)
     p = sub.add_parser("vector"); vector_sub = p.add_subparsers(dest="vector_command", required=True)

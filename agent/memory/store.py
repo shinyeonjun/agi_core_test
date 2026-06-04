@@ -8,6 +8,7 @@ from typing import Any
 
 from agent.config.defaults import KST, now_kst
 from agent.core.database import connect, init_db
+from agent.memory.retrieval import build_context_pack, mmr_rerank, reciprocal_rank_fusion
 from agent.memory.sparse_vector import search_memory_vectors, upsert_memory_vector
 
 
@@ -162,14 +163,20 @@ def _search_like(query: str, terms: list[str], limit: int) -> list[dict[str, Any
 
 
 def _merge_candidates(*candidate_groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rrf_scores = reciprocal_rank_fusion(candidate_groups, id_key="id", k=60, weights=[1.1, 0.8, 1.0])
     merged: dict[int, dict[str, Any]] = {}
-    for group in candidate_groups:
-        for row in group:
+    sources = ["fts", "like", "sparse"]
+    for source_index, group in enumerate(candidate_groups):
+        source = sources[source_index] if source_index < len(sources) else f"source_{source_index}"
+        for rank, row in enumerate(group, start=1):
             memory_id = int(row["id"])
             existing = merged.get(memory_id)
             if not existing:
-                merged[memory_id] = dict(row)
-                continue
+                existing = dict(row)
+                existing["retrieval_sources"] = []
+                merged[memory_id] = existing
+            existing["retrieval_sources"].append({"source": source, "rank": rank})
+            existing["rrf_score"] = round(rrf_scores.get(memory_id, 0.0), 6)
             existing["sparse_similarity"] = max(float(existing.get("sparse_similarity") or 0.0), float(row.get("sparse_similarity") or 0.0))
             if row.get("bm25_score") is not None:
                 existing["bm25_score"] = row.get("bm25_score")
@@ -188,8 +195,12 @@ def search_memories(query: str, limit: int = 10) -> list[dict[str, Any]]:
     vector_rows = search_memory_vectors(query, limit=candidate_limit)
     rows = _merge_candidates(fts_rows, like_rows, vector_rows)
     for row in rows:
-        _score_memory(row, query, terms, row.get("bm25_score"), row.get("sparse_similarity"))
-    rows = sorted(rows, key=lambda row: row.get("score", 0.0), reverse=True)[:limit]
+        base_score = _score_memory(row, query, terms, row.get("bm25_score"), row.get("sparse_similarity"))
+        rrf_bonus = min(0.18, float(row.get("rrf_score") or 0.0) * 3.0)
+        row["score"] = round(base_score + rrf_bonus, 4)
+        row.setdefault("score_components", {})["rrf"] = round(rrf_bonus, 4)
+    rows = sorted(rows, key=lambda row: row.get("score", 0.0), reverse=True)
+    rows = mmr_rerank(rows, query=query, limit=limit, diversity=0.28)
     ids = [row["id"] for row in rows]
     if ids:
         with connect() as conn:
@@ -199,6 +210,12 @@ def search_memories(query: str, limit: int = 10) -> list[dict[str, Any]]:
             )
             conn.commit()
     return rows
+
+
+def build_memory_context(query: str, *, limit: int = 8, max_chars: int = 3200, per_item_chars: int = 700) -> dict[str, Any]:
+    candidate_limit = max(limit * 3, limit)
+    candidates = search_memories(query, limit=candidate_limit)
+    return build_context_pack(query, candidates, max_chars=max_chars, per_item_chars=per_item_chars, limit=limit)
 
 
 def list_memories(limit: int = 20) -> list[dict[str, Any]]:
