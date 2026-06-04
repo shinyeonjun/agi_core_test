@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
@@ -69,11 +70,10 @@ def _existing_idempotent_task(idempotency_key: str | None) -> dict[str, Any] | N
     if not idempotency_key:
         return None
     init_db()
-    placeholders = ",".join("?" for _ in OPEN_TASK_STATUSES)
     with connect() as conn:
         row = conn.execute(
-            f"SELECT * FROM task_queue WHERE idempotency_key = ? AND status IN ({placeholders}) ORDER BY id DESC LIMIT 1",
-            (idempotency_key, *OPEN_TASK_STATUSES),
+            "SELECT * FROM task_queue WHERE idempotency_key = ? ORDER BY id DESC LIMIT 1",
+            (idempotency_key,),
         ).fetchone()
     return _decode(dict(row)) if row else None
 
@@ -108,23 +108,29 @@ def enqueue_task(
         return int(existing_idempotent["id"])
     init_db()
     ts = now_kst()
-    with connect() as conn:
-        cur = conn.execute(
-            """
-            INSERT INTO task_queue (
-                created_at, updated_at, queue_type, status, priority, goal_id, approval_id,
-                task_kind, title, source, payload_json, max_attempts, idempotency_key, not_before, due_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                ts, ts, queue_type, status, max(0.0, min(1.0, float(priority))),
-                goal_id, approval_id, task_kind, title[:160], source,
-                json.dumps(payload or {}, ensure_ascii=False),
-                max(1, int(max_attempts)), idempotency_key, not_before, due_at,
-            ),
-        )
-        conn.commit()
-        task_id = int(cur.lastrowid)
+    try:
+        with connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO task_queue (
+                    created_at, updated_at, queue_type, status, priority, goal_id, approval_id,
+                    task_kind, title, source, payload_json, max_attempts, idempotency_key, not_before, due_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ts, ts, queue_type, status, max(0.0, min(1.0, float(priority))),
+                    goal_id, approval_id, task_kind, title[:160], source,
+                    json.dumps(payload or {}, ensure_ascii=False),
+                    max(1, int(max_attempts)), idempotency_key, not_before, due_at,
+                ),
+            )
+            conn.commit()
+            task_id = int(cur.lastrowid)
+    except sqlite3.IntegrityError:
+        existing_after_conflict = _existing_idempotent_task(idempotency_key)
+        if existing_after_conflict:
+            return int(existing_after_conflict["id"])
+        raise
     log_event("task_queue", "task_enqueued", f"{queue_type}:{task_kind}", {"task_id": task_id, "goal_id": goal_id, "status": status}, 0.7 if queue_type == "user" else 0.55)
     if status == "queued":
         emit_wake_signal(

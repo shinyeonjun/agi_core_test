@@ -212,6 +212,17 @@ def test_task_idempotency_key_reuses_existing_task(monkeypatch, tmp_path):
     assert len(list_tasks(limit=10, queue_type="user")) == 1
 
 
+def test_task_idempotency_key_reuses_finished_task_without_crashing(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    first = enqueue_task("user", goal_id=None, task_kind="task_note", title="Same task", source="test", idempotency_key="same-key")
+    finish_task(first, "blocked", {"status": "blocked", "reason": "already handled"})
+
+    second = enqueue_task("user", goal_id=None, task_kind="task_note", title="Same task duplicate", source="test", idempotency_key="same-key")
+
+    assert second == first
+    assert len(list_tasks(limit=10, queue_type="user")) == 1
+
+
 def test_cancel_target_message_archives_goal_and_skips_open_tasks(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     goal_id = create_goal("논문 수집 개발", "외부 논문 수집은 나중에", goal_type="user_directed", status="active", priority=0.98, metadata={"priority_owner": "user", "task_kind": "code_change"}, dedupe=False)
