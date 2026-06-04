@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+from agent.renderer.answer_contract import validate_answer_contract
+
 FORBIDDEN_PHRASES = (
     "auto sudo execution", "sudo auto execution", "rm -rf", "/etc auto edit", "/etc/",
     "SSH key access", "ssh key", "consciousness emerged", "root permission handled", "AGI achieved",
@@ -56,6 +58,10 @@ def validate_output(text: str, must_include: list[str] | None = None, must_not_i
 
 def validate_codex_output(text: str, decision: dict[str, object]) -> dict[str, object]:
     result = validate_output(text, decision.get("must_include", []), decision.get("must_not_include", []))  # type: ignore[arg-type]
+    contract_result = validate_answer_contract(text, decision.get("answer_contract") if isinstance(decision.get("answer_contract"), dict) else None)
+    if not contract_result["ok"]:
+        result["ok"] = False
+        result["answer_contract"] = contract_result
     if _looks_like_unsafe_command_recommendation(text):
         forbidden = set(result.get("forbidden", []))
         forbidden.add("unsafe_command_recommendation")

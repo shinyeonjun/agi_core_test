@@ -28,7 +28,34 @@ def _grounded_self_report(decision: dict[str, Any]) -> str | None:
     return "\n".join(lines)
 
 
+def _contract_fallback(decision: dict[str, Any]) -> str | None:
+    contract = decision.get("answer_contract") if isinstance(decision.get("answer_contract"), dict) else {}
+    if not contract:
+        return None
+    kind = str(contract.get("kind") or "general")
+    context = decision.get("self_report_context") if isinstance(decision.get("self_report_context"), dict) else {}
+    weak = context.get("weak_points") if isinstance(context.get("weak_points"), list) else []
+    metrics = context.get("verification_snapshot") if isinstance(context.get("verification_snapshot"), dict) else decision.get("metrics", {})
+    renderer_rate = metrics.get("renderer_success_rate") if isinstance(metrics, dict) else None
+    renderer_text = f"렌더러 성공률 {float(renderer_rate) * 100:.1f}%" if isinstance(renderer_rate, (int, float)) else "렌더러 복구 경로"
+    if kind == "advice":
+        first = weak[0] if weak else f"{renderer_text}가 아직 흔들림"
+        return "\n".join([
+            "지금 기준으로는 이 순서가 좋아.",
+            f"1순위: 대화 렌더러 복구 품질 개선. 현재 약점은 '{first}' 쪽이라, 질문에 직접 답하지 못하고 상태 안내로 빠질 수 있어.",
+            "2순위: 작업 루프 실패 원인 분류 강화. 차단/검증 실패/권한 문제를 나눠 기록해야 다음 재시도가 똑똑해져.",
+            "3순위: 이벤트 reactor 안정성 확인. 고정 타이머보다 필요한 순간에 움직이는 쪽으로 가려면 관찰 근거가 더 필요해.",
+            "즉, 기능 추가보다 지금은 답변 품질, 실패 학습, 실행 루프 신뢰성을 먼저 조이는 게 맞아.",
+        ])
+    if kind == "direct_question":
+        return "Core 기준으로 가능한 부분과 아직 약한 부분을 나눠서 볼게. 지금 답은 상태 안내로 넘길 게 아니라 질문 자체에 직접 답해야 해."
+    return None
+
+
 def _chat_fallback(decision: dict[str, Any]) -> str:
+    contract_reply = _contract_fallback(decision)
+    if contract_reply:
+        return contract_reply
     grounded = _grounded_self_report(decision)
     if grounded:
         return grounded

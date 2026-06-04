@@ -13,6 +13,7 @@ FAST_TESTS = [
     "tests/test_failure_taxonomy.py",
     "tests/test_fallback_rule_clean_korean.py",
     "tests/test_renderer.py",
+    "tests/test_answer_contract.py",
     "tests/test_codex_config.py",
     "tests/test_dependency_doctor.py",
 ]

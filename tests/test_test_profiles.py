@@ -16,6 +16,7 @@ def test_fast_profile_keeps_pytest_scope_smaller_than_full():
     full = plan_test_profile("full")
 
     assert "tests/test_smoke.py" in fast["steps"][0]["command"]
+    assert "tests/test_answer_contract.py" in fast["steps"][0]["command"]
     assert "tests/test_discord_control_plane.py" not in fast["steps"][0]["command"]
     assert "tests/test_task_queue_split.py" not in fast["steps"][0]["command"]
     assert full["steps"][0]["command"].endswith(" -m pytest -q")

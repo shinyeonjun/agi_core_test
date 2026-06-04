@@ -162,3 +162,39 @@ def test_codex_renderer_respects_component_env(monkeypatch, tmp_path):
     })
 
     assert "빠른 렌더링" in text
+def test_codex_renderer_repairs_answer_contract_failure(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENT_CORE_DB_PATH", str(tmp_path / "agent.db"))
+    monkeypatch.setenv("AGENT_CORE_STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setenv("AGENT_CORE_HOME", str(tmp_path))
+    calls = {"count": 0}
+
+    def fake_run(args, **kwargs):
+        calls["count"] += 1
+        output_path = args[args.index("--output-last-message") + 1]
+        with open(output_path, "w", encoding="utf-8") as handle:
+            if calls["count"] == 1:
+                handle.write("답변 생성이 잠깐 매끄럽지 않았어. 입력은 받았고, 작업 지시하면 !work에서 확인하면 돼.")
+            else:
+                handle.write("지금 기준 1순위는 렌더러 복구 품질 개선이고, 2순위는 실패 원인 분류 강화야.")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("agent.renderer.codex_renderer.subprocess.run", fake_run)
+
+    text = render_with_codex({
+        "version": "0.17",
+        "user_input": "뭘 더 업데이트하면 좋을까?",
+        "selected_goal": {"id": 1, "title": "Answer user input"},
+        "policy_summary": {"risk_level": "low", "requires_approval": False},
+        "answer_contract": {
+            "kind": "advice",
+            "direct_answer_required": True,
+            "min_recommendations": 2,
+            "forbidden_moves": ["template_escape", "work_pointer_only"],
+        },
+        "must_include": [],
+        "must_not_include": ["AGI achieved"],
+    })
+
+    assert calls["count"] == 2
+    assert "1순위" in text
+    assert "!work" not in text

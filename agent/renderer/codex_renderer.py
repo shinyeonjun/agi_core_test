@@ -13,7 +13,7 @@ from agent.codex_config import codex_exec_args, codex_exec_config
 from agent.config.defaults import renderer_workspace, now_kst
 from agent.core.database import connect, init_db
 from agent.renderer.fallback_renderer import render as fallback_render
-from agent.renderer.prompts import CODEX_RENDERER_PROMPT
+from agent.renderer.prompts import CODEX_RENDERER_PROMPT, CODEX_RENDERER_REPAIR_PROMPT
 from agent.renderer.validator import validate_codex_output
 
 _ALLOWED_DECISION_KEYS = {
@@ -21,7 +21,7 @@ _ALLOWED_DECISION_KEYS = {
     "drive_scores", "policy_summary", "core_judgment", "confidence", "decision_confidence",
     "risk_level", "metrics", "runtime_self_map", "decision_trace", "must_include", "must_not_include", "renderer_hint", "renderer",
     "language_interpretation", "style_profile", "style_directives", "style_feedback",
-    "user_directed_goal", "user_goal_created", "capability_map", "self_report_context",
+    "user_directed_goal", "user_goal_created", "capability_map", "self_report_context", "answer_contract",
 }
 _ALLOWED_MEMORY_KEYS = {"id", "title", "memory_type", "importance", "confidence", "score", "tags_json"}
 _ALLOWED_SKILL_KEYS = {"id", "name", "trigger", "confidence", "score", "tags_json"}
@@ -87,6 +87,55 @@ def sanitize_decision_for_renderer(decision: dict[str, Any]) -> dict[str, Any]:
 
 
 
+def _invoke_codex_renderer(prompt: str, config: Any, workspace: Path, output_path: Path, timeout_seconds: int) -> str:
+    if output_path.exists():
+        output_path.unlink()
+    args = [
+        *codex_exec_args(config),
+        "--sandbox",
+        "read-only",
+        "--ephemeral",
+        "--skip-git-repo-check",
+        "--output-last-message",
+        str(output_path),
+        prompt,
+    ]
+    completed = subprocess.run(
+        args,
+        cwd=workspace,
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        timeout=timeout_seconds,
+        check=False,
+    )
+    text = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else (completed.stdout or "").strip()
+    if output_path.exists():
+        output_path.unlink()
+    if not text:
+        raise RuntimeError(completed.stderr.strip() or "codex produced empty output")
+    return text
+
+
+def _repair_codex_output(safe_decision: dict[str, Any], previous_text: str, validation: dict[str, Any], config: Any, workspace: Path, output_path: Path, timeout_seconds: int) -> tuple[str, dict[str, Any]] | None:
+    repair_payload = {
+        "decision": safe_decision,
+        "previous_response": previous_text,
+        "validation": validation,
+    }
+    repair_prompt = CODEX_RENDERER_REPAIR_PROMPT + "\n\nRepair Payload:\n" + json.dumps(repair_payload, ensure_ascii=False, separators=(",", ":"))
+    try:
+        repaired = _invoke_codex_renderer(repair_prompt, config, workspace, output_path, timeout_seconds)
+    except Exception:
+        return None
+    repaired_validation = validate_codex_output(repaired, safe_decision)
+    if repaired_validation["ok"]:
+        repaired_validation = dict(repaired_validation)
+        repaired_validation["repaired"] = True
+        return repaired, repaired_validation
+    return None
+
+
 def _record_renderer_run(decision: dict[str, Any], rendered_text: str | None, success: bool, validation: dict[str, Any], duration_ms: int, error: str | None = None) -> int:
     init_db()
     with connect() as conn:
@@ -111,35 +160,17 @@ def render_with_codex(decision: dict[str, Any], timeout_seconds: int | None = No
     prompt = CODEX_RENDERER_PROMPT + "\n\nDecision Object:\n" + json.dumps(safe_decision, ensure_ascii=False, separators=(",", ":"))
 
     try:
-        if output_path.exists():
-            output_path.unlink()
-        args = [
-            *codex_exec_args(config),
-            "--sandbox",
-            "read-only",
-            "--ephemeral",
-            "--skip-git-repo-check",
-            "--output-last-message",
-            str(output_path),
-            prompt,
-        ]
-        completed = subprocess.run(
-            args,
-            cwd=workspace,
-            text=True,
-            capture_output=True,
-            stdin=subprocess.DEVNULL,
-            timeout=timeout_seconds or config.timeout_seconds,
-            check=False,
-        )
-        text = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else (completed.stdout or "").strip()
-        if output_path.exists():
-            output_path.unlink()
-        if not text:
-            raise RuntimeError(completed.stderr.strip() or "codex produced empty output")
+        render_timeout = timeout_seconds or config.timeout_seconds
+        text = _invoke_codex_renderer(prompt, config, workspace, output_path, render_timeout)
         validation = validate_codex_output(text, safe_decision)
         duration_ms = int((time.monotonic() - start) * 1000)
         if not validation["ok"]:
+            repaired = _repair_codex_output(safe_decision, text, validation, config, workspace, output_path, timeout_seconds or config.timeout_seconds)
+            duration_ms = int((time.monotonic() - start) * 1000)
+            if repaired:
+                repaired_text, repaired_validation = repaired
+                _record_renderer_run(safe_decision, repaired_text, True, repaired_validation, duration_ms, "repaired_after_validation_failed")
+                return repaired_text
             fallback = fallback_render(safe_decision)
             _record_renderer_run(safe_decision, fallback, False, validation, duration_ms, "validation_failed")
             return fallback

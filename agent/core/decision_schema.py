@@ -67,6 +67,7 @@ def build_decision_schema(decision: dict[str, Any]) -> dict[str, Any]:
             "must_include": decision.get("must_include") or [],
             "must_not_include": decision.get("must_not_include") or [],
             "renderer": decision.get("renderer"),
+            "answer_contract_kind": (decision.get("answer_contract") or {}).get("kind") if isinstance(decision.get("answer_contract"), dict) else None,
         },
         failure_policy=failure_report(policy),
     )
