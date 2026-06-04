@@ -754,6 +754,54 @@ CREATE TABLE IF NOT EXISTS circuit_breakers (
 CREATE INDEX IF NOT EXISTS idx_circuit_breakers_status ON circuit_breakers(status);
 CREATE INDEX IF NOT EXISTS idx_circuit_breakers_category ON circuit_breakers(category);
 
+
+CREATE TABLE IF NOT EXISTS research_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    question_key TEXT NOT NULL UNIQUE, title TEXT NOT NULL, prompt TEXT NOT NULL, source TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open', priority REAL DEFAULT 0.5, novelty REAL DEFAULT 0.5,
+    utility REAL DEFAULT 0.5, risk_level TEXT DEFAULT 'low', evidence_json TEXT, metadata_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_research_questions_status ON research_questions(status);
+CREATE INDEX IF NOT EXISTS idx_research_questions_priority ON research_questions(priority);
+CREATE INDEX IF NOT EXISTS idx_research_questions_source ON research_questions(source);
+CREATE TABLE IF NOT EXISTS research_hypotheses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    question_id INTEGER, hypothesis_key TEXT NOT NULL UNIQUE, statement TEXT NOT NULL,
+    rationale TEXT, expected_effect TEXT, falsification TEXT, confidence REAL DEFAULT 0.5,
+    status TEXT NOT NULL DEFAULT 'open', evidence_json TEXT, metadata_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_research_hypotheses_question ON research_hypotheses(question_id);
+CREATE INDEX IF NOT EXISTS idx_research_hypotheses_status ON research_hypotheses(status);
+CREATE INDEX IF NOT EXISTS idx_research_hypotheses_confidence ON research_hypotheses(confidence);
+CREATE TABLE IF NOT EXISTS research_experiments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    question_id INTEGER, hypothesis_id INTEGER, experiment_key TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL, plan_json TEXT NOT NULL, variables_json TEXT, success_criteria_json TEXT,
+    verification_commands_json TEXT, status TEXT NOT NULL DEFAULT 'planned', result_json TEXT,
+    score REAL DEFAULT 0.0, risk_level TEXT DEFAULT 'low'
+);
+CREATE INDEX IF NOT EXISTS idx_research_experiments_question ON research_experiments(question_id);
+CREATE INDEX IF NOT EXISTS idx_research_experiments_hypothesis ON research_experiments(hypothesis_id);
+CREATE INDEX IF NOT EXISTS idx_research_experiments_status ON research_experiments(status);
+CREATE TABLE IF NOT EXISTS research_evidence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, evidence_type TEXT NOT NULL,
+    source_type TEXT NOT NULL, source_id TEXT, title TEXT NOT NULL, summary TEXT, payload_json TEXT,
+    confidence REAL DEFAULT 0.5, supports_type TEXT, supports_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_research_evidence_type ON research_evidence(evidence_type);
+CREATE INDEX IF NOT EXISTS idx_research_evidence_source ON research_evidence(source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_research_evidence_supports ON research_evidence(supports_type, supports_id);
+CREATE TABLE IF NOT EXISTS research_proposals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    question_id INTEGER, hypothesis_id INTEGER, experiment_id INTEGER, title TEXT NOT NULL,
+    proposal_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'proposed', priority REAL DEFAULT 0.5,
+    risk_level TEXT DEFAULT 'low', worker_prompt TEXT, success_criteria_json TEXT, evidence_ids_json TEXT,
+    metadata_json TEXT, queued_task_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_research_proposals_status ON research_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_research_proposals_priority ON research_proposals(priority);
+CREATE INDEX IF NOT EXISTS idx_research_proposals_experiment ON research_proposals(experiment_id);
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL,
@@ -766,4 +814,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR REPLACE INTO schema_meta (key, value)
-VALUES ('schema_version', '0.21.0-alpha');
+VALUES ('schema_version', '0.22.0-alpha');

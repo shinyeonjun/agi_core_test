@@ -523,6 +523,69 @@ def _migration_0014_advanced_learning_loops(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _migration_0015_researcher_loop(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS research_questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            question_key TEXT NOT NULL UNIQUE, title TEXT NOT NULL, prompt TEXT NOT NULL, source TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'open', priority REAL DEFAULT 0.5, novelty REAL DEFAULT 0.5,
+            utility REAL DEFAULT 0.5, risk_level TEXT DEFAULT 'low', evidence_json TEXT, metadata_json TEXT
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_research_questions_status ON research_questions(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_research_questions_priority ON research_questions(priority)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_research_questions_source ON research_questions(source)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS research_hypotheses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            question_id INTEGER, hypothesis_key TEXT NOT NULL UNIQUE, statement TEXT NOT NULL,
+            rationale TEXT, expected_effect TEXT, falsification TEXT, confidence REAL DEFAULT 0.5,
+            status TEXT NOT NULL DEFAULT 'open', evidence_json TEXT, metadata_json TEXT
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_research_hypotheses_question ON research_hypotheses(question_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_research_hypotheses_status ON research_hypotheses(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_research_hypotheses_confidence ON research_hypotheses(confidence)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS research_experiments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            question_id INTEGER, hypothesis_id INTEGER, experiment_key TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL, plan_json TEXT NOT NULL, variables_json TEXT, success_criteria_json TEXT,
+            verification_commands_json TEXT, status TEXT NOT NULL DEFAULT 'planned', result_json TEXT,
+            score REAL DEFAULT 0.0, risk_level TEXT DEFAULT 'low'
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_research_experiments_question ON research_experiments(question_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_research_experiments_hypothesis ON research_experiments(hypothesis_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_research_experiments_status ON research_experiments(status)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS research_evidence (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, evidence_type TEXT NOT NULL,
+            source_type TEXT NOT NULL, source_id TEXT, title TEXT NOT NULL, summary TEXT, payload_json TEXT,
+            confidence REAL DEFAULT 0.5, supports_type TEXT, supports_id INTEGER
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_research_evidence_type ON research_evidence(evidence_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_research_evidence_source ON research_evidence(source_type, source_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_research_evidence_supports ON research_evidence(supports_type, supports_id)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS research_proposals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            question_id INTEGER, hypothesis_id INTEGER, experiment_id INTEGER, title TEXT NOT NULL,
+            proposal_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'proposed', priority REAL DEFAULT 0.5,
+            risk_level TEXT DEFAULT 'low', worker_prompt TEXT, success_criteria_json TEXT, evidence_ids_json TEXT,
+            metadata_json TEXT, queued_task_id INTEGER
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_research_proposals_status ON research_proposals(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_research_proposals_priority ON research_proposals(priority)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_research_proposals_experiment ON research_proposals(experiment_id)")
+    conn.execute("""
+        INSERT INTO schema_meta (key, value) VALUES ('schema_version', '0.22.0-alpha')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    """)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("0001_existing_db_repairs", "Backfill approval task links and memory FTS schema", _migration_0001_existing_db_repairs),
     Migration("0002_task_queue_locks", "Add task queue lease, idempotency, and scheduling fields", _migration_0002_task_queue_locks),
@@ -538,6 +601,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0012_discord_message_dedupe", "Deduplicate Discord events and enforce message idempotency", _migration_0012_discord_message_dedupe),
     Migration("0013_cognitive_graph_layer", "Add cognitive graph nodes, edges, activations, and traces", _migration_0013_cognitive_graph_layer),
     Migration("0014_advanced_learning_loops", "Add memory rollups, graph summaries, failure cases, and circuit breakers", _migration_0014_advanced_learning_loops),
+    Migration("0015_researcher_loop", "Add research questions, hypotheses, experiments, evidence, and proposals", _migration_0015_researcher_loop),
 )
 
 

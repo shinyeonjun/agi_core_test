@@ -8,7 +8,7 @@ from agent.core.test_profiles import list_test_profiles, plan_test_profile, run_
 def test_test_profiles_expose_os_like_layers():
     names = [item["name"] for item in list_test_profiles()]
 
-    assert names == ["smoke", "fast", "chat", "integration", "full", "release"]
+    assert names == ["smoke", "fast", "learning", "chat", "integration", "full", "release"]
 
 
 def test_fast_profile_keeps_pytest_scope_smaller_than_full():
@@ -19,6 +19,14 @@ def test_fast_profile_keeps_pytest_scope_smaller_than_full():
     assert "tests/test_discord_control_plane.py" not in fast["steps"][0]["command"]
     assert "tests/test_task_queue_split.py" not in fast["steps"][0]["command"]
     assert full["steps"][0]["command"].endswith(" -m pytest -q")
+
+
+def test_learning_profile_keeps_research_checks_focused():
+    learning = plan_test_profile("learning")
+
+    assert "tests/test_advanced_learning.py" in learning["steps"][0]["command"]
+    assert "tests/test_research_loop.py" in learning["steps"][0]["command"]
+    assert "tests/test_discord_control_plane.py" not in learning["steps"][0]["command"]
 
 
 def test_chat_profile_keeps_control_plane_checks_focused():

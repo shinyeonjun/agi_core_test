@@ -23,6 +23,7 @@ LEARNING_TESTS = [
     "tests/test_cognitive_engine.py",
     "tests/test_cognitive_graph.py",
     "tests/test_advanced_learning.py",
+    "tests/test_research_loop.py",
 ]
 
 CHAT_TESTS = [
@@ -55,6 +56,7 @@ INTEGRATION_TESTS = [
     "tests/test_project_execution_loop.py",
     "tests/test_reactor.py",
     "tests/test_research_ingestion.py",
+    "tests/test_research_loop.py",
     "tests/test_runtime_isolation.py",
     "tests/test_self_code_review.py",
     "tests/test_self_improvement_planner.py",

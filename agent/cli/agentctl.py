@@ -30,6 +30,7 @@ from agent.core.process_table import get_process, list_processes, process_snapsh
 from agent.core.project_execution import get_project_plan, list_project_plans
 from agent.core.reactor import adaptive_sleep_seconds, reactor_once, reactor_run, reactor_status
 from agent.core.research_ingestion import ingest_research_papers, list_research_paper_seeds
+from agent.core.research_loop import collect_research_evidence, design_experiments, generate_hypotheses, generate_research_questions, propose_research_improvements, run_research_cycle
 from agent.core.self_improvement_release import build_self_improvement_release_plan, evaluate_release_candidate
 from agent.core.self_improvement_planner import enqueue_self_improvement_tickets, generate_self_improvement_tickets
 from agent.core.self_improvement_state import self_improvement_status
@@ -289,6 +290,24 @@ def cmd_research(args: argparse.Namespace) -> int:
         return 0
     if args.research_command == "ingest":
         print_json(ingest_research_papers(limit=args.limit, dry_run=bool(args.dry_run)))
+        return 0
+    if args.research_command == "questions":
+        print_json(generate_research_questions(limit=args.limit, persist=bool(args.persist)))
+        return 0
+    if args.research_command == "hypotheses":
+        print_json(generate_hypotheses(limit=args.limit, persist=bool(args.persist)))
+        return 0
+    if args.research_command == "experiments":
+        print_json(design_experiments(limit=args.limit, persist=bool(args.persist)))
+        return 0
+    if args.research_command == "evidence":
+        print_json(collect_research_evidence(limit=args.limit, persist=bool(args.persist)))
+        return 0
+    if args.research_command == "proposals":
+        print_json(propose_research_improvements(limit=args.limit, persist=bool(args.persist), enqueue=bool(args.enqueue)))
+        return 0
+    if args.research_command == "cycle":
+        print_json(run_research_cycle(limit=args.limit, persist=bool(args.persist), enqueue=bool(args.enqueue)))
         return 0
     raise ValueError(f"unknown research command: {args.research_command}")
 
@@ -885,6 +904,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("research"); research_sub = p.add_subparsers(dest="research_command", required=True)
     p_research_papers = research_sub.add_parser("papers"); p_research_papers.add_argument("--limit", type=int, default=20); p_research_papers.set_defaults(func=cmd_research)
     p_research_ingest = research_sub.add_parser("ingest"); p_research_ingest.add_argument("--limit", type=int); p_research_ingest.add_argument("--dry-run", action="store_true"); p_research_ingest.set_defaults(func=cmd_research)
+    p_research_questions = research_sub.add_parser("questions"); p_research_questions.add_argument("--limit", type=int, default=5); p_research_questions.add_argument("--persist", action="store_true"); p_research_questions.set_defaults(func=cmd_research)
+    p_research_hypotheses = research_sub.add_parser("hypotheses"); p_research_hypotheses.add_argument("--limit", type=int, default=5); p_research_hypotheses.add_argument("--persist", action="store_true"); p_research_hypotheses.set_defaults(func=cmd_research)
+    p_research_experiments = research_sub.add_parser("experiments"); p_research_experiments.add_argument("--limit", type=int, default=5); p_research_experiments.add_argument("--persist", action="store_true"); p_research_experiments.set_defaults(func=cmd_research)
+    p_research_evidence = research_sub.add_parser("evidence"); p_research_evidence.add_argument("--limit", type=int, default=8); p_research_evidence.add_argument("--persist", action="store_true"); p_research_evidence.set_defaults(func=cmd_research)
+    p_research_proposals = research_sub.add_parser("proposals"); p_research_proposals.add_argument("--limit", type=int, default=3); p_research_proposals.add_argument("--persist", action="store_true"); p_research_proposals.add_argument("--enqueue", action="store_true"); p_research_proposals.set_defaults(func=cmd_research)
+    p_research_cycle = research_sub.add_parser("cycle"); p_research_cycle.add_argument("--limit", type=int, default=3); p_research_cycle.add_argument("--persist", action="store_true"); p_research_cycle.add_argument("--enqueue", action="store_true"); p_research_cycle.set_defaults(func=cmd_research)
     p = sub.add_parser("release"); release_sub = p.add_subparsers(dest="release_command", required=True)
     p_release_plan = release_sub.add_parser("plan"); p_release_plan.add_argument("title"); p_release_plan.add_argument("--request"); p_release_plan.add_argument("--risk-level", default="medium", choices=["low", "medium", "high", "critical"]); p_release_plan.add_argument("--owner", default="user"); p_release_plan.set_defaults(func=cmd_release)
     p_release_gate = release_sub.add_parser("gate"); p_release_gate.add_argument("--changed-file", action="append"); p_release_gate.add_argument("--worktree", default="isolated", choices=["isolated", "main"]); p_release_gate.add_argument("--risk-level", default="medium", choices=["low", "medium", "high", "critical"]); p_release_gate.add_argument("--tests-passed", action="store_true"); p_release_gate.add_argument("--audit-passed", action="store_true"); p_release_gate.add_argument("--eval-passed", action="store_true"); p_release_gate.add_argument("--review-passed", action="store_true"); p_release_gate.add_argument("--approval", default="pending", choices=["pending", "approved", "rejected"]); p_release_gate.add_argument("--rollback-plan"); p_release_gate.add_argument("--secrets-touched", action="store_true"); p_release_gate.add_argument("--destructive-change", action="store_true"); p_release_gate.set_defaults(func=cmd_release)
