@@ -62,7 +62,7 @@ def classify_failure_reason(value: object) -> str:
 def _verification_for(task_kind: str) -> list[dict[str, str]]:
     if task_kind == "code_change":
         return [
-            {"type": "tests", "command": "python -m pytest -q"},
+            {"type": "tests", "command": "python -m agent.cli.agentctl test run fast --json"},
             {"type": "audit", "command": "python -m agent.cli.agentctl audit"},
         ]
     if task_kind == "project_spec":

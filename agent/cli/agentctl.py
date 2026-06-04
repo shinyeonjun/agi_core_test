@@ -38,6 +38,7 @@ from agent.core.style import add_style_example, apply_style_feedback, get_active
 from agent.core.task_lifecycle import list_task_lifecycle, task_lifecycle_summary
 from agent.core.task_queue import doctor_tasks, list_tasks as list_queued_tasks, task_status_counts
 from agent.core.control_snapshot import control_snapshot
+from agent.core.test_profiles import PROFILE_NAMES, compact_test_result_lines, list_test_profiles, plan_test_profile, run_test_profile
 from agent.eval.harness import list_eval_runs, list_tasks as list_eval_tasks, run_suite
 from agent.language.engine import get_language_engine, interpret_user_message, language_cache_stats, list_interpretation_logs
 from agent.memory.store import add_memory, list_memories, rebuild_memory_fts, search_memories
@@ -713,6 +714,23 @@ def cmd_audit(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_test(args: argparse.Namespace) -> int:
+    if args.test_command == "list":
+        print_json(list_test_profiles())
+        return 0
+    if args.test_command == "plan":
+        print_json(plan_test_profile(args.profile))
+        return 0
+    if args.test_command == "run":
+        result = run_test_profile(args.profile, extra_pytest_args=args.pytest_arg, timeout=args.timeout)
+        if args.json:
+            print_json(result)
+        else:
+            print("\n".join(compact_test_result_lines(result)))
+        return 0 if result.get("ok") else 1
+    raise ValueError(f"unknown test command: {args.test_command}")
+
+
 def cmd_self_check(args: argparse.Namespace) -> int:
     if args.area == "bridge":
         from agent.bridge.auth import DiscordAuthConfig, classify_context
@@ -842,6 +860,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval_list = eval_sub.add_parser("list"); p_eval_list.add_argument("suite", nargs="?"); p_eval_list.set_defaults(func=cmd_eval_list)
     p_eval_run = eval_sub.add_parser("run"); p_eval_run.add_argument("suite", nargs="?"); p_eval_run.add_argument("--live-db", action="store_true"); p_eval_run.set_defaults(func=cmd_eval_run)
     p_eval_runs = eval_sub.add_parser("runs"); p_eval_runs.add_argument("--limit", type=int, default=20); p_eval_runs.set_defaults(func=cmd_eval_runs)
+
+    p = sub.add_parser("test"); test_sub = p.add_subparsers(dest="test_command", required=True)
+    p_test_list = test_sub.add_parser("list"); p_test_list.set_defaults(func=cmd_test)
+    p_test_plan = test_sub.add_parser("plan"); p_test_plan.add_argument("profile", choices=PROFILE_NAMES); p_test_plan.set_defaults(func=cmd_test)
+    p_test_run = test_sub.add_parser("run"); p_test_run.add_argument("profile", choices=PROFILE_NAMES); p_test_run.add_argument("--json", action="store_true"); p_test_run.add_argument("--timeout", type=int); p_test_run.add_argument("--pytest-arg", action="append"); p_test_run.set_defaults(func=cmd_test)
 
     p = sub.add_parser("tool"); tool_sub = p.add_subparsers(dest="tool_command", required=True)
     p_tool_list = tool_sub.add_parser("list"); p_tool_list.set_defaults(func=cmd_tool_list)

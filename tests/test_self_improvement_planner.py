@@ -41,7 +41,7 @@ def test_self_improvement_ticket_has_worker_contract(monkeypatch, tmp_path):
     assert ticket["title"]
     assert ticket["problem"]
     assert ticket["scope"]
-    assert "python -m pytest -q" in ticket["verification_commands"]
+    assert "agent.cli.agentctl test run fast" in ticket["verification_commands"][0]
     assert "Use git worktree/native loop only" in prompt
     assert ".env" in prompt
 

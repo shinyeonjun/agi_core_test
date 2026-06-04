@@ -46,7 +46,7 @@ def _ticket(
         scope=scope,
         success_criteria=success_criteria,
         verification_commands=[
-            "python -m pytest -q",
+            "python -m agent.cli.agentctl test run fast --json",
             "python -m agent.cli.agentctl audit",
             "python -m agent.cli.agentctl eval run",
         ],

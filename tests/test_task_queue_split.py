@@ -328,7 +328,8 @@ def test_work_loop_default_verify_uses_current_python(monkeypatch, tmp_path):
     commands = _work_loop_verify_commands()
 
     assert commands
-    assert "pytest" in commands[0]
+    assert "agent.cli.agentctl test run fast" in commands[0]
+    assert "python -m pytest" not in commands[0]
     assert sys.executable in commands[0]
     assert commands[0] != "python -m pytest -q"
 

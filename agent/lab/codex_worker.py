@@ -172,7 +172,7 @@ def _work_loop_worktree_enabled() -> bool:
 def _work_loop_verify_commands() -> list[str]:
     value = os.getenv("AGENT_WORK_LOOP_VERIFY_COMMANDS")
     if value is None:
-        return [_normalize_verification_command(f"{shlex.quote(sys.executable)} -m pytest -q")]
+        return [_normalize_verification_command(f"{shlex.quote(sys.executable)} -m agent.cli.agentctl test run fast --json")]
     stripped = value.strip()
     if stripped.lower() in {"", "0", "false", "off", "none", "skip"}:
         return []

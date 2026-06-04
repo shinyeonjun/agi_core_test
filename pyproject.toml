@@ -23,3 +23,15 @@ include = ["agent*"]
 [tool.setuptools.package-data]
 "agent.memory" = ["schema.sql"]
 "agent.eval" = ["tasks/*.json"]
+
+
+[tool.pytest.ini_options]
+markers = [
+  "smoke: very small checks for basic Core liveness",
+  "fast: default development checks that should finish quickly on Orange Pi",
+  "integration: broader cross-component checks",
+  "slow: expensive checks reserved for full/release validation",
+  "chat: chat and Discord bridge checks",
+  "discord: Discord control plane checks",
+  "worker: Codex worker and task-loop checks",
+]
