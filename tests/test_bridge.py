@@ -1,7 +1,8 @@
 from agent.bridge.auth import DiscordAuthConfig, classify_context
 from agent.bridge.discord_bot import _acquire_single_instance_lock, _release_single_instance_lock
 from agent.bridge.formatter import split_for_discord, strip_bot_mention
-from agent.bridge.router import DiscordEvent, _approval_summary, _goal_summary, _memory_summary, route_discord_event
+from agent.bridge.commands import _approval_summary, _goal_summary, _memory_summary
+from agent.bridge.router import DiscordEvent, route_discord_event
 from agent.bridge.formatter import format_chat_reply
 
 

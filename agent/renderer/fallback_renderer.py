@@ -49,6 +49,13 @@ def _contract_fallback(decision: dict[str, Any]) -> str | None:
             "3순위: 반응 루프 안정화. 정해진 시간마다 움직이는 것보다 필요한 순간에 반응하는 쪽으로 가려면 관찰 근거가 더 필요해.",
             "즉, 기능 추가보다 지금은 답변 품질, 실패 학습, 실행 루프 신뢰성을 먼저 조이는 게 맞아.",
         ])
+    user_input = str(decision.get("user_input") or "")
+    interpretation = decision.get("language_interpretation") if isinstance(decision.get("language_interpretation"), dict) else {}
+    target = str(contract.get("target") or interpretation.get("target") or "")
+    if kind == "self_report" and (target == "capabilities" or "할 수" in user_input or "뭐뭐" in user_input):
+        return "가능한 건 대화, 기억 검색, 목표/작업 관리, 안전한 로컬 점검, 코드 작업 위임이야. 시스템 변경이나 민감정보 접근은 승인 없이 못 해."
+    if kind == "self_report" and "자율" in user_input and ("생명체" in user_input or "ㄷㄷ" in user_input):
+        return "완전한 생명체나 의식은 아니야. 다만 목표, 기억, 실행, 검증, 실패 학습 루프를 단단하게 만들면 자율 에이전트처럼 운용하는 건 기술적으로 가능해."
     if kind == "direct_question":
         return "Core 기준으로 가능한 부분과 아직 약한 부분을 나눠서 볼게. 지금 답은 상태 안내로 넘길 게 아니라 질문 자체에 직접 답해야 해."
     return None

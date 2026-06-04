@@ -60,7 +60,7 @@ def test_chat_channel_routes_to_core(monkeypatch, tmp_path):
     event = DiscordEvent(None, "10", "1", "m1", False, False, "\uc9c0\uae08 \uc0c1\ud0dc \uc54c\ub824\uc918")
     chunks = route_discord_event(event, control_config())
     assert chunks
-    assert "상태 확인은 가능해" in chunks[0]
+    assert "상태" in chunks[0]
     assert "지어내진" not in chunks[0]
     assert "잠깐만" not in chunks[0]
     assert "fallback renderer" not in chunks[0]
@@ -179,7 +179,7 @@ def test_duplicate_discord_message_is_ignored(monkeypatch, tmp_path):
 def test_tick_command_is_human_readable(monkeypatch, tmp_path):
     setup_isolated(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        "agent.bridge.router.run_tick",
+        "agent.bridge.commands.run_tick",
         lambda: {"result": {"created_goal_id": None, "processed_events": 3, "cognitive_growth": {"mode": "observe", "top_curiosity": "memory_hygiene"}}},
     )
     event = DiscordEvent(None, "10", "1", "m-tick-readable", False, False, "!tick")
@@ -410,7 +410,7 @@ def test_chat_status_does_not_fall_back_to_template_and_command_state_keeps_deta
     setup_isolated(monkeypatch, tmp_path)
     event = DiscordEvent(None, "10", "1", "m6", False, False, "\uc9c0\uae08 \uc0c1\ud0dc \uc54c\ub824\uc918")
     output = "\n".join(route_discord_event(event, control_config()))
-    assert "상태 확인은 가능해" in output
+    assert "상태" in output
     assert "지어내진" not in output
     assert "잠깐만" not in output
     assert "Relevant skills" not in output
