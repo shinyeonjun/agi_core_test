@@ -148,7 +148,7 @@ def test_format_chat_reply_prefers_core_renderer_text():
         },
     )
 
-    assert "language, memory" in output
+    assert "대화 해석, 기억" in output
 
 
 def test_format_chat_reply_rejects_internal_renderer_text():
@@ -165,4 +165,20 @@ def test_format_chat_reply_rejects_internal_renderer_text():
 
     assert "selected_goal_id" not in output
     assert "user_goal_created" not in output
-    assert "답변 생성이 잠깐 매끄럽지 않았어" in output
+    assert "지금 답변이 충분히 선명하지 않았어" in output
+
+
+def test_format_chat_reply_humanizes_renderer_text():
+    output = format_chat_reply(
+        "구조 알려줘",
+        {
+            "text": "Core는 language, memory, goal, policy, renderer, scheduler로 나뉘어 있어.",
+            "decision": {
+                "policy_summary": {"risk_level": "low", "requires_approval": False, "denied": False},
+                "language_interpretation": {"intent": "chat", "target": "architecture"},
+            },
+        },
+    )
+
+    assert "대화 해석, 기억" in output
+    assert "renderer" not in output

@@ -81,6 +81,7 @@ def build_answer_contract(user_message: str, interpretation: dict[str, Any] | No
         "forbidden_moves": forbidden_moves,
         "fallback_strategy": "prioritized_advice" if kind == "advice" else "grounded_self_report" if kind == "self_report" else "direct_answer",
         "requires_core_subject": kind in {"self_report", "direct_question"} and asks_self,
+        "plain_language_required": kind in {"advice", "self_report", "direct_question"},
     }
 
 

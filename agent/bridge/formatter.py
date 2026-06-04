@@ -6,6 +6,7 @@ import textwrap
 from typing import Any
 
 from agent.core.observability import action_observation, summary_label
+from agent.renderer.human_terms import humanize_public_text
 
 MENTION_RE = re.compile(r"<@!?\d+>")
 SECRET_PATTERNS = (
@@ -281,7 +282,7 @@ def _core_chat_text(core_result: dict[str, Any]) -> str | None:
     )
     if any(marker in lowered for marker in internal_markers):
         return None
-    return text
+    return humanize_public_text(text)
 
 
 def format_chat_reply(user_text: str, core_result: dict[str, Any]) -> str:
@@ -311,7 +312,7 @@ def _natural_chat_reply(core_result: dict[str, Any]) -> str | None:
     task_result = core_result.get("task_result") or {}
     report = compact_text(task_result.get("report"), "").strip() if isinstance(task_result, dict) else ""
     if report:
-        return report[:1600]
+        return humanize_public_text(report[:1600])
     return _core_chat_text(core_result)
 
 
@@ -320,7 +321,7 @@ def _format_task_result(user_goal: dict[str, Any], task_result: dict[str, Any]) 
     if status in {"user_goal_completed", "artifact_created", "completed", "done", "codex_work_completed"}:
         report = compact_text(task_result.get("report"), "")
         if report:
-            return report[:1600]
+            return humanize_public_text(report[:1600])
         result_label = compact_text(task_result.get("artifact_type") or status)
         return f"작업 처리됨.\n결과: {result_label}"
     if status in {"codex_work_blocked", "codex_work_failed"}:
@@ -399,7 +400,7 @@ def _renderer_unavailable_reply(decision: dict[str, Any]) -> str:
         return "Core는 대화 해석, 기억, 목표/작업 큐, 정책 게이트, 장비 관찰, Codex 작업 워커가 나뉘어 돌아가는 구조야."
     if target == "status":
         return "상태 확인은 가능해. 현재 작업은 `!work`, 열린 목표는 `!goals`, 장비 상태는 `!state`로 보면 돼."
-    return "답변 생성이 잠깐 매끄럽지 않았어. 그래도 입력은 받았고, 작업 지시면 `!work`에서 진행 여부를 확인하면 돼."
+    return "지금 답변이 충분히 선명하지 않았어. 같은 질문을 조금만 더 구체적으로 주면 바로 이어서 답할게."
 
 
 def _is_noise_title(value: object) -> bool:

@@ -175,7 +175,7 @@ def test_codex_renderer_repairs_answer_contract_failure(monkeypatch, tmp_path):
             if calls["count"] == 1:
                 handle.write("답변 생성이 잠깐 매끄럽지 않았어. 입력은 받았고, 작업 지시하면 !work에서 확인하면 돼.")
             else:
-                handle.write("지금 기준 1순위는 렌더러 복구 품질 개선이고, 2순위는 실패 원인 분류 강화야.")
+                handle.write("지금 기준 1순위는 답변 품질 개선이고, 2순위는 실패 원인 분류 강화야.")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr("agent.renderer.codex_renderer.subprocess.run", fake_run)
@@ -198,3 +198,26 @@ def test_codex_renderer_repairs_answer_contract_failure(monkeypatch, tmp_path):
     assert calls["count"] == 2
     assert "1순위" in text
     assert "!work" not in text
+
+
+def test_fallback_humanizes_internal_terms():
+    text = render({
+        "user_input": "뭘 더 업데이트하면 좋을까?",
+        "policy_summary": {"risk_level": "low", "requires_approval": False},
+        "answer_contract": {
+            "kind": "advice",
+            "direct_answer_required": True,
+            "min_recommendations": 2,
+            "plain_language_required": True,
+        },
+        "self_report_context": {
+            "weak_points": ["renderer fallback이 남아 있음"],
+            "verification_snapshot": {"renderer_success_rate": 0.88},
+        },
+    })
+
+    assert "답변 품질" in text
+    assert "복구 답변" in text
+    assert "렌더러" not in text
+    assert "fallback" not in text
+    assert "reactor" not in text

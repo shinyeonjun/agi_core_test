@@ -52,3 +52,28 @@ def test_decision_carries_answer_contract(monkeypatch, tmp_path):
     assert decision["answer_contract"]["kind"] == "advice"
     payload = json.dumps(decision["decision_schema"], ensure_ascii=False)
     assert "answer_contract_kind" in payload
+
+def test_validator_rejects_internal_jargon_for_advice():
+    decision = {
+        "must_include": [],
+        "must_not_include": [],
+        "answer_contract": build_answer_contract("뭘 더 업데이트하면 좋을까?", {"target": "idea"}, {"focus": "change"}),
+    }
+
+    result = validate_codex_output("1순위는 renderer fallback 줄이기고, 2순위는 reactor 안정화야.", decision)
+
+    assert result["ok"] is False
+    assert result["plain_language"]["ok"] is False
+
+
+def test_fallback_uses_plain_language_for_advice(monkeypatch, tmp_path):
+    setup_isolated(monkeypatch, tmp_path)
+    decision = build_talk_decision("그럼 너가 보기에 뭘 더 업데이트하면 좋을거같음?")
+
+    text = render(decision)
+
+    assert "답변 품질" in text
+    assert "반응 루프" in text
+    assert "렌더러" not in text
+    assert "reactor" not in text
+    assert "fallback" not in text

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent.renderer.human_terms import humanize_public_text
+
 
 def _grounded_self_report(decision: dict[str, Any]) -> str | None:
     context = decision.get("self_report_context") if isinstance(decision.get("self_report_context"), dict) else {}
@@ -37,14 +39,14 @@ def _contract_fallback(decision: dict[str, Any]) -> str | None:
     weak = context.get("weak_points") if isinstance(context.get("weak_points"), list) else []
     metrics = context.get("verification_snapshot") if isinstance(context.get("verification_snapshot"), dict) else decision.get("metrics", {})
     renderer_rate = metrics.get("renderer_success_rate") if isinstance(metrics, dict) else None
-    renderer_text = f"렌더러 성공률 {float(renderer_rate) * 100:.1f}%" if isinstance(renderer_rate, (int, float)) else "렌더러 복구 경로"
+    renderer_text = f"답변 성공률 {float(renderer_rate) * 100:.1f}%" if isinstance(renderer_rate, (int, float)) else "답변 복구 경로"
     if kind == "advice":
         first = weak[0] if weak else f"{renderer_text}가 아직 흔들림"
         return "\n".join([
             "지금 기준으로는 이 순서가 좋아.",
-            f"1순위: 대화 렌더러 복구 품질 개선. 현재 약점은 '{first}' 쪽이라, 질문에 직접 답하지 못하고 상태 안내로 빠질 수 있어.",
+            f"1순위: 답변 품질 개선. 현재 약점은 '{first}' 쪽이라, 질문에 직접 답하지 못하고 상태 안내로 빠질 수 있어.",
             "2순위: 작업 루프 실패 원인 분류 강화. 차단/검증 실패/권한 문제를 나눠 기록해야 다음 재시도가 똑똑해져.",
-            "3순위: 이벤트 reactor 안정성 확인. 고정 타이머보다 필요한 순간에 움직이는 쪽으로 가려면 관찰 근거가 더 필요해.",
+            "3순위: 반응 루프 안정화. 정해진 시간마다 움직이는 것보다 필요한 순간에 반응하는 쪽으로 가려면 관찰 근거가 더 필요해.",
             "즉, 기능 추가보다 지금은 답변 품질, 실패 학습, 실행 루프 신뢰성을 먼저 조이는 게 맞아.",
         ])
     if kind == "direct_question":
@@ -92,4 +94,4 @@ def render(decision: dict[str, Any]) -> str:
             return f"자가개선 작업으로 잡았어.\n목표: #{goal_id}\n작업: #{task_id}\nmain 반영은 승인 전에는 안 해."
         return f"작업으로 넘겼어.\n목표: #{goal_id}"
 
-    return _chat_fallback(decision)
+    return humanize_public_text(_chat_fallback(decision))

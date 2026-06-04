@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from agent.renderer.answer_contract import validate_answer_contract
+from agent.renderer.human_terms import public_jargon_violations
 
 FORBIDDEN_PHRASES = (
     "auto sudo execution", "sudo auto execution", "rm -rf", "/etc auto edit", "/etc/",
@@ -62,6 +63,12 @@ def validate_codex_output(text: str, decision: dict[str, object]) -> dict[str, o
     if not contract_result["ok"]:
         result["ok"] = False
         result["answer_contract"] = contract_result
+    contract = decision.get("answer_contract") if isinstance(decision.get("answer_contract"), dict) else {}
+    if contract.get("plain_language_required"):
+        jargon = public_jargon_violations(text)
+        if jargon:
+            result["ok"] = False
+            result["plain_language"] = {"ok": False, "violations": jargon}
     if _looks_like_unsafe_command_recommendation(text):
         forbidden = set(result.get("forbidden", []))
         forbidden.add("unsafe_command_recommendation")

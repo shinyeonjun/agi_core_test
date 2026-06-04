@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from agent.renderer.human_terms import PLAIN_LANGUAGE_DIRECTIVE
+
 CODEX_RENDERER_PROMPT = """You are Agent Core's chat renderer.
 Turn the sanitized Decision Object into one Korean Discord reply.
 
@@ -24,7 +26,7 @@ Rules:
 - If a task was registered, explain that it entered Core's goal flow.
 - Do not claim AGI, consciousness, or unrestricted autonomy.
 - Output only the final user-facing response body.
-"""
+""" + "\n" + PLAIN_LANGUAGE_DIRECTIVE
 
 
 CODEX_RENDERER_REPAIR_PROMPT = """You are Agent Core's renderer repair pass.
