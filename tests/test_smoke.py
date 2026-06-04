@@ -7,7 +7,7 @@ from agent.scheduler.tick import run_tick
 
 def test_state_and_memory_smoke():
     init_db()
-    assert get_schema_version() == "0.20.0-alpha"
+    assert get_schema_version() == "0.21.0-alpha"
     state = load_state()
     assert state["version"] == "0.17"
     memory_id = add_memory("test memory", "Core smoke test memory", tags=["test", "core"])

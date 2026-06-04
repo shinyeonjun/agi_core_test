@@ -682,6 +682,78 @@ CREATE INDEX IF NOT EXISTS idx_wake_signals_priority ON wake_signals(priority);
 CREATE INDEX IF NOT EXISTS idx_wake_signals_not_before ON wake_signals(not_before);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_wake_signals_pending_dedupe ON wake_signals(dedupe_key) WHERE status = 'pending' AND dedupe_key IS NOT NULL;
 
+
+CREATE TABLE IF NOT EXISTS memory_rollups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    level INTEGER NOT NULL,
+    cluster_key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    source_memory_ids_json TEXT NOT NULL,
+    score REAL DEFAULT 0.0,
+    metadata_json TEXT,
+    archived INTEGER DEFAULT 0,
+    UNIQUE(level, cluster_key)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_rollups_level ON memory_rollups(level);
+CREATE INDEX IF NOT EXISTS idx_memory_rollups_score ON memory_rollups(score);
+CREATE INDEX IF NOT EXISTS idx_memory_rollups_archived ON memory_rollups(archived);
+
+CREATE TABLE IF NOT EXISTS graph_community_summaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    community_key TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    node_ids_json TEXT NOT NULL,
+    edge_ids_json TEXT NOT NULL,
+    score REAL DEFAULT 0.0,
+    metadata_json TEXT,
+    archived INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_graph_summaries_score ON graph_community_summaries(score);
+CREATE INDEX IF NOT EXISTS idx_graph_summaries_archived ON graph_community_summaries(archived);
+
+CREATE TABLE IF NOT EXISTS failure_cases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    task_id INTEGER,
+    title TEXT NOT NULL,
+    category TEXT NOT NULL,
+    summary TEXT,
+    evidence_json TEXT,
+    strategy_json TEXT,
+    resolved INTEGER DEFAULT 0,
+    archived INTEGER DEFAULT 0,
+    UNIQUE(source_type, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_failure_cases_category ON failure_cases(category);
+CREATE INDEX IF NOT EXISTS idx_failure_cases_task ON failure_cases(task_id);
+CREATE INDEX IF NOT EXISTS idx_failure_cases_resolved ON failure_cases(resolved);
+
+CREATE TABLE IF NOT EXISTS circuit_breakers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    breaker_key TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL,
+    category TEXT NOT NULL,
+    failure_count INTEGER DEFAULT 0,
+    threshold_count INTEGER DEFAULT 3,
+    cooldown_seconds INTEGER DEFAULT 1800,
+    last_failure_at TEXT,
+    opened_at TEXT,
+    metadata_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_circuit_breakers_status ON circuit_breakers(status);
+CREATE INDEX IF NOT EXISTS idx_circuit_breakers_category ON circuit_breakers(category);
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL,
@@ -694,4 +766,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT OR REPLACE INTO schema_meta (key, value)
-VALUES ('schema_version', '0.20.0-alpha');
+VALUES ('schema_version', '0.21.0-alpha');

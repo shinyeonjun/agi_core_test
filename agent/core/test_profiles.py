@@ -12,10 +12,17 @@ FAST_TESTS = [
     "tests/test_policy.py",
     "tests/test_failure_taxonomy.py",
     "tests/test_fallback_rule_clean_korean.py",
-    "tests/test_retrieval_efficiency.py",
     "tests/test_renderer.py",
     "tests/test_codex_config.py",
     "tests/test_dependency_doctor.py",
+]
+
+LEARNING_TESTS = [
+    "tests/test_retrieval_efficiency.py",
+    "tests/test_sparse_vectors.py",
+    "tests/test_cognitive_engine.py",
+    "tests/test_cognitive_graph.py",
+    "tests/test_advanced_learning.py",
 ]
 
 CHAT_TESTS = [
@@ -30,6 +37,7 @@ INTEGRATION_TESTS = [
     "tests/test_codex_worker_policy.py",
     "tests/test_cognitive_engine.py",
     "tests/test_cognitive_graph.py",
+    "tests/test_advanced_learning.py",
     "tests/test_cognitive_pipeline.py",
     "tests/test_core_pipeline.py",
     "tests/test_dashboard.py",
@@ -87,9 +95,15 @@ PROFILES: dict[str, TestProfile] = {
     ),
     "fast": TestProfile(
         name="fast",
-        purpose="Default quick checks for Core liveness, policy, renderer, dependency, and failure taxonomy.",
+        purpose="Default quick checks for Core liveness, policy, renderer, dependency, and failure taxonomy. Retrieval and graph checks live in the learning profile.",
         pytest_args=(*FAST_TESTS, "-q"),
-        expected="about 20-40 seconds on Orange Pi",
+        expected="short quick gate on Orange Pi",
+    ),
+    "learning": TestProfile(
+        name="learning",
+        purpose="Focused learning-layer checks for retrieval, sparse vectors, cognitive graph, memory hierarchy, failure cases, and circuit breakers.",
+        pytest_args=(*LEARNING_TESTS, "-q"),
+        expected="focused learning/graph checks",
     ),
     "chat": TestProfile(
         name="chat",

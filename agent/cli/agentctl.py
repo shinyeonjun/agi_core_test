@@ -12,6 +12,7 @@ from agent.core.approvals import ApprovalStore
 from agent.core.capabilities import collect_capability_map, capability_summary_lines
 from agent.core.cognitive_engine import add_blackboard_item, add_stigmergy_marker, cognitive_growth_snapshot, list_blackboard_items, list_stigmergy_markers
 from agent.core.cognitive_graph import activate_graph, graph_snapshot, sync_graph, trace_decision
+from agent.core.advanced_learning import advanced_learning_snapshot, behavior_tree_for_goal, build_memory_hierarchy, circuit_breaker_snapshot, index_failure_cases, summarize_cognitive_graph
 from agent.core.database import check_migrations, get_schema_version, init_db, migrate_db
 from agent.core.db_hygiene import cleanup_db_noise
 from agent.core.dependency_doctor import dependency_doctor, install_missing_python_dependencies
@@ -663,6 +664,24 @@ def cmd_intelligence(args: argparse.Namespace) -> int:
     if args.intelligence_command == "growth":
         print_json(cognitive_growth_snapshot(persist=bool(args.persist), limit=args.limit))
         return 0
+    if args.intelligence_command == "hierarchy":
+        print_json(build_memory_hierarchy(limit=args.limit, levels=args.levels, persist=bool(args.persist)))
+        return 0
+    if args.intelligence_command == "graph-summary":
+        print_json(summarize_cognitive_graph(limit=args.limit, persist=bool(args.persist), sync=not bool(args.no_sync)))
+        return 0
+    if args.intelligence_command == "failures":
+        print_json(index_failure_cases(limit=args.limit, persist=bool(args.persist)))
+        return 0
+    if args.intelligence_command == "circuit":
+        print_json(circuit_breaker_snapshot(limit=args.limit, threshold=args.threshold, cooldown_seconds=args.cooldown_seconds, persist=bool(args.persist)))
+        return 0
+    if args.intelligence_command == "htn":
+        print_json(behavior_tree_for_goal(goal_id=args.goal_id, query=_joined_arg(args.query)))
+        return 0
+    if args.intelligence_command == "advanced":
+        print_json(advanced_learning_snapshot(persist=bool(args.persist)))
+        return 0
     if args.intelligence_command == "blackboard":
         if args.blackboard_action == "list":
             print_json({"items": list_blackboard_items(limit=args.limit, status=args.status)})
@@ -964,6 +983,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_int_skills = intelligence_sub.add_parser("skills"); p_int_skills.add_argument("--limit", type=int, default=20); p_int_skills.set_defaults(func=cmd_intelligence)
     p_int_maintain = intelligence_sub.add_parser("maintain"); p_int_maintain.add_argument("--dry-run", action="store_true"); p_int_maintain.set_defaults(func=cmd_intelligence)
     p_int_growth = intelligence_sub.add_parser("growth"); p_int_growth.add_argument("--persist", action="store_true"); p_int_growth.add_argument("--limit", type=int, default=8); p_int_growth.set_defaults(func=cmd_intelligence)
+    p_int_hierarchy = intelligence_sub.add_parser("hierarchy"); p_int_hierarchy.add_argument("--persist", action="store_true"); p_int_hierarchy.add_argument("--limit", type=int, default=80); p_int_hierarchy.add_argument("--levels", type=int, default=2); p_int_hierarchy.set_defaults(func=cmd_intelligence)
+    p_int_graph_summary = intelligence_sub.add_parser("graph-summary"); p_int_graph_summary.add_argument("--persist", action="store_true"); p_int_graph_summary.add_argument("--limit", type=int, default=120); p_int_graph_summary.add_argument("--no-sync", action="store_true"); p_int_graph_summary.set_defaults(func=cmd_intelligence)
+    p_int_failures = intelligence_sub.add_parser("failures"); p_int_failures.add_argument("--persist", action="store_true"); p_int_failures.add_argument("--limit", type=int, default=80); p_int_failures.set_defaults(func=cmd_intelligence)
+    p_int_circuit = intelligence_sub.add_parser("circuit"); p_int_circuit.add_argument("--persist", action="store_true"); p_int_circuit.add_argument("--limit", type=int, default=80); p_int_circuit.add_argument("--threshold", type=int, default=3); p_int_circuit.add_argument("--cooldown-seconds", type=int, default=1800); p_int_circuit.set_defaults(func=cmd_intelligence)
+    p_int_htn = intelligence_sub.add_parser("htn"); p_int_htn.add_argument("--goal-id", type=int); p_int_htn.add_argument("query", nargs="*"); p_int_htn.set_defaults(func=cmd_intelligence)
+    p_int_advanced = intelligence_sub.add_parser("advanced"); p_int_advanced.add_argument("--persist", action="store_true"); p_int_advanced.set_defaults(func=cmd_intelligence)
     p_int_graph = intelligence_sub.add_parser("graph"); p_int_graph_sub = p_int_graph.add_subparsers(dest="graph_action", required=True)
     p_int_graph_sync = p_int_graph_sub.add_parser("sync"); p_int_graph_sync.add_argument("--limit", type=int, default=80); p_int_graph_sync.set_defaults(func=cmd_intelligence)
     p_int_graph_snapshot = p_int_graph_sub.add_parser("snapshot"); p_int_graph_snapshot.add_argument("--limit", type=int, default=10); p_int_graph_snapshot.set_defaults(func=cmd_intelligence)

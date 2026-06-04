@@ -441,6 +441,88 @@ def _migration_0013_cognitive_graph_layer(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0014_advanced_learning_loops(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS memory_rollups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            level INTEGER NOT NULL,
+            cluster_key TEXT NOT NULL,
+            title TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            source_memory_ids_json TEXT NOT NULL,
+            score REAL DEFAULT 0.0,
+            metadata_json TEXT,
+            archived INTEGER DEFAULT 0,
+            UNIQUE(level, cluster_key)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_rollups_level ON memory_rollups(level)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_rollups_score ON memory_rollups(score)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_rollups_archived ON memory_rollups(archived)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS graph_community_summaries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            community_key TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            node_ids_json TEXT NOT NULL,
+            edge_ids_json TEXT NOT NULL,
+            score REAL DEFAULT 0.0,
+            metadata_json TEXT,
+            archived INTEGER DEFAULT 0
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_graph_summaries_score ON graph_community_summaries(score)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_graph_summaries_archived ON graph_community_summaries(archived)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS failure_cases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            task_id INTEGER,
+            title TEXT NOT NULL,
+            category TEXT NOT NULL,
+            summary TEXT,
+            evidence_json TEXT,
+            strategy_json TEXT,
+            resolved INTEGER DEFAULT 0,
+            archived INTEGER DEFAULT 0,
+            UNIQUE(source_type, source_id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_failure_cases_category ON failure_cases(category)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_failure_cases_task ON failure_cases(task_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_failure_cases_resolved ON failure_cases(resolved)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS circuit_breakers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            breaker_key TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL,
+            category TEXT NOT NULL,
+            failure_count INTEGER DEFAULT 0,
+            threshold_count INTEGER DEFAULT 3,
+            cooldown_seconds INTEGER DEFAULT 1800,
+            last_failure_at TEXT,
+            opened_at TEXT,
+            metadata_json TEXT
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_circuit_breakers_status ON circuit_breakers(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_circuit_breakers_category ON circuit_breakers(category)")
+    conn.execute("""
+        INSERT INTO schema_meta (key, value) VALUES ('schema_version', '0.21.0-alpha')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    """)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("0001_existing_db_repairs", "Backfill approval task links and memory FTS schema", _migration_0001_existing_db_repairs),
     Migration("0002_task_queue_locks", "Add task queue lease, idempotency, and scheduling fields", _migration_0002_task_queue_locks),
@@ -455,6 +537,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration("0011_wake_signals_reactor", "Add wake signal storage for event-driven reactor runtime", _migration_0011_wake_signals_reactor),
     Migration("0012_discord_message_dedupe", "Deduplicate Discord events and enforce message idempotency", _migration_0012_discord_message_dedupe),
     Migration("0013_cognitive_graph_layer", "Add cognitive graph nodes, edges, activations, and traces", _migration_0013_cognitive_graph_layer),
+    Migration("0014_advanced_learning_loops", "Add memory rollups, graph summaries, failure cases, and circuit breakers", _migration_0014_advanced_learning_loops),
 )
 
 
