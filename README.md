@@ -126,6 +126,17 @@ CLI:
 python -m neurokernel_seed.cli activate-work-item <work_id> --db data/harness.db --project-root .
 ```
 
+## SelfPatchWorker v2
+
+SelfPatchWorker는 OmO/AIOS 계열 하네스에서 쓰는 격리 실행과 검증 산출물 패턴을 NeuroKernel에 맞게 단순화한 개발 워커입니다.
+
+- `NEUROKERNEL_SELF_PATCH_ISOLATION=auto`이면 git repo에서는 `git worktree`를 만들고, git repo가 아니면 copy workspace를 만듭니다.
+- live repo는 직접 수정하지 않고, 격리 workspace에서 Codex CLI가 수정한 내용을 `proposal.patch`로 뽑습니다.
+- 작업 산출물은 `proposal.patch`, `summary.json`, `contract.json`, `evidence.json`, `summary.md`, `codex_*`, `test_*`, `diff_check_*` 로그입니다.
+- `git diff --check`가 실패하면 `diff_check_failed`로 남기고 activation으로 올리지 않습니다.
+- `pytest`가 실패하면 `test_failed`로 남기고 사람이 리뷰하거나 워커가 다시 수정해야 합니다.
+- `patch_ready`일 때만 Discord/CLI activation 단계에서 live repo에 적용할 수 있습니다.
+
 ## 운영 원칙
 
 - fallback으로 성공한 척하지 않습니다.

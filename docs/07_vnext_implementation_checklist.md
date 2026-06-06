@@ -15,6 +15,14 @@ This checklist is the next work order after the v4.1 benchmark.
   - [x] writes `proposal.patch`,
   - [x] writes `summary.json`,
   - [x] moves successful patches to `waiting_approval`.
+- [x] SelfPatchWorker v2:
+  - [x] uses `git worktree` isolation for git repos,
+  - [x] keeps copy-mode isolation for non-git projects,
+  - [x] writes `contract.json`,
+  - [x] writes `evidence.json`,
+  - [x] writes human-readable `summary.md`,
+  - [x] runs `git diff --check`,
+  - [x] blocks activation-ready promotion on diff-check failure.
 - [x] Activation Pipeline v1:
   - [x] apply reviewed patch to the live repo,
   - [x] require a clean git tree before activation,

@@ -130,7 +130,7 @@ def _record_work_result(memory: HarnessMemory, *, work_id: str, work_type: str, 
         return
     if status == "patch_ready":
         _transition_if_allowed(memory, work_id, "waiting_approval", actor=actor, payload={"job_id": job_id, "result": result})
-    elif status == "test_failed":
+    elif status in {"test_failed", "diff_check_failed"}:
         _transition_if_allowed(memory, work_id, "reviewing", actor=actor, payload={"job_id": job_id, "result": result})
     elif status in {"no_patch", "ignored"}:
         _transition_if_allowed(memory, work_id, "blocked", actor=actor, payload={"job_id": job_id, "result": result})

@@ -137,6 +137,38 @@ CLI:
 python -m neurokernel_seed.cli activate-work-item <work_id> --db data/harness.db --project-root .
 ```
 
+## SelfPatchWorker v2 Contract
+
+SelfPatchWorker v2 is the Codex development-worker adapter.
+
+Runtime contract:
+
+- It creates an isolated workspace before Codex runs.
+- `NEUROKERNEL_SELF_PATCH_ISOLATION=auto` uses `git worktree` for git repos and copy mode for non-git projects.
+- It never writes directly into the live repo.
+- It records a reproducible artifact bundle under `artifacts/self_patch/<job_id>/`.
+
+Required artifacts:
+
+- `proposal.patch`
+- `summary.json`
+- `contract.json`
+- `evidence.json`
+- `summary.md`
+- `codex_stdout.txt`
+- `codex_stderr.txt`
+- `test_stdout.txt`
+- `test_stderr.txt`
+- `diff_check_stdout.txt`
+- `diff_check_stderr.txt`
+
+Status contract:
+
+- `patch_ready`: patch exists, tests pass, and `git diff --check` passes.
+- `test_failed`: patch exists but tests fail.
+- `diff_check_failed`: patch exists but patch formatting/whitespace validation fails.
+- `no_patch`: Codex produced no repository diff.
+
 API:
 
 ```http
