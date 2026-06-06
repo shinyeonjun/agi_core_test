@@ -34,7 +34,7 @@ class SelfPatchConfig:
     project_root: Path = Path(".")
     run_root: Path = Path("artifacts/self_patch")
     codex_bin: str = "codex"
-    codex_timeout_seconds: int = 900
+    codex_timeout_seconds: int = 420
     test_timeout_seconds: int = 300
     test_command: tuple[str, ...] = ("python", "-m", "pytest", "-q")
     codex_model: str | None = None
@@ -170,7 +170,7 @@ def build_self_patch_config_from_env(*, project_root: str | Path = ".") -> SelfP
         project_root=Path(project_root),
         run_root=Path(os.environ.get("NEUROKERNEL_SELF_PATCH_RUN_ROOT", "artifacts/self_patch")),
         codex_bin=os.environ.get("NEUROKERNEL_SELF_PATCH_CODEX_BIN") or os.environ.get("NEUROKERNEL_CODEX_BIN", "codex"),
-        codex_timeout_seconds=int(os.environ.get("NEUROKERNEL_SELF_PATCH_CODEX_TIMEOUT", "900")),
+        codex_timeout_seconds=int(os.environ.get("NEUROKERNEL_SELF_PATCH_CODEX_TIMEOUT", "420")),
         test_timeout_seconds=int(os.environ.get("NEUROKERNEL_SELF_PATCH_TEST_TIMEOUT", "300")),
         test_command=tuple(_split_command(os.environ.get("NEUROKERNEL_SELF_PATCH_TEST_COMMAND", "python -m pytest -q"))),
         codex_model=os.environ.get("NEUROKERNEL_SELF_PATCH_CODEX_MODEL") or None,
