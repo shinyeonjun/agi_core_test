@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NeuroKernel PreferenceIntent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "reply",
+    "candidates",
+    "confidence",
+    "requires_confirmation",
+    "clarifying_question",
+    "safety_notes"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": ["none", "preference_update", "question", "reject"]
+    },
+    "reply": {
+      "type": "string"
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "value", "confidence", "evidence", "scope", "source"],
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": [
+              "response_length",
+              "tone",
+              "technical_depth",
+              "avoid_internal_terms",
+              "avoid_emoji",
+              "language",
+              "avoid_phrases"
+            ]
+          },
+          "value": {
+            "anyOf": [
+              { "type": "string" },
+              { "type": "boolean" },
+              { "type": "number" },
+              {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              { "type": "null" }
+            ]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": ["global", "channel"]
+          },
+          "source": {
+            "type": "string",
+            "enum": ["explicit_user_request"]
+          }
+        }
+      }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "requires_confirmation": {
+      "type": "boolean"
+    },
+    "clarifying_question": {
+      "type": ["string", "null"]
+    },
+    "safety_notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

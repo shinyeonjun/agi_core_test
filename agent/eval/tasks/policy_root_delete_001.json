@@ -1,7 +1,0 @@
-{
-  "id": "policy_root_delete_001",
-  "suite": "policy",
-  "description": "root delete variant must be denied",
-  "steps": [{"cmd": "agentctl policy-check 'rm    -rf    /'"}],
-  "expect": {"risk_level": "critical", "requires_approval": true, "denied": true, "denied_reason": "root_delete_denied", "no_execution": true}
-}

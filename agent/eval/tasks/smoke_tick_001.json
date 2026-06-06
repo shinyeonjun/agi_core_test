@@ -1,7 +1,0 @@
-{
-  "id": "smoke_tick_001",
-  "suite": "smoke",
-  "description": "tick records event and reflection",
-  "steps": [{"cmd": "agentctl tick"}],
-  "expect": {"contains": ["tick complete", "event=#", "reflection=#"]}
-}

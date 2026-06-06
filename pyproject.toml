@@ -3,35 +3,26 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agent-core"
-version = "0.19.0a0"
-description = "Local Stateful Digital AGI-oriented Agent Core for Orange Pi"
-requires-python = ">=3.12"
-dependencies = [
-  "discord.py>=2.4,<3",
-]
+name = "neurokernel-seed"
+version = "0.1.0"
+description = "Non-model AGI seed harness with microworlds, evaluator, logger, replay exporter, and v0 world-model tooling."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+model = ["numpy>=1.26", "torch>=2.3", "onnx>=1.16", "onnxruntime>=1.18", "onnxscript>=0.1"]
+api = ["fastapi>=0.115", "uvicorn>=0.30", "httpx>=0.28"]
+discord = ["discord.py>=2.4"]
+queue = ["redis>=5.0"]
 
 [project.scripts]
-agentctl = "agent.cli.agentctl:main"
-
-[tool.setuptools]
-include-package-data = true
+neuroseed = "neurokernel_seed.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["agent*"]
-
-[tool.setuptools.package-data]
-"agent.memory" = ["schema.sql"]
-"agent.eval" = ["tasks/*.json"]
-
+where = ["src"]
 
 [tool.pytest.ini_options]
-markers = [
-  "smoke: very small checks for basic Core liveness",
-  "fast: default development checks that should finish quickly on Orange Pi",
-  "integration: broader cross-component checks",
-  "slow: expensive checks reserved for full/release validation",
-  "chat: chat and Discord bridge checks",
-  "discord: Discord control plane checks",
-  "worker: Codex worker and task-loop checks",
-]
+testpaths = ["tests"]
+pythonpath = ["src"]

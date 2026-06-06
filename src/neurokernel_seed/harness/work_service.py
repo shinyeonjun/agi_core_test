@@ -1,0 +1,146 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from .ids import new_id
+from .memory import HarnessMemory
+from .work_queue import WorkQueue, queue_name_for_work_type
+
+
+class WorkItemService:
+    def __init__(self, *, db_path: str | Path, work_queue: WorkQueue | None = None, queue_error: str | None = None):
+        self.db_path = Path(db_path)
+        self.work_queue = work_queue
+        self.queue_error = queue_error
+
+    def queue_health(self) -> dict[str, Any]:
+        if self.work_queue is None:
+            return {"available": False, "reason": self.queue_error or "queue not configured"}
+        try:
+            return self.work_queue.health()
+        except Exception as exc:
+            return {"available": False, "reason": str(exc)}
+
+    def list_items(self, *, limit: int = 20, status: str | None = None, work_type: str | None = None) -> dict[str, Any]:
+        with HarnessMemory(self.db_path) as memory:
+            items = memory.list_work_items(limit=limit, status=status, work_type=work_type)
+        return {"work_items": items}
+
+    def get_item(self, work_id: str) -> dict[str, Any]:
+        with HarnessMemory(self.db_path) as memory:
+            item = memory.get_work_item(work_id)
+            events = memory.work_events(work_id)
+            notes = memory.work_notes(work_id)
+            jobs = memory.list_work_jobs(work_id=work_id, limit=20)
+        return {"work_item": item, "events": events, "notes": notes, "jobs": jobs}
+
+    def list_jobs(
+        self,
+        *,
+        limit: int = 20,
+        work_id: str | None = None,
+        status: str | None = None,
+        queue_name: str | None = None,
+    ) -> dict[str, Any]:
+        with HarnessMemory(self.db_path) as memory:
+            jobs = memory.list_work_jobs(limit=limit, work_id=work_id, status=status, queue_name=queue_name)
+        return {"jobs": jobs}
+
+    def add_note(self, work_id: str, *, actor: str = "api", note: str) -> dict[str, Any]:
+        with HarnessMemory(self.db_path) as memory:
+            note_row = memory.add_work_note(work_id, actor=actor, note=note)
+            item = memory.get_work_item(work_id)
+        return {"work_item": item, "note": note_row}
+
+    def transition(self, work_id: str, next_status: str, *, actor: str = "api", reason: str | None = None) -> dict[str, Any]:
+        with HarnessMemory(self.db_path) as memory:
+            item = memory.transition_work_item(work_id, next_status, actor=actor, payload={"reason": reason})
+            events = memory.work_events(work_id)
+        payload: dict[str, Any] = {"work_item": item, "events": events}
+        if next_status == "accepted":
+            payload["queue"] = self.enqueue(work_id, actor=actor)
+        return payload
+
+    def enqueue(self, work_id: str, *, actor: str = "api", max_attempts: int = 3) -> dict[str, Any]:
+        with HarnessMemory(self.db_path) as memory:
+            work = memory.get_work_item(work_id)
+            existing = memory.find_active_work_job(work_id)
+            if existing:
+                return {"queued": False, "reason": "active_job_exists", "job": existing}
+
+            work_type = str(work.get("type") or "external_work")
+            queue_name = queue_name_for_work_type(work_type)
+            job_id = new_id("job", work_type)
+            payload = _work_job_payload(job_id=job_id, work_id=work_id, work=work, work_type=work_type, queue_name=queue_name)
+            memory.create_work_job(
+                job_id=job_id,
+                work_id=work_id,
+                queue_name=queue_name,
+                status="created",
+                priority=str(work.get("priority") or "medium"),
+                max_attempts=max_attempts,
+                payload=payload,
+                actor=actor,
+            )
+            if self.work_queue is None:
+                memory.mark_work_job_enqueue_failed(job_id, error=self.queue_error or "queue not configured", actor=actor)
+                return {"queued": False, "reason": self.queue_error or "queue not configured", "job": memory.get_work_job(job_id)}
+            try:
+                message_id = self.work_queue.enqueue(queue_name, payload)
+                job = memory.mark_work_job_queued(job_id, redis_message_id=message_id, actor=actor)
+                return {"queued": True, "queue_name": queue_name, "message_id": message_id, "job": job}
+            except Exception as exc:
+                job = memory.mark_work_job_enqueue_failed(job_id, error=str(exc), actor=actor)
+                return {"queued": False, "reason": str(exc), "job": job}
+
+    def create_from_route(
+        self,
+        *,
+        user_text: str,
+        route_decision: dict[str, Any],
+        user_id: str | None = None,
+        channel_id: str | None = None,
+        source_message_id: str | None = None,
+    ) -> dict[str, Any]:
+        route = str(route_decision.get("route") or "clarify")
+        if route in {"runtime_task", "unsafe", "clarify"}:
+            return {"created": False, "route": route, "route_decision": route_decision}
+        work_item = route_decision.get("work_item")
+        if not isinstance(work_item, dict):
+            return {"created": False, "route": "clarify", "route_decision": route_decision}
+        with HarnessMemory(self.db_path) as memory:
+            row = memory.create_work_item(
+                work_id=new_id("work", str(work_item.get("title") or route)),
+                work_type=str(work_item.get("type") or route),
+                title=str(work_item.get("title") or route),
+                goal=str(work_item.get("goal") or user_text),
+                status="proposed",
+                priority=str(work_item.get("priority") or "medium"),
+                risk_level=str(work_item.get("risk_level") or "low"),
+                owner_user_id=user_id,
+                channel_id=channel_id,
+                source_message_id=source_message_id,
+                route_reason=str(route_decision.get("reason") or ""),
+                confidence=float(route_decision.get("confidence") or 0.0),
+                metadata={
+                    "user_text": user_text[:1000],
+                    "route_decision": route_decision,
+                    "deliverables": work_item.get("deliverables") or [],
+                    "open_questions": work_item.get("open_questions") or [],
+                },
+                actor=user_id or "language_organ",
+            )
+        return {"created": True, "route": route, "work_item": row, "route_decision": route_decision}
+
+
+def _work_job_payload(*, job_id: str, work_id: str, work: dict[str, Any], work_type: str, queue_name: str) -> dict[str, Any]:
+    return {
+        "job_id": job_id,
+        "work_id": work_id,
+        "work_type": work_type,
+        "queue_name": queue_name,
+        "priority": work.get("priority") or "medium",
+        "risk_level": work.get("risk_level") or "low",
+        "title": work.get("title") or "",
+    }

@@ -1,202 +1,93 @@
-# agent-core
+# NeuroKernel AGI Seed
 
-Digital AGI-oriented Local Stateful Agent Core for Orange Pi 5. This project does not claim AGI. It builds a testable runtime for persistent state, long-term memory, goals, policy, approvals, reflection, skills, evaluation, safe tool use, and renderer isolation.
+Orange Pi 5에서 24시간 돌리는 AGI seed 하네스입니다. 목표는 "LLM 느낌의 챗봇"이 아니라, 언어기관(LLM)과 실행 코어를 분리하고, 작업 명세, 안전 게이트, 기억, 평가, 워커, 학습 루프를 하나의 검증 가능한 시스템으로 묶는 것입니다.
 
-## Current Scope
+## 현재 상태
 
-- v0.19-alpha Agent OS kernel for Orange Pi
-- Discord conversational control plane
-- Codex-backed language interpretation and rendering with rule fallback
-- Language interpretation cache and redacted interpretation logs
-- Goal deduplication and cooldown
-- Reflection plus skill learner
-- SQLite FTS5 memory search with LIKE fallback
-- Evaluation harness
-- CodexRenderer sanitized isolation boundary with fallback
-- Read-only ToolExecutor and system snapshot
-- WorkspaceExecutor bounded to `/home/ubuntu/agent_workspace`
-- ProjectSpec and workspace artifact tracking
-- Runtime self-map loop for host/service/git/config-presence awareness
-- Split task queue for immediate user tasks and scheduled autonomous tasks
-- Task lifecycle tracking with queued/planning/executing/verifying/reporting/learned phases
-- SQLite task leases, idempotency keys, delayed scheduling fields, and task doctor recovery
-- OS-like Core process table for task/project state, blockers, progress, and next actions
-- Redacted control snapshot for Discord/CLI reporting across process table, goals, approvals, actions, self-map, memory, vectors, metrics, and safety posture
-- Staged project worker loop for planning, implementation, verification, and reporting
-- CorePipeline trace for observe/interpret/retrieve/plan/act/verify/reflect/report phases
-- Typed decision schema with memory, skill, tool routing, policy, and verification metadata
-- Shared failure taxonomy with recovery hints for project worker and decision reporting
-- Operating intelligence snapshots for goal priority, action critic, memory hygiene, skill candidates, and next improvements
-- Cognitive growth algorithms for curiosity, utility/novelty scoring, HTN planning, case memory, Bayesian confidence, MAP-Elites, blackboard, active-inference-lite, and stigmergy markers
-- Cognitive growth pipeline that turns high-pressure growth signals into safe autonomous queue tasks while user tasks keep priority
-- Event Reactor with wake signals, `agentctl reactor once/run/status`, and a parallel systemd service template for event/pressure-driven operation
-- Explicit DB migration status table and `agentctl db migrate/check`
-- systemd unit templates
+- Core API: 로컬 FastAPI 서버로 작업 생성, 실행, 상태 조회를 제공합니다.
+- Discord bot: 지정 채널/허용 사용자에게 대화형으로 반응하고 Core API에 연결됩니다.
+- Memory/Trace: SQLite에 작업, 실행 결과, 실패 기록을 남깁니다.
+- Safety Gate: 읽기 작업은 바로 실행하고, 쓰기/위험 작업은 승인 흐름으로 보냅니다.
+- Capability Proposal: 없는 능력은 바로 거짓 실행하지 않고, 개발 후보로 제안합니다.
+- Queue/Worker: Redis 기반 큐로 self-patch/external-work 작업을 분리할 수 있습니다.
+- World Model: MicroWorld 벤치마크에서 ONNX/RKNN 모델을 연결하고 gate ablation으로 모델 기여를 검증했습니다.
+- Orange Pi 배포: user systemd service로 Core API와 Discord bot을 상시 구동합니다.
 
-Version alignment:
+## 아직 남은 것
 
-- package: `0.19.0a0`
-- schema: `0.19.0-alpha`
-- runtime scope: `v0.19-alpha`
+- Self-Patch worker: 후보 능력을 코드 변경, 테스트, 패치 제안까지 연결하는 워커.
+- Activation pipeline: 승인된 패치를 배포, 리로드, 검증하는 절차.
+- Research/Data worker: 논문/자료 수집, 요약, 데이터셋 변환 파이프라인.
+- Training worker: 노트북 학습 산출물을 Orange Pi 런타임 모델로 승격하는 자동화.
+- 장기 평가: 실제 Discord 사용 로그 기반 실패 원인 분석과 회귀 벤치마크.
 
-## Basic Commands
+## 개발 환경
 
-```bash
-cd /home/ubuntu/agent_core
-source venv/bin/activate
-agentctl init
-agentctl state
-agentctl talk "Core next step?"
-agentctl tick
-agentctl policy-check "apt-get install nginx"
-agentctl eval run policy
-agentctl audit
-agentctl db check
-agentctl db migrate
-agentctl metrics
-agentctl self-map refresh
-agentctl self-map show
-agentctl workspace init
-agentctl workspace report --title "Daily workspace status"
-agentctl autonomy show
-agentctl action history
-agentctl tasks counts
-agentctl tasks list --queue-type user
-agentctl reactor status
-agentctl reactor once
-agentctl process snapshot
-agentctl process list
-agentctl control snapshot
-agentctl project plans
-agentctl intelligence snapshot --persist --refresh
+Windows:
+
+```powershell
+cd D:\agi_seed\agi_core_test
+python -m venv venv
+venv\Scripts\activate
+python -m pip install -U pip
+python -m pip install -e ".[dev,model,api,discord,queue]"
+python -m pytest -q
 ```
 
-Reactor migration note: keep `agent-core-daily-summary.timer` and run `agent-core-reactor.service` in parallel first. Disable or weaken `agent-core-lab-tick.timer` and `agent-core-tick.timer` only after reactor cycles are stable.
-
-## Discord
-
-Put `DISCORD_BOT_TOKEN`, `DISCORD_ALLOWED_USER_IDS`, and optionally `DISCORD_ALLOWED_CHANNEL_IDS` in `.env`.
+Linux/Orange Pi:
 
 ```bash
-python -m agent.bridge.discord_bot --check-config
-python -m agent.bridge.discord_bot
+cd ~/projects/neurokernel-agi-seed
+python3 -m venv venv
+. venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[dev,api,discord,queue]"
+python -m pytest -q
 ```
 
-Discord connects to Core only. Discord input never executes shell commands directly. Risky requests are separated into policy and approval flow.
+## 환경 변수
 
-## Full Device Lab
-
-Default autonomy profile is `safe`. `full_device_lab` must be enabled explicitly before `agentctl action run` can execute local commands. Even in lab mode, secret access, credential exfiltration, remote script execution, network scanning, payment, and cloud creation patterns stay denied.
+`.env.example`을 복사해서 `.env`를 만들고 실제 토큰/채널/사용자 ID를 넣습니다.
 
 ```bash
-agentctl autonomy show
-agentctl autonomy set full_device_lab
-agentctl action run "printf lab-ok"
-agentctl action history
-agentctl autonomy set safe
+cp .env.example .env
 ```
 
-## Runtime Self-Map
+주의: `.env`, `data/`, `artifacts/`, 모델 파일(`*.pt`, `*.onnx`, `*.rknn`)은 Git에 올리지 않습니다.
 
-`self-map` is a safe runtime body map. It records where Core is running, recent git state, service/timer state, autonomy profile, schema/eval summary, and config presence booleans. It does not read or store `.env` values, tokens, private keys, or passwords.
+## Orange Pi 실행
 
-The normal tick loop refreshes it on cooldown, so Discord summaries and chat rendering can use recent verified runtime context without re-running heavy checks on every message.
+수동 실행:
 
 ```bash
-agentctl self-map refresh
-agentctl self-map show
+cd ~/projects/neurokernel-agi-seed
+. venv/bin/activate
+bash tools/run_orangepi_stack.sh
 ```
 
-## Task Queue Split
-
-User-directed work and autonomous scheduled work are intentionally separate.
-
-- Discord user directives enqueue `user` tasks and the chat bridge runs that user task immediately when policy allows it.
-- The lab scheduler only claims `autonomous` tasks. It does not consume user tasks.
-- Memory, events, reflections, goals, self-map, policy, and approvals remain shared state.
+user systemd 서비스 설치:
 
 ```bash
-agentctl tasks counts
-agentctl tasks list --queue-type user
-agentctl tasks list --queue-type autonomous
-agentctl tasks run-user <task_id>
-agentctl tasks doctor
+cd ~/projects/neurokernel-agi-seed
+bash tools/install_orangepi_user_service.sh
+systemctl --user status neurokernel-stack.service --no-pager
 ```
 
-Task queue rows carry a lease (`locked_until`, `locked_by`), idempotency key, scheduling fields (`not_before`, `due_at`), and retry budget. This keeps user-triggered work and scheduler work separate while still sharing memory, goals, approvals, events, reflections, and operating reviews.
-
-## Core Process Table
-
-`process` is the OS-style runtime view. It merges task queue rows, project execution plans, lifecycle events, approval state, progress, blockers, and next actions into one operator-facing table.
+로그 확인:
 
 ```bash
-agentctl process snapshot
-agentctl process list --state waiting
-agentctl process show task:12
-agentctl process show project:3
+journalctl --user -u neurokernel-stack.service -f
 ```
 
-Project plans now advance through `planning`, `implementation`, `verification`, and `reporting` stages. This makes a broad user goal visible as a staged process instead of an opaque one-shot result.
+## Discord 사용
 
-## Control Snapshot
+봇은 허용된 사용자 메시지만 처리합니다. 현재 목표는 명령어 중심 CLI가 아니라 자연어 대화형 인터페이스입니다. 내부적으로는 자연어를 Core가 이해하는 작업 명세로 바꾸고, 실행 결과를 다시 사람 말로 요약합니다.
 
-`agentctl control snapshot` returns a redacted operator snapshot for Discord and CLI workflows. It summarizes process table, user/autonomous queues, goals, approvals, recent actions, events, memory/vector health, skill candidates, self-map, eval status, and capability posture.
+읽기/조회 작업은 바로 실행할 수 있고, 파일 쓰기, 배포, 삭제, 외부 전송, 비밀값 조회 같은 작업은 승인 흐름을 타야 합니다.
 
-It does not expose raw stdout/stderr, approval payload JSON, `.env` values, tokens, private keys, passwords, or webhook URLs. There is no bundled web UI; Discord is the primary control surface.
+## 저장소 운영 원칙
 
-```bash
-agentctl control snapshot
-```
-
-## Operating Intelligence
-
-`agentctl intelligence` exposes Core's current operating review loop. It does not make the model fine-tune itself. It records and reports structured signals that help the Core decide what to improve next.
-
-```bash
-agentctl intelligence snapshot --persist --refresh
-agentctl intelligence priorities --refresh
-agentctl intelligence critics
-agentctl intelligence memory
-agentctl intelligence skills
-```
-
-The Discord observation summary includes the same high-level signals in Korean so the summary channel reads like a control room instead of raw logs.
-
-## Database Migrations
-
-Fresh databases are created from `agent/memory/schema.sql`. Existing databases are repaired through idempotent migrations recorded in `schema_migrations`.
-
-```bash
-agentctl db check
-agentctl db migrate
-```
-
-Migrations are intentionally conservative. They add missing columns, indexes, and tables without reading secrets or rewriting user data.
-
-## Codex Runtime Tuning
-
-Chat and language interpretation use faster Codex settings. Code work should keep the stronger default model.
-
-```bash
-AGENT_CODEX_LANGUAGE_MODEL=gpt-5.3-codex-spark
-AGENT_CODEX_LANGUAGE_REASONING=low
-AGENT_CODEX_LANGUAGE_TIMEOUT=20
-AGENT_CODEX_RENDERER_MODEL=gpt-5.3-codex-spark
-AGENT_CODEX_RENDERER_REASONING=low
-AGENT_CODEX_RENDERER_TIMEOUT=20
-AGENT_CODEX_WORK_MODEL=gpt-5.5
-AGENT_CODEX_WORK_REASONING=medium
-```
-
-Optional long-running code work can use Core's native work loop as the work backend. Core owns policy, memory, Discord reporting, unsafe-diff checks, worktree isolation, evidence collection, verification, and retry.
-
-```bash
-# user-triggered code work runs through a Core-owned loop:
-AGENT_CODEX_WORK_BACKEND=native_loop
-AGENT_WORK_LOOP_TIMEOUT=600
-AGENT_WORK_LOOP_ITERATIONS=2
-AGENT_WORK_LOOP_WORKTREE=1
-AGENT_WORK_LOOP_VERIFY_COMMANDS="python -m pytest -q"
-```
-
-Native work-loop runs use a separate git worktree by default under the agent workspace. This keeps user-triggered code work separate from autonomous study/self-improvement loops while still writing evidence, changed-file summaries, verification output, and a Discord-facing report.
+- 공개 저장소에는 코드, 문서, 스키마, 테스트만 올립니다.
+- 학습 데이터, 런타임 DB, 로그, 모델 산출물은 로컬/Orange Pi에만 둡니다.
+- fallback으로 성공한 척하지 않습니다. 실패하면 실패 원인과 필요한 다음 액션을 기록합니다.
+- 하드코딩 규칙을 늘리기보다 schema, evaluator, trace, worker contract로 일반화합니다.

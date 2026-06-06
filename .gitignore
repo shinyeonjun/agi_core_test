@@ -1,22 +1,44 @@
+# Python
 venv/
+.venv/
 __pycache__/
-*.pyc
-.env
+*.py[cod]
 *.egg-info/
-dist/
-build/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
 htmlcov/
-data/
-logs/
-renderer_workspace/
-.tmp*/
-data/agent.db*
-logs/*.log
-renderer_workspace/input.json
-renderer_workspace/output.md
+build/
+dist/
 
-data/state.json
-data/backups/
-data/recovery/
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Runtime data and artifacts
+data/
+artifacts/
+baselines/
+logs/
+language_workspace/
+model_transrate/
+tmp/
+.tmp*/
+*.db
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.pt
+*.onnx
+*.rknn
+*.jsonl
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

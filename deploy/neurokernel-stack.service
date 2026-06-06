@@ -1,0 +1,15 @@
+[Unit]
+Description=NeuroKernel AGI Seed Core API and Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/projects/neurokernel-agi-seed
+EnvironmentFile=-/home/ubuntu/projects/neurokernel-agi-seed/.env
+ExecStart=/usr/bin/bash /home/ubuntu/projects/neurokernel-agi-seed/tools/run_orangepi_stack.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

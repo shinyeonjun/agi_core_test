@@ -2,29 +2,23 @@ name: tests
 
 on:
   push:
-    branches: ["main"]
   pull_request:
 
 jobs:
   pytest:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install package
+      - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .
+          python -m pip install -U pip
+          python -m pip install -e ".[dev,model,api,discord,queue]"
 
       - name: Run tests
-        env:
-          AGENT_LANGUAGE_ENGINE: rule
-          AGENT_CHAT_RENDERER: fallback
         run: python -m pytest -q
