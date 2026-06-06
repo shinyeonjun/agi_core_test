@@ -1,0 +1,165 @@
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from neurokernel_seed.harness.activation import ActivationConfig, ActivationError, ActivationService
+from neurokernel_seed.harness.memory import HarnessMemory
+from neurokernel_seed.harness.service import HarnessService
+
+
+def test_activation_applies_patch_runs_tests_and_marks_proposal_active(tmp_path):
+    project = _make_git_project(tmp_path)
+    db_path = tmp_path / "harness.db"
+    service = HarnessService(db_path=db_path, project_root=project)
+    proposal = service.create_capability_proposal_from_intent(
+        user_text="CPU 사용률 볼 수 있어?",
+        user_id="discord:1",
+        channel_id="chan",
+        capability_intent=_cpu_usage_intent(),
+    )
+    proposal_id = proposal["proposal"]["proposal_id"]
+    work_id = proposal["work_item"]["work_id"]
+    service.transition_capability_proposal(proposal_id, "approved_for_dev", actor="discord:1")
+    patch_path = _make_patch(project, tmp_path, work_id=work_id)
+    with HarnessMemory(db_path) as memory:
+        memory.transition_work_item(work_id, "waiting_approval", actor="test", payload={"patch_path": str(patch_path)})
+        memory.add_work_event(
+            work_id,
+            "job_completed",
+            actor="worker",
+            payload={"job_id": "job1", "result": {"status": "patch_ready", "patch_path": str(patch_path), "changed_files": ["src/demo.py"]}},
+        )
+        memory.conn.commit()
+
+    result = ActivationService(
+        ActivationConfig(
+            db_path=db_path,
+            project_root=project,
+            self_patch_run_root=project / "artifacts" / "self_patch",
+            test_command=("python", "-c", "from pathlib import Path; assert Path('src/demo.py').read_text().strip() == 'VALUE = 2'"),
+        )
+    ).activate_work_item(work_id, actor="test")
+
+    assert result["activated"] is True
+    assert result["service_reload_required"] is True
+    assert (project / "src" / "demo.py").read_text(encoding="utf-8").strip() == "VALUE = 2"
+    detail = service.work_item(work_id)
+    assert detail["work_item"]["status"] == "completed"
+    assert service.capability_proposal(proposal_id)["proposal"]["status"] == "active"
+
+
+def test_activation_blocks_dirty_live_repo(tmp_path):
+    project = _make_git_project(tmp_path)
+    db_path = tmp_path / "harness.db"
+    service = HarnessService(db_path=db_path, project_root=project)
+    proposal = service.create_capability_proposal_from_intent(user_text="CPU 사용률", capability_intent=_cpu_usage_intent())
+    work_id = proposal["work_item"]["work_id"]
+    proposal_id = proposal["proposal"]["proposal_id"]
+    service.transition_capability_proposal(proposal_id, "approved_for_dev", actor="test")
+    patch_path = _make_patch(project, tmp_path, work_id=work_id)
+    (project / "README.md").write_text("dirty\n", encoding="utf-8")
+    with HarnessMemory(db_path) as memory:
+        memory.transition_work_item(work_id, "waiting_approval", actor="test", payload={})
+        memory.add_work_event(work_id, "job_completed", actor="worker", payload={"job_id": "job1", "result": {"status": "patch_ready", "patch_path": str(patch_path)}})
+        memory.conn.commit()
+
+    with pytest.raises(ActivationError, match="clean tree"):
+        ActivationService(
+            ActivationConfig(
+                db_path=db_path,
+                project_root=project,
+                self_patch_run_root=project / "artifacts" / "self_patch",
+                test_command=("python", "-c", "pass"),
+            )
+        ).activate_work_item(work_id, actor="test")
+
+
+def test_activation_rolls_back_when_tests_fail(tmp_path):
+    project = _make_git_project(tmp_path)
+    db_path = tmp_path / "harness.db"
+    service = HarnessService(db_path=db_path, project_root=project)
+    proposal = service.create_capability_proposal_from_intent(user_text="CPU 사용률", capability_intent=_cpu_usage_intent())
+    work_id = proposal["work_item"]["work_id"]
+    proposal_id = proposal["proposal"]["proposal_id"]
+    service.transition_capability_proposal(proposal_id, "approved_for_dev", actor="test")
+    patch_path = _make_patch(project, tmp_path, work_id=work_id)
+    with HarnessMemory(db_path) as memory:
+        memory.transition_work_item(work_id, "waiting_approval", actor="test", payload={})
+        memory.add_work_event(work_id, "job_completed", actor="worker", payload={"job_id": "job1", "result": {"status": "patch_ready", "patch_path": str(patch_path)}})
+        memory.conn.commit()
+
+    with pytest.raises(ActivationError, match="tests failed"):
+        ActivationService(
+            ActivationConfig(
+                db_path=db_path,
+                project_root=project,
+                self_patch_run_root=project / "artifacts" / "self_patch",
+                test_command=("python", "-c", "raise SystemExit(1)"),
+            )
+        ).activate_work_item(work_id, actor="test")
+
+    assert (project / "src" / "demo.py").read_text(encoding="utf-8").strip() == "VALUE = 1"
+    assert service.work_item(work_id)["work_item"]["status"] == "reviewing"
+
+
+def _make_git_project(tmp_path) -> Path:
+    project = tmp_path / "project"
+    (project / "src").mkdir(parents=True)
+    (project / ".gitignore").write_text("artifacts/\n", encoding="utf-8")
+    (project / "src" / "demo.py").write_text("VALUE = 1\n", encoding="utf-8")
+    _git(project, "init")
+    _git(project, "config", "user.name", "Test")
+    _git(project, "config", "user.email", "test@example.invalid")
+    _git(project, "add", "-A")
+    _git(project, "commit", "-m", "baseline")
+    return project
+
+
+def _make_patch(project: Path, tmp_path, *, work_id: str) -> Path:
+    (project / "src" / "demo.py").write_text("VALUE = 2\n", encoding="utf-8")
+    patch = project / "artifacts" / "self_patch" / "job1" / "proposal.patch"
+    patch.parent.mkdir(parents=True)
+    diff = subprocess.run(["git", "diff", "--no-ext-diff", "--binary"], cwd=project, text=True, encoding="utf-8", capture_output=True, check=True).stdout
+    patch.write_text(diff, encoding="utf-8")
+    subprocess.run(["git", "checkout", "--", "src/demo.py"], cwd=project, check=True)
+    return patch
+
+
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=cwd, text=True, encoding="utf-8", capture_output=True, check=True)
+
+
+def _cpu_usage_intent():
+    return {
+        "kind": "gap",
+        "reply": "CPU 사용률 확인 능력을 후보로 올릴게.",
+        "gap": {
+            "gap_type": "missing_action",
+            "requested_capability": "현재 CPU 사용률 확인",
+            "normalized_request": "orangepi5 현재 CPU 사용률을 조회한다",
+            "matched_existing_actions": [],
+            "confidence": 0.9,
+        },
+        "proposal": {
+            "action_id": "get_cpu_usage",
+            "capability_name": "CPU 사용률 확인",
+            "purpose": "Orange Pi 5의 현재 CPU 사용률을 조회한다.",
+            "target": "orangepi5",
+            "risk_level": "low",
+            "side_effect": False,
+            "requires_approval": False,
+            "inputs": {"type": "object", "properties": {}, "required": []},
+            "outputs": {"type": "object", "properties": {"used_percent": {"type": "number"}}, "required": ["used_percent"]},
+            "implementation_hint": {"executor": "readonly_system", "suggested_library": "psutil", "notes": "read-only"},
+            "test_plan": [{"name": "returns_percent", "type": "unit", "assertions": ["0 <= used_percent <= 100"]}],
+            "safety_notes": ["read-only"],
+            "confidence": 0.9,
+            "approval_required_for_implementation": True,
+            "activation_requires_tests": True,
+        },
+        "confidence": 0.9,
+        "requires_confirmation": False,
+        "clarifying_question": None,
+        "safety_notes": [],
+    }

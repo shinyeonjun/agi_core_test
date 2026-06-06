@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from .action_catalog import ActionDefinition, default_action_catalog, public_catalog
+from .activation import ActivationService, build_activation_config_from_env
 from .capability_service import CapabilityProposalService
 from .executors.benchmark import BenchmarkExecutor
 from .executors.readonly_system import ReadOnlyExecutor
@@ -40,6 +41,7 @@ class HarnessService:
         self.work_queue, self.queue_error = _resolve_work_queue(work_queue)
         self.work_items_service = WorkItemService(db_path=self.db_path, work_queue=self.work_queue, queue_error=self.queue_error)
         self.capability_service = CapabilityProposalService(db_path=self.db_path, catalog=self.catalog, work_items=self.work_items_service)
+        self.activation_service = ActivationService(build_activation_config_from_env(db_path=self.db_path, project_root=self.project_root))
 
     def health(self) -> dict[str, Any]:
         return {"ok": True, "service": "neurokernel-harness-v0"}
@@ -106,6 +108,9 @@ class HarnessService:
 
     def enqueue_work_item(self, work_id: str, *, actor: str = "api", max_attempts: int = 3) -> dict[str, Any]:
         return self.work_items_service.enqueue(work_id, actor=actor, max_attempts=max_attempts)
+
+    def activate_work_item(self, work_id: str, *, actor: str = "api") -> dict[str, Any]:
+        return self.activation_service.activate_work_item(work_id, actor=actor)
 
     def create_work_item_from_route(
         self,

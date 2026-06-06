@@ -4,10 +4,12 @@ from __future__ import annotations
 PROPOSAL_TRANSITIONS: dict[str, set[str]] = {
     "proposed": {"approved_for_dev", "rejected", "deferred", "duplicate", "unsafe"},
     "deferred": {"proposed", "approved_for_dev", "rejected"},
-    "approved_for_dev": {"deferred", "rejected"},
+    "approved_for_dev": {"active", "deferred", "rejected"},
+    "active": {"archived"},
     "duplicate": set(),
     "unsafe": set(),
     "rejected": set(),
+    "archived": set(),
 }
 
 WORK_ITEM_TRANSITIONS: dict[str, set[str]] = {

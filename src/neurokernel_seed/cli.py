@@ -275,6 +275,11 @@ def main(argv: list[str] | None = None) -> int:
         result = service.reject(args.task_id, rejected_by=args.rejected_by, reason=args.reason)
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
+    if args.cmd == "activate-work-item":
+        service = _make_harness_service(args.db, args.project_root)
+        result = service.activate_work_item(args.work_id, actor=args.actor)
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
     if args.cmd == "serve-core-api":
         from neurokernel_seed.api.server import serve
         serve(host=args.host, port=args.port, db_path=args.db, project_root=args.project_root)

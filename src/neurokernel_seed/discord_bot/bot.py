@@ -153,6 +153,9 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
     def work_view_factory(work_id: str):
         return WorkReviewView(work_id)
 
+    def activation_view_factory(work_id: str):
+        return ActivationReviewView(work_id)
+
     class ProposalReviewView(discord.ui.View):
         def __init__(self, proposal_id: str):
             super().__init__(timeout=60 * 60 * 24)
@@ -196,7 +199,7 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
         async def _allowed(self, interaction: Any) -> bool:
             user_id = int(getattr(getattr(interaction, "user", None), "id", 0) or 0)
             if config.allowed_user_ids and user_id not in config.allowed_user_ids:
-                await interaction.response.send_message("button is restricted", ephemeral=True)
+                await interaction.response.send_message("이 버튼은 허용된 사용자만 누를 수 있어.", ephemeral=True)
                 return False
             return True
 
@@ -207,21 +210,55 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
                 payload = await _call(core.post, f"/work-items/{self.work_id}/status", {"status": status, "actor": _interaction_user_id(interaction)})
                 item = payload.get("work_item", {}) if isinstance(payload, dict) else {}
                 title = item.get("title") or "work"
-                await interaction.response.edit_message(content=f"{label}: {title}\nstatus: `{status}`", view=None)
+                await interaction.response.edit_message(content=f"{label}: {title}\n상태: `{status}`", view=None)
             except Exception as exc:
-                await interaction.response.send_message(f"failed: `{type(exc).__name__}: {exc}`", ephemeral=True)
+                await interaction.response.send_message(f"처리 실패: `{type(exc).__name__}: {exc}`", ephemeral=True)
 
-        @discord.ui.button(label="Accept work", style=discord.ButtonStyle.success)
+        @discord.ui.button(label="작업 승인", style=discord.ButtonStyle.success)
         async def accept_work(self, interaction: Any, button: Any) -> None:
-            await self._transition(interaction, "accepted", "Work accepted")
+            await self._transition(interaction, "accepted", "작업을 승인했어")
 
-        @discord.ui.button(label="Defer", style=discord.ButtonStyle.secondary)
+        @discord.ui.button(label="보류", style=discord.ButtonStyle.secondary)
         async def defer_work(self, interaction: Any, button: Any) -> None:
-            await self._transition(interaction, "deferred", "Work deferred")
+            await self._transition(interaction, "deferred", "작업을 보류했어")
 
-        @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger)
+        @discord.ui.button(label="거절", style=discord.ButtonStyle.danger)
         async def reject_work(self, interaction: Any, button: Any) -> None:
-            await self._transition(interaction, "rejected", "Work rejected")
+            await self._transition(interaction, "rejected", "작업을 거절했어")
+
+    class ActivationReviewView(discord.ui.View):
+        def __init__(self, work_id: str):
+            super().__init__(timeout=60 * 60 * 24)
+            self.work_id = work_id
+
+        async def _allowed(self, interaction: Any) -> bool:
+            user_id = int(getattr(getattr(interaction, "user", None), "id", 0) or 0)
+            if config.allowed_user_ids and user_id not in config.allowed_user_ids:
+                await interaction.response.send_message("이 버튼은 허용된 사용자만 누를 수 있어.", ephemeral=True)
+                return False
+            return True
+
+        @discord.ui.button(label="패치 장착 승인", style=discord.ButtonStyle.success)
+        async def activate(self, interaction: Any, button: Any) -> None:
+            if not await self._allowed(interaction):
+                return
+            try:
+                payload = await _call(core.post, f"/work-items/{self.work_id}/activate", {"actor": _interaction_user_id(interaction)})
+                action = (payload.get("action_id") or payload.get("proposal_id") or self.work_id) if isinstance(payload, dict) else self.work_id
+                reload_note = "\n서비스 재시작이 필요해." if isinstance(payload, dict) and payload.get("service_reload_required") else ""
+                await interaction.response.edit_message(content=f"장착 완료: `{action}`{reload_note}", view=None)
+            except Exception as exc:
+                await interaction.response.send_message(f"장착 실패: `{type(exc).__name__}: {exc}`", ephemeral=True)
+
+        @discord.ui.button(label="수정 필요", style=discord.ButtonStyle.secondary)
+        async def needs_review(self, interaction: Any, button: Any) -> None:
+            if not await self._allowed(interaction):
+                return
+            try:
+                await _call(core.post, f"/work-items/{self.work_id}/status", {"status": "reviewing", "actor": _interaction_user_id(interaction), "reason": "activation review requested"})
+                await interaction.response.edit_message(content="장착 보류. 수정/리뷰 상태로 돌려둘게.", view=None)
+            except Exception as exc:
+                await interaction.response.send_message(f"처리 실패: `{type(exc).__name__}: {exc}`", ephemeral=True)
 
     @client.event
     async def on_message(message: Any) -> None:
@@ -240,7 +277,7 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
         channel_id = _discord_channel_id(message)
         await _record_message(core, message, role="user", content=content)
         try:
-            response = await _handle_command(command_line, core, config, user_id=user_id, channel_id=channel_id, proposal_view_factory=proposal_view_factory, work_view_factory=work_view_factory)
+            response = await _handle_command(command_line, core, config, user_id=user_id, channel_id=channel_id, proposal_view_factory=proposal_view_factory, work_view_factory=work_view_factory, activation_view_factory=activation_view_factory)
         except Exception as exc:  # Discord handlers should never crash the bot.
             response = f"실행 실패: `{type(exc).__name__}: {exc}`"
         response_text = response.text if isinstance(response, BotResponse) else str(response)
@@ -268,7 +305,7 @@ def _command_line_from_content(content: str, config: DiscordBotConfig) -> str | 
     return f"auto {content}"
 
 
-async def _handle_command(command_line: str, core: CoreClient, config: DiscordBotConfig, *, user_id: str | None = None, channel_id: str | None = None, proposal_view_factory: Any | None = None, work_view_factory: Any | None = None) -> str | BotResponse:
+async def _handle_command(command_line: str, core: CoreClient, config: DiscordBotConfig, *, user_id: str | None = None, channel_id: str | None = None, proposal_view_factory: Any | None = None, work_view_factory: Any | None = None, activation_view_factory: Any | None = None) -> str | BotResponse:
     command, _, rest = command_line.partition(" ")
     command = command.lower().strip()
     rest = rest.strip()
@@ -293,7 +330,7 @@ async def _handle_command(command_line: str, core: CoreClient, config: DiscordBo
     if command == "memory":
         return await _handle_memory(rest, core, user_id=user_id, channel_id=channel_id)
     if command == "work":
-        return await _handle_work(rest, core)
+        return await _handle_work(rest, core, activation_view_factory=activation_view_factory)
     if command == "run":
         return await _run_preset(rest, core, user_id=user_id, channel_id=channel_id)
     if command == "benchmark":
@@ -593,7 +630,7 @@ async def _handle_memory(rest: str, core: CoreClient, *, user_id: str | None, ch
     return "`memory recent` 또는 `memory context`로 말해줘."
 
 
-async def _handle_work(rest: str, core: CoreClient) -> str:
+async def _handle_work(rest: str, core: CoreClient, *, activation_view_factory: Any | None = None) -> str | BotResponse:
     command, _, tail = rest.partition(" ")
     command = command.lower().strip() or "list"
     tail = tail.strip()
@@ -614,7 +651,19 @@ async def _handle_work(rest: str, core: CoreClient) -> str:
         item = payload.get("work_item") if isinstance(payload, dict) else {}
         if not item:
             return "그 작업을 못 찾았어."
-        return _format_work_item_response(item, payload if isinstance(payload, dict) else {})
+        text = _format_work_item_response(item, payload if isinstance(payload, dict) else {})
+        if item.get("status") == "waiting_approval" and activation_view_factory:
+            return BotResponse(text, view=activation_view_factory(str(item.get("work_id"))))
+        return text
+    if command == "activate":
+        work_id = tail.split()[0] if tail else ""
+        if not work_id:
+            return "장착할 작업 id를 붙여줘."
+        payload = await _call(core.post, f"/work-items/{quote(work_id)}/activate", {"actor": "discord"})
+        if isinstance(payload, dict) and payload.get("activated"):
+            reload_note = "\n서비스 재시작이 필요해." if payload.get("service_reload_required") else ""
+            return f"장착 완료: `{payload.get('action_id') or work_id}`{reload_note}"
+        return format_code_block(payload)
     return "`work list` 또는 `work show <id>`로 볼 수 있어."
 
 

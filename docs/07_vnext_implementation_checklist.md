@@ -15,12 +15,16 @@ This checklist is the next work order after the v4.1 benchmark.
   - [x] writes `proposal.patch`,
   - [x] writes `summary.json`,
   - [x] moves successful patches to `waiting_approval`.
-- [ ] Activation Pipeline:
-  - [ ] apply reviewed patch to the live repo,
-  - [ ] rerun tests in the live repo,
-  - [ ] reload the Orange Pi service,
+- [x] Activation Pipeline v1:
+  - [x] apply reviewed patch to the live repo,
+  - [x] require a clean git tree before activation,
+  - [x] rerun tests in the live repo,
+  - [x] roll back the patch when tests fail,
+  - [x] expose Core API / CLI / Discord activation entrypoints,
+  - [x] mark the linked capability proposal active after successful activation,
+  - [ ] reload the Orange Pi service automatically,
   - [ ] verify the newly added action through Discord,
-  - [ ] mark the capability proposal active only after verification.
+  - [ ] commit or archive the accepted activation as a durable baseline.
 - [ ] Dynamic Action Registry:
   - [ ] load action definitions from a versioned registry file,
   - [ ] bind registry entries to executor adapters,

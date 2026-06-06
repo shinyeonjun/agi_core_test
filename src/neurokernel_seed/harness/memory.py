@@ -644,6 +644,13 @@ class HarnessMemory:
             raise KeyError(f"unknown capability proposal: {proposal_id}")
         return _row(row)
 
+    def find_capability_proposal_by_work_id(self, work_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT * FROM capability_proposals WHERE work_id=? ORDER BY created_at DESC LIMIT 1",
+            (_required_text(work_id, "work_id"),),
+        ).fetchone()
+        return _row(row) if row is not None else None
+
     def list_capability_gaps(self, *, limit: int = 20, status: str | None = None) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 100))
         if status:
@@ -687,4 +694,3 @@ class HarnessMemory:
     def proposal_events(self, proposal_id: str) -> list[dict[str, Any]]:
         rows = self.conn.execute("SELECT * FROM proposal_events WHERE proposal_id=? ORDER BY event_id", (proposal_id,)).fetchall()
         return [_row(row) for row in rows]
-

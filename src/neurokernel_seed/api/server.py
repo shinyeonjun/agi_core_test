@@ -75,6 +75,11 @@ def create_app(*, db_path: str | Path = "data/harness.db", project_root: str | P
             reason=payload.get("reason"),
         )
 
+    @app.post("/work-items/{work_id}/activate")
+    def work_item_activate(work_id: str, payload: dict[str, Any] | None = None):
+        payload = payload or {}
+        return service.activate_work_item(work_id, actor=str(payload.get("actor") or "api"))
+
     @app.post("/work/route")
     def work_route(payload: dict[str, Any]):
         user_text = str(payload.get("user_text") or payload.get("text") or "").strip()
@@ -251,7 +256,17 @@ def create_app(*, db_path: str | Path = "data/harness.db", project_root: str | P
     def language_to_core(payload: dict[str, Any]):
         user_text = str(payload.get("user_text") or payload.get("text") or "").strip()
         if not user_text:
-            return {"intent": "unknown", "reply": "무슨 작업인지 조금 더 말해줘.", "task_spec": None, "dev_task": None, "approval": None, "confidence": 0.0, "requires_confirmation": True, "clarifying_question": "무엇을 확인하거나 실행하면 될까?", "safety_notes": ["empty_input"]}
+            return {
+                "intent": "unknown",
+                "reply": "무슨 작업인지 조금 더 말해줘.",
+                "task_spec": None,
+                "dev_task": None,
+                "approval": None,
+                "confidence": 0.0,
+                "requires_confirmation": True,
+                "clarifying_question": "무엇을 확인하거나 실행하면 될까?",
+                "safety_notes": ["empty_input"],
+            }
         context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
         user_id = str(context.get("user_id") or payload.get("user_id") or "").strip()
         channel_id = str(context.get("channel_id") or payload.get("channel_id") or "").strip()

@@ -95,8 +95,6 @@ class CapabilityProposalService:
         )
 
     def transition(self, proposal_id: str, next_status: str, *, actor: str = "api", reason: str | None = None) -> dict[str, Any]:
-        if next_status == "active":
-            raise ValueError("capability proposals cannot become active in v1")
         enqueue_work_id = None
         with HarnessMemory(self.db_path) as memory:
             proposal = memory.transition_capability_proposal(proposal_id, next_status, actor=actor, payload={"reason": reason})
