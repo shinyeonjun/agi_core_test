@@ -439,8 +439,13 @@ def _format_work_notification(payload: dict[str, Any]) -> tuple[str, str | None]
         if changed_text:
             lines.append(f"바뀐 파일: {changed_text}")
         return "\n".join(lines), "activation"
-    if status == "reviewing" and result_status in {"test_failed", "diff_check_failed"}:
-        reason = "테스트 실패" if result_status == "test_failed" else "패치 형식 검사 실패"
+    if status == "reviewing" and result_status in {"test_failed", "diff_check_failed", "codex_failed"}:
+        reason_by_status = {
+            "test_failed": "테스트 실패",
+            "diff_check_failed": "패치 형식 검사 실패",
+            "codex_failed": "개발 워커 실행 실패",
+        }
+        reason = reason_by_status.get(result_status, "수정 필요")
         lines = [
             f"개발 시도는 끝났는데 바로 장착하면 안 돼: {title}",
             f"이유: {reason}",
@@ -462,7 +467,7 @@ def _latest_self_patch_result(events: Any) -> dict[str, Any]:
     if not isinstance(events, list):
         return {}
     for event in reversed(events):
-        if not isinstance(event, dict) or event.get("event_type") != "job_completed":
+        if not isinstance(event, dict) or event.get("event_type") not in {"job_completed", "self_patch_failed"}:
             continue
         payload = event.get("payload_json")
         if isinstance(payload, str):

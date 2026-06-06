@@ -206,7 +206,7 @@ def _work_job_payload(*, job_id: str, work_id: str, work: dict[str, Any], work_t
 
 def _latest_self_patch_result(events: list[dict[str, Any]]) -> dict[str, Any]:
     for event in reversed(events):
-        if event.get("event_type") != "job_completed":
+        if event.get("event_type") not in {"job_completed", "self_patch_failed"}:
             continue
         payload = event.get("payload_json")
         if not isinstance(payload, dict):
@@ -223,6 +223,7 @@ def _trim_self_patch_result(result: dict[str, Any]) -> dict[str, Any]:
         "job_id": result.get("job_id"),
         "patch_path": result.get("patch_path"),
         "changed_files": result.get("changed_files") or [],
+        "error": result.get("error"),
         "next_required_action": result.get("next_required_action"),
     }
     for key in ("test", "diff_check", "codex"):

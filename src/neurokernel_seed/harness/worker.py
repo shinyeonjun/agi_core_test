@@ -77,7 +77,19 @@ class WorkDispatcher:
         except Exception as exc:
             with HarnessMemory(self.config.db_path) as memory:
                 try:
-                    job = memory.mark_work_job_failed(job_id, error=str(exc), actor=self.config.worker_id, retryable=True)
+                    is_self_patch = str(payload.get("work_type") or "") == "self_patch"
+                    job = memory.mark_work_job_failed(job_id, error=str(exc), actor=self.config.worker_id, retryable=not is_self_patch)
+                    if is_self_patch:
+                        result = {
+                            "status": "codex_failed",
+                            "job_id": job_id,
+                            "work_id": work_id,
+                            "error": str(exc),
+                            "next_required_action": "retry_self_patch_after_error",
+                        }
+                        memory.add_work_event(work_id, "self_patch_failed", actor=self.config.worker_id, payload={"job_id": job_id, "result": result})
+                        memory.add_work_note(work_id, actor=self.config.worker_id, note=_result_note("self_patch", job_id, result))
+                        _transition_if_allowed(memory, work_id, "reviewing", actor=self.config.worker_id, payload={"job_id": job_id, "result": result})
                     if job.get("status") == "dead_letter":
                         self.work_queue.dead_letter({"job_id": job_id, "work_id": work_id, "queue_name": queue_name, "error": str(exc), "payload": payload})
                         self.work_queue.ack(queue_name, message_id)

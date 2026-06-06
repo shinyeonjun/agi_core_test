@@ -214,3 +214,20 @@ def test_format_work_notification_offers_activation_for_patch_ready():
 
     assert view_kind == "activation"
     assert "테스트를 통과" in text
+
+
+def test_format_work_notification_reports_codex_failed_patch_with_retry_button_kind():
+    text, view_kind = _format_work_notification(
+        {
+            "work_item": {"work_id": "work1", "title": "CPU 코어별 사용률 확인", "status": "reviewing"},
+            "events": [
+                {
+                    "event_type": "self_patch_failed",
+                    "payload_json": '{"result":{"status":"codex_failed","error":"timeout"}}',
+                }
+            ],
+        }
+    )
+
+    assert view_kind == "retry"
+    assert "개발 워커 실행 실패" in text

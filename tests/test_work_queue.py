@@ -130,6 +130,38 @@ def test_retry_reviewing_self_patch_requeues_with_previous_failure_context(tmp_p
     assert retry_payload["retry"]["previous_result"]["test"]["returncode"] == 1
 
 
+def test_dispatcher_returns_self_patch_exception_to_reviewing(tmp_path):
+    queue = InMemoryWorkQueue()
+    service = HarnessService(db_path=tmp_path / "harness.db", project_root=tmp_path, work_queue=queue)
+    proposal = service.create_capability_proposal_from_intent(
+        user_text="CPU failure path",
+        user_id="discord:1",
+        channel_id="chan",
+        capability_intent=_cpu_usage_intent(),
+    )
+    work_id = proposal["work_item"]["work_id"]
+    service.transition_capability_proposal(proposal["proposal"]["proposal_id"], "approved_for_dev", actor="discord:1")
+
+    dispatcher = WorkDispatcher(
+        config=WorkDispatcherConfig(db_path=Path(tmp_path / "harness.db"), project_root=tmp_path, worker_id="test-worker", queues=("self_patch",), once=True),
+        work_queue=queue,
+        self_patch_runner=FakeRaisingSelfPatchRunner(),
+    )
+    dispatcher.run_once()
+
+    item = service.work_item(work_id)
+    assert item["work_item"]["status"] == "reviewing"
+    assert item["jobs"][0]["status"] == "dead_letter"
+    assert queue.acked
+    assert queue.dead_letters
+
+    retry = service.retry_work_item(work_id, actor="discord:1")
+    retry_payload = queue.messages[-1][2]
+    assert retry["queued"] is True
+    assert retry_payload["retry"]["previous_result"]["status"] == "codex_failed"
+    assert "boom" in retry_payload["retry"]["previous_result"]["error"]
+
+
 def test_dispatcher_defaults_to_trigger_style_blocking_read():
     assert WorkDispatcherConfig().block_ms == 0
     assert WorkDispatcherConfig().idle_sleep_seconds == 0.0
@@ -158,6 +190,11 @@ class FakeFailedSelfPatchRunner:
             "test": {"returncode": 1, "stdout_tail": "assert False", "stderr_tail": ""},
             "diff_check": {"returncode": 0, "stdout_tail": "", "stderr_tail": ""},
         }
+
+
+class FakeRaisingSelfPatchRunner:
+    def run(self, *, job_id, work, payload):
+        raise RuntimeError("boom from self-patch runner")
 
 
 def _external_work_route():
