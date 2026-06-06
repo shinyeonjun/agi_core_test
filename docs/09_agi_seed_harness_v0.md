@@ -113,6 +113,9 @@ Activation Pipeline은 승인된 self-patch 결과를 실제 프로젝트에 붙
 
 - patch를 live repo에 적용한다.
 - live repo 테스트를 실행한다.
+- fresh action catalog를 다시 로드한다.
+- proposal의 `action_id`가 catalog에 실제로 등록됐는지 확인한다.
+- smoke-test 가능한 action이면 즉시 실행해서 성공 여부를 확인한다.
 - 성공한 변경을 git commit으로 남긴다.
 - activation manifest와 patch를 `artifacts/activations/<work_id>/`에 보관한다.
 - `NEUROKERNEL_ACTIVATION_RELOAD_COMMAND`가 설정되어 있으면 지연 restart를 예약한다.
@@ -124,6 +127,7 @@ Activation Pipeline은 승인된 self-patch 결과를 실제 프로젝트에 붙
 
 - apply 실패면 live repo를 건드리지 않는다.
 - test 실패면 patch를 reverse apply로 되돌린다.
+- catalog/smoke 검증 실패면 commit 전에 patch를 되돌린다.
 - work item을 `reviewing`으로 돌린다.
 - 실패 stage와 command tail을 work event에 남긴다.
 
@@ -146,6 +150,7 @@ work show <work_id>
 ```
 
 상태가 `waiting_approval`이면 `패치 장착 승인` 버튼이 붙는다.
+버튼으로 장착하면 Discord 응답에 catalog 등록과 smoke-test 통과 여부가 함께 표시된다.
 
 Orange Pi 지연 재시작 기본 명령:
 

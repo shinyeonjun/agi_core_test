@@ -25,8 +25,10 @@ This checklist is the next work order after the v4.1 benchmark.
   - [x] commit successful activations as durable git history,
   - [x] archive activation manifest and patch artifacts,
   - [x] schedule an Orange Pi service restart through deferred `systemd-run`,
+  - [x] reload fresh action catalog before final promotion,
+  - [x] smoke-test the proposed action before marking proposal active,
   - [ ] verify deferred restart on the real Orange Pi service,
-  - [ ] verify the newly added action through Discord,
+  - [x] report activation smoke-test result through Discord,
   - [ ] push or sync accepted activation to the upstream repo.
 - [x] Dynamic Action Registry v1:
   - [x] load action definitions from a versioned registry file,
@@ -35,8 +37,8 @@ This checklist is the next work order after the v4.1 benchmark.
   - [x] reject unsafe shell-style dynamic commands,
   - [x] expose `validate-action-registry`,
   - [x] add `get_cpu_usage` as a registry-backed action,
-  - [ ] promote registry updates from activation artifacts automatically,
-  - [ ] verify newly active actions through Discord before final promotion.
+  - [x] promote registry updates through the approved activation patch,
+  - [x] verify newly active actions through smoke-test before final promotion.
 - [ ] Project/Research/Data worker:
   - [ ] split broad work into durable subtasks,
   - [ ] collect sources,

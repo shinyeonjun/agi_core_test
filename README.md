@@ -11,6 +11,7 @@ Orange Pi 5에서 24시간 돌리는 AGI seed 하네스입니다. 목표는 LLM 
 - Redis Queue/Worker: self-patch와 external-work 작업을 durable queue로 처리합니다.
 - SelfPatchWorker: 격리 workspace에서 Codex 개발 세션을 실행하고 `proposal.patch`를 만듭니다.
 - Activation Pipeline: 승인된 patch를 live repo에 적용하고, 테스트하고, commit/archive 후 active로 승격합니다.
+- Activation Verification: active 승격 전에 fresh catalog reload와 action smoke-test를 수행합니다.
 - Dynamic Action Registry: 새 action을 `registry/actions.json`으로 등록하고 executor adapter에 연결합니다.
 - World Model: MicroWorld에서 ONNX/RKNN 모델과 gate ablation 검증이 연결되어 있습니다.
 
@@ -112,6 +113,8 @@ Discord 요청
 -> git apply --check
 -> git apply
 -> pytest
+-> fresh catalog reload
+-> action smoke-test
 -> git commit
 -> activation archive 저장
 -> proposal active

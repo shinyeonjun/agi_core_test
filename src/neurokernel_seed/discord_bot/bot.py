@@ -246,7 +246,8 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
                 payload = await _call(core.post, f"/work-items/{self.work_id}/activate", {"actor": _interaction_user_id(interaction)})
                 action = (payload.get("action_id") or payload.get("proposal_id") or self.work_id) if isinstance(payload, dict) else self.work_id
                 reload_note = "\n서비스 재시작이 필요해." if isinstance(payload, dict) and payload.get("service_reload_required") else ""
-                await interaction.response.edit_message(content=f"장착 완료: `{action}`{reload_note}", view=None)
+                verify_note = _activation_verify_note(payload)
+                await interaction.response.edit_message(content=f"장착 완료: `{action}`{verify_note}{reload_note}", view=None)
             except Exception as exc:
                 await interaction.response.send_message(f"장착 실패: `{type(exc).__name__}: {exc}`", ephemeral=True)
 
@@ -662,9 +663,20 @@ async def _handle_work(rest: str, core: CoreClient, *, activation_view_factory: 
         payload = await _call(core.post, f"/work-items/{quote(work_id)}/activate", {"actor": "discord"})
         if isinstance(payload, dict) and payload.get("activated"):
             reload_note = "\n서비스 재시작이 필요해." if payload.get("service_reload_required") else ""
-            return f"장착 완료: `{payload.get('action_id') or work_id}`{reload_note}"
+            return f"장착 완료: `{payload.get('action_id') or work_id}`{_activation_verify_note(payload)}{reload_note}"
         return format_code_block(payload)
     return "`work list` 또는 `work show <id>`로 볼 수 있어."
+
+
+def _activation_verify_note(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    verification = payload.get("verification") if isinstance(payload.get("verification"), dict) else {}
+    if not verification:
+        return ""
+    if verification.get("passed"):
+        return "\n검증: catalog 등록 + smoke-test 통과"
+    return "\n검증: 실패"
 
 
 async def _record_message(core: CoreClient, message: Any, *, role: str, content: str) -> None:

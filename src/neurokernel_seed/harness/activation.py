@@ -4,10 +4,13 @@ import os
 import shlex
 import subprocess
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
+from .action_catalog import ActionDefinition, build_action_catalog
+from .executors.readonly_command import ReadOnlyCommandExecutor
+from .executors.readonly_system import ReadOnlyExecutor
 from .memory import HarnessMemory
 from .trace import redact_text
 
@@ -33,6 +36,9 @@ class ActivationConfig:
     require_clean_git: bool = True
     commit_after_apply: bool = True
     archive_root: Path = Path("artifacts/activations")
+    verify_activation: bool = True
+    action_registry_path: Path | None = None
+    smoke_timeout_seconds: int = 30
 
 
 class ActivationService:
@@ -78,6 +84,17 @@ class ActivationService:
                 _transition_if_possible(memory, work_id, "reviewing", actor=actor, payload=payload)
             raise ActivationError("activation tests failed; patch was rolled back")
 
+        verification = self._verify_activation(project_root, proposal)
+        commands.extend(verification.pop("commands", []))
+        if not verification.get("passed"):
+            rollback = self.runner(["git", "apply", "-R", "--whitespace=nowarn", str(patch_path)], cwd=project_root, timeout_seconds=60)
+            commands.append(_command_record("rollback", ["git", "apply", "-R", "--whitespace=nowarn", str(patch_path)], rollback))
+            with HarnessMemory(self.config.db_path) as memory:
+                payload = {"stage": "verify", "verification": verification, "rollback": _public_result(rollback), "commands": commands}
+                memory.add_work_event(work_id, "activation_failed", actor=actor, payload=payload)
+                _transition_if_possible(memory, work_id, "reviewing", actor=actor, payload=payload)
+            raise ActivationError("activation verification failed; patch was rolled back")
+
         commit_result = None
         if self.config.commit_after_apply:
             try:
@@ -112,6 +129,7 @@ class ActivationService:
             "pre_activation_sha": pre_sha.strip(),
             "post_activation_sha": post_sha.strip(),
             "tests": _public_result(test_result),
+            "verification": verification,
             "commit": _public_result(commit_result) if commit_result else None,
             "reload": _public_result(reload_result) if reload_result else None,
             "service_reload_required": reload_result is None,
@@ -120,6 +138,7 @@ class ActivationService:
         archive_path = _write_activation_archive(project_root, self.config.archive_root, work_id, result, patch_path)
         result["archive_path"] = str(archive_path)
         with HarnessMemory(self.config.db_path) as memory:
+            memory.add_work_event(work_id, "activation_verified", actor=actor, payload=verification)
             memory.add_work_event(work_id, "activated", actor=actor, payload=result)
             _transition_if_possible(memory, work_id, "completed", actor=actor, payload=result)
             if proposal:
@@ -129,6 +148,33 @@ class ActivationService:
                     memory.add_proposal_event(str(proposal["proposal_id"]), "activation_status_not_changed", actor=actor, payload=result)
                     memory.conn.commit()
         return result
+
+    def _verify_activation(self, project_root: Path, proposal: dict[str, Any] | None) -> dict[str, Any]:
+        if not self.config.verify_activation:
+            return {"passed": True, "mode": "disabled", "commands": []}
+        if not proposal:
+            return {"passed": True, "mode": "no_proposal", "commands": []}
+        action_id = str(proposal.get("action_id") or "").strip()
+        if not action_id:
+            return {"passed": False, "mode": "missing_action_id", "reason": "proposal has no action_id", "commands": []}
+        try:
+            registry_path = self.config.action_registry_path
+            if registry_path is not None and not registry_path.is_absolute():
+                registry_path = project_root / registry_path
+            catalog = build_action_catalog(registry_path=registry_path)
+            action = catalog[action_id]
+        except Exception as exc:
+            return {"passed": False, "mode": "catalog_load_failed", "action_id": action_id, "reason": redact_text(str(exc)), "commands": []}
+        smoke = _smoke_action(project_root, self.config.db_path, action, timeout_seconds=self.config.smoke_timeout_seconds)
+        return {
+            "passed": bool(smoke.get("passed")),
+            "mode": "action_smoke",
+            "action_id": action_id,
+            "action_source": action.source,
+            "executor": action.executor,
+            "smoke": smoke,
+            "commands": [],
+        }
 
     def _commit_activation(self, project_root: Path, work_id: str, commands: list[dict[str, Any]]) -> subprocess.CompletedProcess[str]:
         _run_checked(self.runner, ["git", "add", "-A"], cwd=project_root, timeout_seconds=60, commands=commands)
@@ -174,6 +220,9 @@ def build_activation_config_from_env(*, db_path: str | Path = "data/harness.db",
         require_clean_git=os.environ.get("NEUROKERNEL_ACTIVATION_REQUIRE_CLEAN_GIT", "1").lower() in {"1", "true", "yes", "y"},
         commit_after_apply=os.environ.get("NEUROKERNEL_ACTIVATION_COMMIT", "1").lower() in {"1", "true", "yes", "y"},
         archive_root=Path(os.environ.get("NEUROKERNEL_ACTIVATION_ARCHIVE_ROOT", "artifacts/activations")),
+        verify_activation=os.environ.get("NEUROKERNEL_ACTIVATION_VERIFY", "1").lower() in {"1", "true", "yes", "y"},
+        action_registry_path=Path(os.environ["NEUROKERNEL_ACTION_REGISTRY"]) if os.environ.get("NEUROKERNEL_ACTION_REGISTRY") else None,
+        smoke_timeout_seconds=int(os.environ.get("NEUROKERNEL_ACTIVATION_SMOKE_TIMEOUT", "30")),
     )
 
 
@@ -228,6 +277,37 @@ def _run_command(cmd: list[str], *, cwd: Path, timeout_seconds: int) -> subproce
         timeout=timeout_seconds,
         check=False,
     )
+
+
+def _smoke_action(project_root: Path, db_path: Path, action: ActionDefinition, *, timeout_seconds: int) -> dict[str, Any]:
+    params = _default_params(action)
+    if params is None:
+        return {"passed": False, "reason": "action has required params without defaults", "action_id": action.action_id}
+    if action.executor == "readonly_command":
+        configured_timeout = int(action.executor_config.get("timeout_seconds", timeout_seconds))
+        smoke_action = replace(action, executor_config={**action.executor_config, "timeout_seconds": min(configured_timeout, timeout_seconds)})
+        result = ReadOnlyCommandExecutor(project_root=project_root).execute(smoke_action, params, {"source": "activation_smoke"}).as_dict()
+        return {"passed": bool(result.get("success")), "execution_result": result}
+    if action.executor == "readonly_system":
+        result = ReadOnlyExecutor(project_root=project_root, memory_path=db_path).execute(action.action_id, params, {"source": "activation_smoke"}).as_dict()
+        return {"passed": bool(result.get("success")), "execution_result": result}
+    return {"passed": False, "reason": f"executor is not smoke-testable: {action.executor}", "action_id": action.action_id}
+
+
+def _default_params(action: ActionDefinition) -> dict[str, Any] | None:
+    params: dict[str, Any] = {}
+    required = set()
+    if isinstance(action.params_schema.get("required"), list):
+        required.update(str(item) for item in action.params_schema.get("required", []))
+    properties = action.params_schema.get("properties") if isinstance(action.params_schema.get("properties"), dict) else action.params_schema
+    if not isinstance(properties, dict):
+        return {}
+    for key, schema in properties.items():
+        if isinstance(schema, dict) and "default" in schema:
+            params[str(key)] = schema["default"]
+        elif str(key) in required:
+            return None
+    return params
 
 
 def _write_activation_archive(project_root: Path, archive_root: Path, work_id: str, result: dict[str, Any], patch_path: Path) -> Path:
