@@ -8,6 +8,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import psutil
+
 from neurokernel_seed.harness.executors.base import ExecutionResult, TimedExecution
 from neurokernel_seed.harness.trace import redact_text
 
@@ -29,6 +31,8 @@ class ReadOnlyExecutor:
                 return timer.finish(action_id, success=True, result=self._get_memory_usage())
             if action_id == "get_cpu_temp":
                 return timer.finish(action_id, success=True, result=self._get_cpu_temp())
+            if action_id == "get_cpu_per_core_usage":
+                return timer.finish(action_id, success=True, result=self._get_cpu_per_core_usage())
             if action_id == "get_service_status":
                 return timer.finish(action_id, success=True, result=self._get_service_status(str(params.get("service") or "")))
             if action_id == "tail_logs":
@@ -78,6 +82,11 @@ class ReadOnlyExecutor:
                 return {"path": str(path), "celsius": round(float(raw) / 1000.0, 2)}
         return {"available": False}
 
+    def _get_cpu_per_core_usage(self) -> dict[str, Any]:
+        percentages = psutil.cpu_percent(interval=0.2, percpu=True)
+        per_core = [{"core": index, "used_percent": round(float(value), 3)} for index, value in enumerate(percentages)]
+        return {"per_core_percent": per_core, "core_count": len(per_core)}
+
     def _get_service_status(self, service: str) -> dict[str, Any]:
         if not service:
             return {"available": False, "reason": "service param is required"}
@@ -118,4 +127,3 @@ class ReadOnlyExecutor:
         except ValueError as exc:
             raise ValueError(f"path escapes project root: {path}") from exc
         return target
-

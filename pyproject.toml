@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Non-model AGI seed harness with microworlds, evaluator, logger, replay exporter, and v0 world-model tooling."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["psutil>=5.9"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]

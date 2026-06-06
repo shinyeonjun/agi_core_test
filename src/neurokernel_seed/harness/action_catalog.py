@@ -41,6 +41,7 @@ def default_action_catalog() -> dict[str, ActionDefinition]:
         ActionDefinition("get_disk_usage", "디스크 사용량 조회", "low", False, False, "readonly_system", {"path": {"type": "string", "default": "."}}),
         ActionDefinition("get_memory_usage", "메모리 사용량 조회", "low", False, False, "readonly_system"),
         ActionDefinition("get_cpu_temp", "CPU 온도 조회", "low", False, False, "readonly_system"),
+        ActionDefinition("get_cpu_per_core_usage", "CPU 코어별 사용률 조회", "low", False, False, "readonly_system"),
         ActionDefinition("get_service_status", "서비스 상태 조회", "low", False, False, "readonly_system", {"service": {"type": "string"}}),
         ActionDefinition("tail_logs", "허용된 로그 꼬리 조회", "low", False, False, "readonly_system", {"path": {"type": "string"}, "lines": {"type": "integer", "default": 80}}),
         ActionDefinition("list_artifacts", "artifact 목록 조회", "low", False, False, "readonly_system", {"path": {"type": "string", "default": "artifacts"}}),

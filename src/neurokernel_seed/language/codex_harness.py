@@ -368,7 +368,6 @@ def _capability_prompt(user_text: str, context: dict[str, Any]) -> str:
                             "type": "object",
                             "fields": [
                                 {"name": "used_percent", "type": "number", "description": "전체 CPU 사용률 퍼센트"},
-                                {"name": "per_core_percent", "type": "number[]", "description": "코어별 CPU 사용률 퍼센트 배열"},
                             ],
                             "required": ["used_percent"],
                         },

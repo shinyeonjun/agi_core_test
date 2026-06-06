@@ -30,6 +30,7 @@ INTERNAL_TERMS = {
     "get_disk_usage",
     "get_uptime",
     "get_cpu_temp",
+    "get_cpu_per_core_usage",
     "list_artifacts",
     "run_safe_benchmark",
 }

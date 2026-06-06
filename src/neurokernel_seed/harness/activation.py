@@ -4,13 +4,12 @@ import os
 import shlex
 import subprocess
 import json
+import importlib
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from .action_catalog import ActionDefinition, build_action_catalog
-from .executors.readonly_command import ReadOnlyCommandExecutor
-from .executors.readonly_system import ReadOnlyExecutor
+from .action_catalog import ActionDefinition
 from .memory import HarnessMemory
 from .trace import redact_text
 
@@ -161,7 +160,7 @@ class ActivationService:
             registry_path = self.config.action_registry_path
             if registry_path is not None and not registry_path.is_absolute():
                 registry_path = project_root / registry_path
-            catalog = build_action_catalog(registry_path=registry_path)
+            catalog = _fresh_action_catalog(registry_path=registry_path)
             action = catalog[action_id]
         except Exception as exc:
             return {"passed": False, "mode": "catalog_load_failed", "action_id": action_id, "reason": redact_text(str(exc)), "commands": []}
@@ -279,17 +278,32 @@ def _run_command(cmd: list[str], *, cwd: Path, timeout_seconds: int) -> subproce
     )
 
 
+def _fresh_action_catalog(*, registry_path: Path | None) -> dict[str, ActionDefinition]:
+    import neurokernel_seed.harness.action_catalog as action_catalog_module
+
+    importlib.invalidate_caches()
+    action_catalog_module = importlib.reload(action_catalog_module)
+    return action_catalog_module.build_action_catalog(registry_path=registry_path)
+
+
 def _smoke_action(project_root: Path, db_path: Path, action: ActionDefinition, *, timeout_seconds: int) -> dict[str, Any]:
+    import neurokernel_seed.harness.executors.readonly_command as readonly_command_module
+    import neurokernel_seed.harness.executors.readonly_system as readonly_system_module
+
+    importlib.invalidate_caches()
+    readonly_command_module = importlib.reload(readonly_command_module)
+    readonly_system_module = importlib.reload(readonly_system_module)
+
     params = _default_params(action)
     if params is None:
         return {"passed": False, "reason": "action has required params without defaults", "action_id": action.action_id}
     if action.executor == "readonly_command":
         configured_timeout = int(action.executor_config.get("timeout_seconds", timeout_seconds))
         smoke_action = replace(action, executor_config={**action.executor_config, "timeout_seconds": min(configured_timeout, timeout_seconds)})
-        result = ReadOnlyCommandExecutor(project_root=project_root).execute(smoke_action, params, {"source": "activation_smoke"}).as_dict()
+        result = readonly_command_module.ReadOnlyCommandExecutor(project_root=project_root).execute(smoke_action, params, {"source": "activation_smoke"}).as_dict()
         return {"passed": bool(result.get("success")), "execution_result": result}
     if action.executor == "readonly_system":
-        result = ReadOnlyExecutor(project_root=project_root, memory_path=db_path).execute(action.action_id, params, {"source": "activation_smoke"}).as_dict()
+        result = readonly_system_module.ReadOnlyExecutor(project_root=project_root, memory_path=db_path).execute(action.action_id, params, {"source": "activation_smoke"}).as_dict()
         return {"passed": bool(result.get("success")), "execution_result": result}
     return {"passed": False, "reason": f"executor is not smoke-testable: {action.executor}", "action_id": action.action_id}
 
