@@ -23,7 +23,7 @@ WORK_ITEM_TRANSITIONS: dict[str, set[str]] = {
     "deferred": {"proposed", "planned", "cancelled"},
     "rejected": set(),
     "completed": {"archived"},
-    "failed": {"planned", "archived"},
+    "failed": {"planned", "running", "archived"},
     "cancelled": {"archived"},
     "archived": set(),
 }

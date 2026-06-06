@@ -277,6 +277,7 @@ def _self_patch_prompt(*, work: dict[str, Any], payload: dict[str, Any]) -> str:
             "- Add or update tests for the implemented behavior.",
             "- If the request cannot be implemented safely, write a clear failing note in a new docs/self_patch_blockers.md file and do not pretend success.",
             "- Do not add fallback behavior that claims capability without a real implementation.",
+            "- If Queue payload JSON contains retry.previous_result, treat it as the failed prior attempt: inspect the listed changed files and failing test tails, then fix the underlying issue instead of repeating the same patch.",
             "",
             "Work item JSON:",
             _json_dump(work),

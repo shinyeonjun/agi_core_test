@@ -94,6 +94,61 @@ class WorkItemService:
                 job = memory.mark_work_job_enqueue_failed(job_id, error=str(exc), actor=actor)
                 return {"queued": False, "reason": str(exc), "job": job}
 
+    def retry(self, work_id: str, *, actor: str = "api", max_attempts: int = 3) -> dict[str, Any]:
+        with HarnessMemory(self.db_path) as memory:
+            work = memory.get_work_item(work_id)
+            if str(work.get("type") or "") != "self_patch":
+                raise ValueError("only self_patch work items can be retried")
+            status = str(work.get("status") or "")
+            if status not in {"reviewing", "blocked", "failed"}:
+                raise ValueError(f"work item is not retryable from status: {status}")
+            existing = memory.find_active_work_job(work_id)
+            if existing:
+                return {"queued": False, "reason": "active_job_exists", "job": existing, "work_item": work}
+
+            events = memory.work_events(work_id)
+            previous_result = _latest_self_patch_result(events)
+            work_type = str(work.get("type") or "self_patch")
+            queue_name = queue_name_for_work_type(work_type)
+            job_id = new_id("job", work_type)
+            payload = _work_job_payload(
+                job_id=job_id,
+                work_id=work_id,
+                work=work,
+                work_type=work_type,
+                queue_name=queue_name,
+                extra={
+                    "retry": {
+                        "requested_by": actor,
+                        "previous_status": status,
+                        "previous_result": previous_result,
+                    }
+                },
+            )
+            memory.create_work_job(
+                job_id=job_id,
+                work_id=work_id,
+                queue_name=queue_name,
+                status="created",
+                priority=str(work.get("priority") or "medium"),
+                max_attempts=max_attempts,
+                payload=payload,
+                actor=actor,
+            )
+            memory.transition_work_item(work_id, "running", actor=actor, payload={"reason": "retry", "job_id": job_id, "previous_result": previous_result})
+            if self.work_queue is None:
+                job = memory.mark_work_job_enqueue_failed(job_id, error=self.queue_error or "queue not configured", actor=actor)
+                _transition_back_after_retry_enqueue_failure(memory, work_id, status, actor=actor, job_id=job_id)
+                return {"queued": False, "reason": self.queue_error or "queue not configured", "job": job, "work_item": memory.get_work_item(work_id)}
+            try:
+                message_id = self.work_queue.enqueue(queue_name, payload)
+                job = memory.mark_work_job_queued(job_id, redis_message_id=message_id, actor=actor)
+                return {"queued": True, "queue_name": queue_name, "message_id": message_id, "job": job, "work_item": memory.get_work_item(work_id)}
+            except Exception as exc:
+                job = memory.mark_work_job_enqueue_failed(job_id, error=str(exc), actor=actor)
+                _transition_back_after_retry_enqueue_failure(memory, work_id, status, actor=actor, job_id=job_id)
+                return {"queued": False, "reason": str(exc), "job": job, "work_item": memory.get_work_item(work_id)}
+
     def create_from_route(
         self,
         *,
@@ -134,8 +189,8 @@ class WorkItemService:
         return {"created": True, "route": route, "work_item": row, "route_decision": route_decision}
 
 
-def _work_job_payload(*, job_id: str, work_id: str, work: dict[str, Any], work_type: str, queue_name: str) -> dict[str, Any]:
-    return {
+def _work_job_payload(*, job_id: str, work_id: str, work: dict[str, Any], work_type: str, queue_name: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = {
         "job_id": job_id,
         "work_id": work_id,
         "work_type": work_type,
@@ -144,3 +199,45 @@ def _work_job_payload(*, job_id: str, work_id: str, work: dict[str, Any], work_t
         "risk_level": work.get("risk_level") or "low",
         "title": work.get("title") or "",
     }
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def _latest_self_patch_result(events: list[dict[str, Any]]) -> dict[str, Any]:
+    for event in reversed(events):
+        if event.get("event_type") != "job_completed":
+            continue
+        payload = event.get("payload_json")
+        if not isinstance(payload, dict):
+            continue
+        result = payload.get("result")
+        if isinstance(result, dict):
+            return _trim_self_patch_result(result)
+    return {}
+
+
+def _trim_self_patch_result(result: dict[str, Any]) -> dict[str, Any]:
+    trimmed: dict[str, Any] = {
+        "status": result.get("status"),
+        "job_id": result.get("job_id"),
+        "patch_path": result.get("patch_path"),
+        "changed_files": result.get("changed_files") or [],
+        "next_required_action": result.get("next_required_action"),
+    }
+    for key in ("test", "diff_check", "codex"):
+        value = result.get(key)
+        if isinstance(value, dict):
+            trimmed[key] = {
+                "returncode": value.get("returncode"),
+                "stdout_tail": str(value.get("stdout_tail") or "")[-2_000:],
+                "stderr_tail": str(value.get("stderr_tail") or "")[-2_000:],
+            }
+    return trimmed
+
+
+def _transition_back_after_retry_enqueue_failure(memory: HarnessMemory, work_id: str, previous_status: str, *, actor: str, job_id: str) -> None:
+    try:
+        memory.transition_work_item(work_id, previous_status, actor=actor, payload={"reason": "retry enqueue failed", "job_id": job_id})
+    except ValueError:
+        memory.add_work_event(work_id, "retry_status_restore_failed", actor=actor, payload={"previous_status": previous_status, "job_id": job_id})

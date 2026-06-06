@@ -111,6 +111,9 @@ class HarnessService:
     def enqueue_work_item(self, work_id: str, *, actor: str = "api", max_attempts: int = 3) -> dict[str, Any]:
         return self.work_items_service.enqueue(work_id, actor=actor, max_attempts=max_attempts)
 
+    def retry_work_item(self, work_id: str, *, actor: str = "api", max_attempts: int = 3) -> dict[str, Any]:
+        return self.work_items_service.retry(work_id, actor=actor, max_attempts=max_attempts)
+
     def activate_work_item(self, work_id: str, *, actor: str = "api") -> dict[str, Any]:
         return self.activation_service.activate_work_item(work_id, actor=actor)
 

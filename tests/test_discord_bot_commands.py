@@ -180,8 +180,8 @@ def test_latest_self_patch_result_reads_completed_event_payload():
     assert result == {"status": "test_failed", "changed_files": ["a.py"]}
 
 
-def test_format_work_notification_reports_failed_patch_without_activation_button():
-    text, wants_activation = _format_work_notification(
+def test_format_work_notification_reports_failed_patch_with_retry_button_kind():
+    text, view_kind = _format_work_notification(
         {
             "work_item": {"work_id": "work1", "title": "CPU 코어별 사용률 확인", "status": "reviewing"},
             "events": [
@@ -193,14 +193,14 @@ def test_format_work_notification_reports_failed_patch_without_activation_button
         }
     )
 
-    assert not wants_activation
+    assert view_kind == "retry"
     assert "테스트 실패" in text
     assert "CPU 코어별 사용률 확인" in text
     assert "src/x.py" in text
 
 
 def test_format_work_notification_offers_activation_for_patch_ready():
-    text, wants_activation = _format_work_notification(
+    text, view_kind = _format_work_notification(
         {
             "work_item": {"work_id": "work1", "title": "CPU 코어별 사용률 확인", "status": "waiting_approval"},
             "events": [
@@ -212,5 +212,5 @@ def test_format_work_notification_offers_activation_for_patch_ready():
         }
     )
 
-    assert wants_activation
+    assert view_kind == "activation"
     assert "테스트를 통과" in text
