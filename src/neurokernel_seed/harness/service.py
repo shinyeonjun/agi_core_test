@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .action_catalog import ActionDefinition, default_action_catalog, public_catalog
+from .action_catalog import ActionDefinition, build_action_catalog, public_catalog
 from .activation import ActivationService, build_activation_config_from_env
 from .capability_service import CapabilityProposalService
 from .executors.benchmark import BenchmarkExecutor
+from .executors.readonly_command import ReadOnlyCommandExecutor
 from .executors.readonly_system import ReadOnlyExecutor
 from .memory import HarnessMemory
 from .preferences import preference_map
@@ -35,8 +36,9 @@ class HarnessService:
     ):
         self.db_path = Path(db_path)
         self.project_root = Path(project_root)
-        self.catalog = catalog or default_action_catalog()
+        self.catalog = catalog or build_action_catalog()
         self.readonly_executor = ReadOnlyExecutor(project_root=self.project_root, memory_path=self.db_path)
+        self.readonly_command_executor = ReadOnlyCommandExecutor(project_root=self.project_root)
         self.benchmark_executor = BenchmarkExecutor(project_root=self.project_root)
         self.work_queue, self.queue_error = _resolve_work_queue(work_queue)
         self.work_items_service = WorkItemService(db_path=self.db_path, work_queue=self.work_queue, queue_error=self.queue_error)
@@ -324,8 +326,11 @@ class HarnessService:
 
     def _execute(self, action_id: str, task: TaskSpec) -> dict[str, Any]:
         params = task.context.get("params", {}) if isinstance(task.context.get("params", {}), dict) else {}
-        if self.catalog[action_id].executor == "benchmark":
+        action = self.catalog[action_id]
+        if action.executor == "benchmark":
             return self.benchmark_executor.execute(action_id, params, {"task_id": task.task_id}).as_dict()
+        if action.executor == "readonly_command":
+            return self.readonly_command_executor.execute(action, params, {"task_id": task.task_id}).as_dict()
         return self.readonly_executor.execute(action_id, params, {"task_id": task.task_id}).as_dict()
 
     def _record_execution(self, task_id: str, chosen_action: str, result: dict[str, Any]) -> None:

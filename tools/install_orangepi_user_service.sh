@@ -9,7 +9,7 @@ SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 mkdir -p "$SYSTEMD_USER_DIR"
 cp "deploy/${SERVICE_NAME}" "${SYSTEMD_USER_DIR}/${SERVICE_NAME}"
 chmod 644 "${SYSTEMD_USER_DIR}/${SERVICE_NAME}"
-chmod +x tools/run_orangepi_stack.sh tools/run_core_api.sh tools/run_discord_bot.sh
+chmod +x tools/run_orangepi_stack.sh tools/run_core_api.sh tools/run_discord_bot.sh tools/restart_orangepi_stack_deferred.sh
 
 systemctl --user daemon-reload
 systemctl --user enable "$SERVICE_NAME"

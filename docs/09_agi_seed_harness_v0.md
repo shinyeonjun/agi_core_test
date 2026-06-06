@@ -19,10 +19,10 @@
 - Redis Work Queue
 - SelfPatchWorker v1
 - Activation Pipeline v1
+- Dynamic Action Registry v1
 
 ## 아직 안 되는 것
 
-- 동적 Action Registry
 - 장착 후 서비스 자동 reload/restart
 - 새 action을 Discord에서 자동 검증하는 승격 게이트
 - 대형 프로젝트 전담 워커
@@ -113,6 +113,9 @@ Activation Pipeline은 승인된 self-patch 결과를 실제 프로젝트에 붙
 
 - patch를 live repo에 적용한다.
 - live repo 테스트를 실행한다.
+- 성공한 변경을 git commit으로 남긴다.
+- activation manifest와 patch를 `artifacts/activations/<work_id>/`에 보관한다.
+- `NEUROKERNEL_ACTIVATION_RELOAD_COMMAND`가 설정되어 있으면 지연 restart를 예약한다.
 - work item을 `completed`로 전환한다.
 - 연결된 capability proposal을 `active`로 전환한다.
 - reload 명령이 설정되어 있지 않으면 `service_reload_required=true`를 반환한다.
@@ -143,6 +146,49 @@ work show <work_id>
 ```
 
 상태가 `waiting_approval`이면 `패치 장착 승인` 버튼이 붙는다.
+
+Orange Pi 지연 재시작 기본 명령:
+
+```bash
+bash tools/restart_orangepi_stack_deferred.sh
+```
+
+이 스크립트는 `systemd-run --user --on-active=2s`로 현재 API 응답이 끝난 뒤 `neurokernel-stack.service`를 재시작하게 예약한다.
+
+## Dynamic Action Registry
+
+새 action은 Python 코드에 직접 박지 않고 registry 파일로 등록할 수 있다.
+
+기본 registry:
+
+```text
+registry/actions.json
+```
+
+환경값:
+
+```bash
+NEUROKERNEL_ACTION_REGISTRY=registry/actions.json
+```
+
+검증:
+
+```bash
+python -m neurokernel_seed.cli validate-action-registry registry/actions.json
+```
+
+registry entry 조건:
+
+- `schema_version`은 `neurokernel-action-registry-v1`이어야 한다.
+- `action_id`는 lower snake case여야 한다.
+- 동적 executor는 현재 `readonly_system`, `benchmark`, `readonly_command`만 허용한다.
+- `readonly_command`는 low-risk/read-only action만 허용한다.
+- shell 문자열 실행은 금지하고 argv list만 허용한다.
+- 동적 action은 `test_plan`이 없으면 로드되지 않는다.
+
+현재 포함된 registry action:
+
+- `get_cpu_usage`: `/proc/stat` 기반 CPU 사용률 조회. Orange Pi/Linux에서 동작하고, `/proc/stat`이 없는 환경에서는 `available=false`를 반환한다.
 
 ## Core API
 

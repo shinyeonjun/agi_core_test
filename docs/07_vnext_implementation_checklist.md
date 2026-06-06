@@ -22,13 +22,21 @@ This checklist is the next work order after the v4.1 benchmark.
   - [x] roll back the patch when tests fail,
   - [x] expose Core API / CLI / Discord activation entrypoints,
   - [x] mark the linked capability proposal active after successful activation,
-  - [ ] reload the Orange Pi service automatically,
+  - [x] commit successful activations as durable git history,
+  - [x] archive activation manifest and patch artifacts,
+  - [x] schedule an Orange Pi service restart through deferred `systemd-run`,
+  - [ ] verify deferred restart on the real Orange Pi service,
   - [ ] verify the newly added action through Discord,
-  - [ ] commit or archive the accepted activation as a durable baseline.
-- [ ] Dynamic Action Registry:
-  - [ ] load action definitions from a versioned registry file,
-  - [ ] bind registry entries to executor adapters,
-  - [ ] reject registry entries without tests.
+  - [ ] push or sync accepted activation to the upstream repo.
+- [x] Dynamic Action Registry v1:
+  - [x] load action definitions from a versioned registry file,
+  - [x] bind registry entries to executor adapters,
+  - [x] reject registry entries without tests,
+  - [x] reject unsafe shell-style dynamic commands,
+  - [x] expose `validate-action-registry`,
+  - [x] add `get_cpu_usage` as a registry-backed action,
+  - [ ] promote registry updates from activation artifacts automatically,
+  - [ ] verify newly active actions through Discord before final promotion.
 - [ ] Project/Research/Data worker:
   - [ ] split broad work into durable subtasks,
   - [ ] collect sources,

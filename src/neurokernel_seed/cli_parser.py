@@ -221,6 +221,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", default="data/harness.db")
     p.add_argument("--project-root", default=".")
 
+    p = sub.add_parser("validate-action-registry")
+    p.add_argument("path")
+
     p = sub.add_parser("harness-status")
     p.add_argument("--db", default="data/harness.db")
     p.add_argument("--project-root", default=".")

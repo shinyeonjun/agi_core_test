@@ -1,0 +1,32 @@
+{
+  "schema_version": "neurokernel-action-registry-v1",
+  "actions": [
+    {
+      "action_id": "get_cpu_usage",
+      "title": "CPU 사용률 조회",
+      "risk_level": "low",
+      "side_effect": false,
+      "requires_approval": false,
+      "executor": "readonly_command",
+      "role": "observe",
+      "allowed_targets": ["local", "orangepi5"],
+      "params_schema": {},
+      "executor_config": {
+        "command": [
+          "python",
+          "-c",
+          "import json, pathlib, time\np=pathlib.Path('/proc/stat')\ndef snap():\n    parts=p.read_text().splitlines()[0].split()[1:]\n    vals=[int(x) for x in parts]\n    idle=vals[3]+(vals[4] if len(vals)>4 else 0)\n    return sum(vals), idle\nif not p.exists():\n    print(json.dumps({'available': False, 'reason': 'proc_stat_missing'}, ensure_ascii=False))\nelse:\n    t1,i1=snap(); time.sleep(0.1); t2,i2=snap(); total=max(1,t2-t1); idle=max(0,i2-i1); used=max(0.0,min(100.0,(1.0-idle/total)*100.0)); print(json.dumps({'available': True, 'used_percent': round(used, 3), 'sample_seconds': 0.1}, ensure_ascii=False))"
+        ],
+        "output": "json",
+        "timeout_seconds": 5
+      },
+      "test_plan": [
+        {
+          "name": "returns_cpu_usage_object",
+          "type": "integration",
+          "assertions": ["result is an object", "available is boolean", "when available, 0 <= used_percent <= 100"]
+        }
+      ]
+    }
+  ]
+}

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -30,6 +31,8 @@ class ActivationConfig:
     reload_command: tuple[str, ...] = ()
     reload_timeout_seconds: int = 30
     require_clean_git: bool = True
+    commit_after_apply: bool = True
+    archive_root: Path = Path("artifacts/activations")
 
 
 class ActivationService:
@@ -75,6 +78,19 @@ class ActivationService:
                 _transition_if_possible(memory, work_id, "reviewing", actor=actor, payload=payload)
             raise ActivationError("activation tests failed; patch was rolled back")
 
+        commit_result = None
+        if self.config.commit_after_apply:
+            try:
+                commit_result = self._commit_activation(project_root, work_id, commands)
+            except Exception as exc:
+                rollback = self.runner(["git", "apply", "-R", "--whitespace=nowarn", str(patch_path)], cwd=project_root, timeout_seconds=60)
+                commands.append(_command_record("rollback", ["git", "apply", "-R", "--whitespace=nowarn", str(patch_path)], rollback))
+                with HarnessMemory(self.config.db_path) as memory:
+                    payload = {"stage": "commit", "error": redact_text(str(exc)), "rollback": _public_result(rollback), "commands": commands}
+                    memory.add_work_event(work_id, "activation_failed", actor=actor, payload=payload)
+                    _transition_if_possible(memory, work_id, "reviewing", actor=actor, payload=payload)
+                raise ActivationError("activation commit failed; patch was rolled back") from exc
+
         reload_result = None
         if self.config.reload_command:
             reload_result = self.runner(list(self.config.reload_command), cwd=project_root, timeout_seconds=self.config.reload_timeout_seconds)
@@ -96,10 +112,13 @@ class ActivationService:
             "pre_activation_sha": pre_sha.strip(),
             "post_activation_sha": post_sha.strip(),
             "tests": _public_result(test_result),
+            "commit": _public_result(commit_result) if commit_result else None,
             "reload": _public_result(reload_result) if reload_result else None,
             "service_reload_required": reload_result is None,
             "commands": commands,
         }
+        archive_path = _write_activation_archive(project_root, self.config.archive_root, work_id, result, patch_path)
+        result["archive_path"] = str(archive_path)
         with HarnessMemory(self.config.db_path) as memory:
             memory.add_work_event(work_id, "activated", actor=actor, payload=result)
             _transition_if_possible(memory, work_id, "completed", actor=actor, payload=result)
@@ -109,6 +128,17 @@ class ActivationService:
                 except ValueError:
                     memory.add_proposal_event(str(proposal["proposal_id"]), "activation_status_not_changed", actor=actor, payload=result)
                     memory.conn.commit()
+        return result
+
+    def _commit_activation(self, project_root: Path, work_id: str, commands: list[dict[str, Any]]) -> subprocess.CompletedProcess[str]:
+        _run_checked(self.runner, ["git", "add", "-A"], cwd=project_root, timeout_seconds=60, commands=commands)
+        commit_message = f"Activate self-patch {work_id}"
+        result = self.runner(["git", "commit", "-m", commit_message], cwd=project_root, timeout_seconds=60)
+        commands.append(_command_record("git commit", ["git", "commit", "-m", commit_message], result))
+        if result.returncode != 0:
+            unstage = self.runner(["git", "reset", "--mixed", "HEAD"], cwd=project_root, timeout_seconds=60)
+            commands.append(_command_record("git reset", ["git", "reset", "--mixed", "HEAD"], unstage))
+            raise ActivationError(_trim(redact_text(result.stderr or result.stdout)))
         return result
 
     def _resolve_patch_path(self, patch_result: dict[str, Any]) -> Path:
@@ -142,6 +172,8 @@ def build_activation_config_from_env(*, db_path: str | Path = "data/harness.db",
         reload_command=reload_command,
         reload_timeout_seconds=int(os.environ.get("NEUROKERNEL_ACTIVATION_RELOAD_TIMEOUT", "30")),
         require_clean_git=os.environ.get("NEUROKERNEL_ACTIVATION_REQUIRE_CLEAN_GIT", "1").lower() in {"1", "true", "yes", "y"},
+        commit_after_apply=os.environ.get("NEUROKERNEL_ACTIVATION_COMMIT", "1").lower() in {"1", "true", "yes", "y"},
+        archive_root=Path(os.environ.get("NEUROKERNEL_ACTIVATION_ARCHIVE_ROOT", "artifacts/activations")),
     )
 
 
@@ -196,6 +228,15 @@ def _run_command(cmd: list[str], *, cwd: Path, timeout_seconds: int) -> subproce
         timeout=timeout_seconds,
         check=False,
     )
+
+
+def _write_activation_archive(project_root: Path, archive_root: Path, work_id: str, result: dict[str, Any], patch_path: Path) -> Path:
+    root = _resolve_child(project_root, archive_root)
+    target = root / work_id
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "activation.json").write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    (target / "proposal.patch").write_text(patch_path.read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
+    return target / "activation.json"
 
 
 def _transition_if_possible(memory: HarnessMemory, work_id: str, next_status: str, *, actor: str, payload: dict[str, Any]) -> None:

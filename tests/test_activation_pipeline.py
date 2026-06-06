@@ -43,7 +43,11 @@ def test_activation_applies_patch_runs_tests_and_marks_proposal_active(tmp_path)
 
     assert result["activated"] is True
     assert result["service_reload_required"] is True
+    assert result["pre_activation_sha"] != result["post_activation_sha"]
+    assert result["commit"]["returncode"] == 0
+    assert Path(result["archive_path"]).is_file()
     assert (project / "src" / "demo.py").read_text(encoding="utf-8").strip() == "VALUE = 2"
+    assert _git_output(project, "status", "--porcelain").strip() == ""
     detail = service.work_item(work_id)
     assert detail["work_item"]["status"] == "completed"
     assert service.capability_proposal(proposal_id)["proposal"]["status"] == "active"
@@ -101,6 +105,37 @@ def test_activation_rolls_back_when_tests_fail(tmp_path):
 
     assert (project / "src" / "demo.py").read_text(encoding="utf-8").strip() == "VALUE = 1"
     assert service.work_item(work_id)["work_item"]["status"] == "reviewing"
+    assert _git_output(project, "status", "--porcelain").strip() == ""
+
+
+def test_activation_rolls_back_when_commit_fails(tmp_path):
+    project = _make_git_project(tmp_path)
+    db_path = tmp_path / "harness.db"
+    service = HarnessService(db_path=db_path, project_root=project)
+    proposal = service.create_capability_proposal_from_intent(user_text="CPU 사용률", capability_intent=_cpu_usage_intent())
+    work_id = proposal["work_item"]["work_id"]
+    proposal_id = proposal["proposal"]["proposal_id"]
+    service.transition_capability_proposal(proposal_id, "approved_for_dev", actor="test")
+    patch_path = _make_patch(project, tmp_path, work_id=work_id)
+    with HarnessMemory(db_path) as memory:
+        memory.transition_work_item(work_id, "waiting_approval", actor="test", payload={})
+        memory.add_work_event(work_id, "job_completed", actor="worker", payload={"job_id": "job1", "result": {"status": "patch_ready", "patch_path": str(patch_path)}})
+        memory.conn.commit()
+
+    with pytest.raises(ActivationError, match="commit failed"):
+        ActivationService(
+            ActivationConfig(
+                db_path=db_path,
+                project_root=project,
+                self_patch_run_root=project / "artifacts" / "self_patch",
+                test_command=("python", "-c", "pass"),
+            ),
+            runner=_runner_that_fails_commit,
+        ).activate_work_item(work_id, actor="test")
+
+    assert (project / "src" / "demo.py").read_text(encoding="utf-8").strip() == "VALUE = 1"
+    assert service.work_item(work_id)["work_item"]["status"] == "reviewing"
+    assert _git_output(project, "status", "--porcelain").strip() == ""
 
 
 def _make_git_project(tmp_path) -> Path:
@@ -128,6 +163,16 @@ def _make_patch(project: Path, tmp_path, *, work_id: str) -> Path:
 
 def _git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=cwd, text=True, encoding="utf-8", capture_output=True, check=True)
+
+
+def _git_output(cwd: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, text=True, encoding="utf-8", capture_output=True, check=True).stdout
+
+
+def _runner_that_fails_commit(cmd: list[str], *, cwd: Path, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
+    if cmd[:2] == ["git", "commit"]:
+        return subprocess.CompletedProcess(cmd, 1, "", "simulated commit failure")
+    return subprocess.run(cmd, cwd=cwd, text=True, encoding="utf-8", capture_output=True, timeout=timeout_seconds, check=False)
 
 
 def _cpu_usage_intent():

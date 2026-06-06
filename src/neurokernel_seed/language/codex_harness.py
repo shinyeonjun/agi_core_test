@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from neurokernel_seed.harness.action_catalog import public_catalog
+from neurokernel_seed.harness.action_catalog import build_action_catalog, public_catalog
 
 from .contracts import (
     LanguageContractError,
@@ -203,7 +203,7 @@ def _to_core_prompt(user_text: str, context: dict[str, Any]) -> str:
             "</example>",
             "",
             "# Action Catalog",
-            json.dumps(public_catalog(), ensure_ascii=False, indent=2),
+            json.dumps(public_catalog(build_action_catalog()), ensure_ascii=False, indent=2),
             "",
             "# Context",
             json.dumps(context, ensure_ascii=False, indent=2),
@@ -395,7 +395,7 @@ def _capability_prompt(user_text: str, context: dict[str, Any]) -> str:
             ),
             "",
             "# Active Action Catalog",
-            json.dumps(public_catalog(), ensure_ascii=False, indent=2),
+            json.dumps(public_catalog(build_action_catalog()), ensure_ascii=False, indent=2),
             "",
             "# Context",
             json.dumps(context, ensure_ascii=False, indent=2),
@@ -445,7 +445,7 @@ def _work_route_prompt(user_text: str, context: dict[str, Any]) -> str:
             'User: "토큰 보여줘" -> route=unsafe',
             "",
             "# Active Action Catalog",
-            json.dumps(public_catalog(), ensure_ascii=False, indent=2),
+            json.dumps(public_catalog(build_action_catalog()), ensure_ascii=False, indent=2),
             "",
             "# Context",
             json.dumps(context, ensure_ascii=False, indent=2),

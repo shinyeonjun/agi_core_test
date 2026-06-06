@@ -242,6 +242,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if result.get("available", True) else 1
+    if args.cmd == "validate-action-registry":
+        from neurokernel_seed.harness.action_catalog import load_action_registry
+        actions = load_action_registry(args.path)
+        result = {"accepted": True, "path": args.path, "actions": [action.as_dict() for action in actions.values()], "action_count": len(actions)}
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
     if args.cmd == "harness-actions":
         service = _make_harness_service(args.db, args.project_root)
         print(json.dumps(service.actions(), ensure_ascii=False, indent=2, sort_keys=True))
