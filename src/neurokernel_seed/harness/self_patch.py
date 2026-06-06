@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import threading
 import time
+from hashlib import blake2s
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -572,7 +573,7 @@ def _run_command(
 
     started = time.monotonic()
     last_workspace_check = started
-    last_workspace_mtime = _workspace_mtime(watchdog_root) if watchdog_root is not None else None
+    last_workspace_signature = _workspace_signature(watchdog_root) if watchdog_root is not None else None
     stop_reason: str | None = None
     poll_seconds = max(0.1, watchdog_poll_seconds)
 
@@ -587,10 +588,10 @@ def _run_command(
             and now - activity["last"] >= idle_timeout_seconds
         ):
             if watchdog_root is not None and now - last_workspace_check >= max(0.1, watchdog_file_scan_seconds):
-                current_mtime = _workspace_mtime(watchdog_root)
+                current_signature = _workspace_signature(watchdog_root)
                 last_workspace_check = now
-                if current_mtime is not None and current_mtime != last_workspace_mtime:
-                    last_workspace_mtime = current_mtime
+                if current_signature is not None and current_signature != last_workspace_signature:
+                    last_workspace_signature = current_signature
                     activity["last"] = now
                     continue
             stop_reason = f"Command stalled after {idle_timeout_seconds} seconds without output or workspace changes."
@@ -638,17 +639,23 @@ def _join_reader(thread: threading.Thread | None) -> None:
         thread.join(timeout=2)
 
 
-def _workspace_mtime(root: Path | None, *, max_files: int = 5_000) -> int | None:
+def _workspace_signature(root: Path | None, *, max_files: int = 5_000, content_sample_bytes: int = 4_096) -> int | None:
     if root is None or not root.exists():
         return None
     ignored = {".git", "venv", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
-    newest = root.stat().st_mtime_ns
+    digest = blake2s(digest_size=16)
+    root = root.resolve()
+    try:
+        root_stat = root.stat()
+    except OSError:
+        return None
+    digest.update(f".|dir|{root_stat.st_mtime_ns}|0".encode("utf-8", errors="replace"))
     seen = 0
     stack = [root]
     while stack and seen < max_files:
         current = stack.pop()
         try:
-            for child in current.iterdir():
+            for child in sorted(current.iterdir(), key=lambda path: path.name):
                 if child.name in ignored:
                     continue
                 seen += 1
@@ -656,14 +663,25 @@ def _workspace_mtime(root: Path | None, *, max_files: int = 5_000) -> int | None
                     stat = child.stat()
                 except OSError:
                     continue
-                newest = max(newest, stat.st_mtime_ns)
+                try:
+                    relative = child.relative_to(root).as_posix()
+                except ValueError:
+                    relative = child.name
                 if child.is_dir():
+                    digest.update(f"{relative}|dir|{stat.st_mtime_ns}|0".encode("utf-8", errors="replace"))
                     stack.append(child)
+                else:
+                    digest.update(f"{relative}|file|{stat.st_mtime_ns}|{stat.st_size}".encode("utf-8", errors="replace"))
+                    if content_sample_bytes > 0 and stat.st_size <= content_sample_bytes:
+                        try:
+                            digest.update(child.read_bytes())
+                        except OSError:
+                            pass
                 if seen >= max_files:
                     break
         except OSError:
             continue
-    return newest
+    return int.from_bytes(digest.digest(), "big")
 
 
 def _terminate_process_group(proc: subprocess.Popen[str]) -> None:
