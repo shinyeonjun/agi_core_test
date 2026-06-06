@@ -1,7 +1,9 @@
 import subprocess
+import sys
+import time
 from pathlib import Path
 
-from neurokernel_seed.harness.self_patch import CodexSelfPatchWorker, SelfPatchConfig
+from neurokernel_seed.harness.self_patch import CodexSelfPatchWorker, SelfPatchConfig, _run_command
 
 
 def test_self_patch_worker_creates_patch_artifact(tmp_path):
@@ -92,6 +94,20 @@ def test_self_patch_worker_blocks_diff_check_failure(tmp_path):
     assert result["status"] == "diff_check_failed"
     assert result["diff_check"]["returncode"] != 0
     assert result["next_required_action"] == "worker_review_patch_format_errors"
+
+
+def test_run_command_returns_timeout_result(tmp_path):
+    started = time.monotonic()
+
+    result = _run_command(
+        [sys.executable, "-c", "import time; time.sleep(5)"],
+        cwd=tmp_path,
+        timeout_seconds=1,
+    )
+
+    assert result.returncode == 124
+    assert "timed out" in result.stderr
+    assert time.monotonic() - started < 4
 
 
 class FakeSelfPatchRunner:

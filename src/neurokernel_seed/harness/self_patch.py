@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import shlex
 import shutil
 import subprocess
@@ -399,17 +400,66 @@ def _write_summary_markdown(run_dir: Path, result: dict[str, Any]) -> None:
 
 
 def _run_command(cmd: list[str], *, cwd: Path, input_text: str | None = None, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        cmd,
-        cwd=cwd,
-        input=input_text,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        capture_output=True,
-        timeout=timeout_seconds,
-        check=False,
-    )
+    kwargs: dict[str, Any] = {
+        "cwd": cwd,
+        "stdin": subprocess.PIPE if input_text is not None else None,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        kwargs["start_new_session"] = True
+
+    proc = subprocess.Popen(cmd, **kwargs)
+    try:
+        stdout, stderr = proc.communicate(input=input_text, timeout=timeout_seconds)
+        return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+    except subprocess.TimeoutExpired:
+        _terminate_process_group(proc)
+        try:
+            stdout, stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            _kill_process_group(proc)
+            stdout, stderr = proc.communicate()
+        timeout_note = f"\nCommand timed out after {timeout_seconds} seconds."
+        return subprocess.CompletedProcess(cmd, 124, stdout or "", (stderr or "") + timeout_note)
+
+
+def _terminate_process_group(proc: subprocess.Popen[str]) -> None:
+    if os.name == "nt":
+        try:
+            proc.send_signal(signal.CTRL_BREAK_EVENT)
+            return
+        except Exception:
+            proc.terminate()
+            return
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+
+
+def _kill_process_group(proc: subprocess.Popen[str]) -> None:
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            return
+        except Exception:
+            proc.kill()
+            return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
 
 
 def _command_record(label: str, cmd: list[str], result: subprocess.CompletedProcess[str]) -> dict[str, Any]:
