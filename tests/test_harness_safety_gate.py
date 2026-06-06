@@ -1,3 +1,4 @@
+from neurokernel_seed.harness.action_catalog import ActionDefinition
 from neurokernel_seed.harness.safety_gate import check_action_safety
 from neurokernel_seed.harness.task_spec import task_spec_from_dict
 
@@ -25,3 +26,25 @@ def test_safety_gate_requires_approval_for_write_action():
     decision = check_action_safety(spec, "write_file")
     assert decision.decision == "requires_approval"
 
+
+def test_safety_gate_denies_inactive_action_even_when_allowed():
+    catalog = {
+        "get_waiting_probe": ActionDefinition(
+            "get_waiting_probe",
+            "대기 중 probe",
+            "low",
+            False,
+            False,
+            "readonly_command",
+            allowed_targets=("orangepi5",),
+            status="activation_candidate",
+            description="아직 장착 승인 전인 probe",
+            test_plan=({"name": "not_runnable", "assertions": ["must not run before activation"]},),
+        )
+    }
+    spec = task_spec_from_dict({"goal": "x", "target": "orangepi5", "allowed_actions": ["get_waiting_probe"]}, catalog=catalog)
+
+    decision = check_action_safety(spec, "get_waiting_probe", catalog=catalog)
+
+    assert decision.decision == "deny"
+    assert decision.policy_hits == ("deny_inactive_action",)

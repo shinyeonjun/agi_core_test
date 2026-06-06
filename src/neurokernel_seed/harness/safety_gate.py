@@ -35,6 +35,8 @@ def check_action_safety(
     if action_id not in catalog:
         return SafetyDecision("deny", "forbidden", False, f"unknown action: {action_id}", ("deny_unknown_action",))
     action = catalog[action_id]
+    if action.status != "active":
+        return SafetyDecision("deny", action.risk_level, action.requires_approval, f"action is not active: {action.status}", ("deny_inactive_action",))
     if action_id in task.blocked_actions:
         return SafetyDecision("deny", action.risk_level, action.requires_approval, "action is explicitly blocked by task", ("deny_blocked_action",))
     if task.allowed_actions and action_id not in task.allowed_actions:
@@ -52,4 +54,3 @@ def check_action_safety(
     if action.side_effect:
         return SafetyDecision("requires_approval", action.risk_level, True, "side-effect action requires approval", ("side_effect_requires_approval",), "single_action")
     return SafetyDecision("allow", action.risk_level, False, "read-only action in allowed_actions", ("allow_readonly",))
-

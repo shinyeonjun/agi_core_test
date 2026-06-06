@@ -4,6 +4,8 @@ import asyncio
 import json
 from typing import Any
 
+from neurokernel_seed.harness.action_catalog import build_action_catalog
+
 from .core_client import CoreClientError
 
 
@@ -77,18 +79,21 @@ def is_auto_executable_task(task: Any) -> bool:
     allowed = task.get("allowed_actions")
     if not isinstance(allowed, list) or not allowed:
         return False
-    safe_actions = {
-        "get_uptime",
-        "get_disk_usage",
-        "get_memory_usage",
-        "get_cpu_temp",
-        "get_cpu_per_core_usage",
-        "get_service_status",
-        "tail_logs",
-        "list_artifacts",
-        "get_recent_trace",
-    }
-    return all(action in safe_actions for action in allowed)
+    catalog = build_action_catalog()
+    return all(_is_catalog_auto_safe(action_id, catalog) for action_id in allowed)
+
+
+def _is_catalog_auto_safe(action_id: str, catalog: dict[str, Any]) -> bool:
+    action = catalog.get(str(action_id))
+    if action is None:
+        return False
+    return (
+        action.status == "active"
+        and action.risk_level in {"none", "low"}
+        and not action.side_effect
+        and not action.requires_approval
+        and action.executor in {"readonly_system", "readonly_command"}
+    )
 
 
 async def reply(message: Any, text: str, *, view: Any | None = None) -> None:

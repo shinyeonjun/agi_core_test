@@ -202,6 +202,149 @@ def test_activation_rolls_back_when_registry_smoke_fails(tmp_path):
     assert service.capability_proposal(proposal_id)["proposal"]["status"] == "approved_for_dev"
 
 
+def test_activation_verifies_registry_v2_output_contract(tmp_path):
+    project = _make_git_project(tmp_path)
+    db_path = tmp_path / "harness.db"
+    service = HarnessService(db_path=db_path, project_root=project)
+    proposal = service.create_capability_proposal_from_intent(user_text="테스트 probe v2 추가", capability_intent=_registry_probe_intent("get_test_probe_v2"))
+    proposal_id = proposal["proposal"]["proposal_id"]
+    work_id = proposal["work_item"]["work_id"]
+    service.transition_capability_proposal(proposal_id, "approved_for_dev", actor="test")
+    patch_path = _make_registry_v2_patch(project, action_id="get_test_probe_v2")
+    with HarnessMemory(db_path) as memory:
+        memory.transition_work_item(work_id, "waiting_approval", actor="test", payload={})
+        memory.add_work_event(
+            work_id,
+            "job_completed",
+            actor="worker",
+            payload={"job_id": "job1", "result": {"status": "patch_ready", "patch_path": str(patch_path), "changed_files": ["registry/actions.json"]}},
+        )
+        memory.conn.commit()
+
+    result = ActivationService(
+        ActivationConfig(
+            db_path=db_path,
+            project_root=project,
+            self_patch_run_root=project / "artifacts" / "self_patch",
+            test_command=("python", "-c", "pass"),
+            action_registry_path=Path("registry/actions.json"),
+        )
+    ).activate_work_item(work_id, actor="test")
+
+    assert result["verification"]["passed"] is True
+    assert result["verification"]["schema_check"]["passed"] is True
+    assert result["verification"]["output_check"]["passed"] is True
+    assert result["verification"]["action_status"] == "active"
+    assert service.capability_proposal(proposal_id)["proposal"]["status"] == "active"
+
+
+def test_activation_rolls_back_when_registry_v2_output_contract_fails(tmp_path):
+    project = _make_git_project(tmp_path)
+    db_path = tmp_path / "harness.db"
+    service = HarnessService(db_path=db_path, project_root=project)
+    proposal = service.create_capability_proposal_from_intent(user_text="테스트 probe v2 추가", capability_intent=_registry_probe_intent("get_test_probe_v2"))
+    proposal_id = proposal["proposal"]["proposal_id"]
+    work_id = proposal["work_item"]["work_id"]
+    service.transition_capability_proposal(proposal_id, "approved_for_dev", actor="test")
+    patch_path = _make_registry_v2_patch(
+        project,
+        action_id="get_test_probe_v2",
+        command=["python", "-c", "import json; print(json.dumps({'wrong': True}))"],
+    )
+    with HarnessMemory(db_path) as memory:
+        memory.transition_work_item(work_id, "waiting_approval", actor="test", payload={})
+        memory.add_work_event(
+            work_id,
+            "job_completed",
+            actor="worker",
+            payload={"job_id": "job1", "result": {"status": "patch_ready", "patch_path": str(patch_path), "changed_files": ["registry/actions.json"]}},
+        )
+        memory.conn.commit()
+
+    with pytest.raises(ActivationError, match="verification failed"):
+        ActivationService(
+            ActivationConfig(
+                db_path=db_path,
+                project_root=project,
+                self_patch_run_root=project / "artifacts" / "self_patch",
+                test_command=("python", "-c", "pass"),
+                action_registry_path=Path("registry/actions.json"),
+            )
+        ).activate_work_item(work_id, actor="test")
+
+    assert not (project / "registry" / "actions.json").exists()
+    assert service.work_item(work_id)["work_item"]["status"] == "reviewing"
+    assert service.capability_proposal(proposal_id)["proposal"]["status"] == "approved_for_dev"
+
+
+def test_activation_rolls_back_when_registry_v2_output_type_mismatches(tmp_path):
+    project = _make_git_project(tmp_path)
+    db_path = tmp_path / "harness.db"
+    service = HarnessService(db_path=db_path, project_root=project)
+    proposal = service.create_capability_proposal_from_intent(user_text="테스트 probe v2 추가", capability_intent=_registry_probe_intent("get_test_probe_v2"))
+    proposal_id = proposal["proposal"]["proposal_id"]
+    work_id = proposal["work_item"]["work_id"]
+    service.transition_capability_proposal(proposal_id, "approved_for_dev", actor="test")
+    patch_path = _make_registry_v2_patch(
+        project,
+        action_id="get_test_probe_v2",
+        command=["python", "-c", "import json; print(json.dumps({'ok': 'true'}))"],
+    )
+    with HarnessMemory(db_path) as memory:
+        memory.transition_work_item(work_id, "waiting_approval", actor="test", payload={})
+        memory.add_work_event(
+            work_id,
+            "job_completed",
+            actor="worker",
+            payload={"job_id": "job1", "result": {"status": "patch_ready", "patch_path": str(patch_path), "changed_files": ["registry/actions.json"]}},
+        )
+        memory.conn.commit()
+
+    with pytest.raises(ActivationError, match="verification failed"):
+        ActivationService(
+            ActivationConfig(
+                db_path=db_path,
+                project_root=project,
+                self_patch_run_root=project / "artifacts" / "self_patch",
+                test_command=("python", "-c", "pass"),
+                action_registry_path=Path("registry/actions.json"),
+            )
+        ).activate_work_item(work_id, actor="test")
+
+    assert not (project / "registry" / "actions.json").exists()
+    assert service.work_item(work_id)["work_item"]["status"] == "reviewing"
+    assert service.capability_proposal(proposal_id)["proposal"]["status"] == "approved_for_dev"
+
+
+def test_activation_preflight_blocks_sensitive_changed_files(tmp_path):
+    project = _make_git_project(tmp_path)
+    db_path = tmp_path / "harness.db"
+    service = HarnessService(db_path=db_path, project_root=project)
+    proposal = service.create_capability_proposal_from_intent(user_text="위험한 파일 수정", capability_intent=_registry_probe_intent())
+    proposal_id = proposal["proposal"]["proposal_id"]
+    work_id = proposal["work_item"]["work_id"]
+    service.transition_capability_proposal(proposal_id, "approved_for_dev", actor="test")
+    patch_path = _make_blocked_env_patch(project)
+    with HarnessMemory(db_path) as memory:
+        memory.transition_work_item(work_id, "waiting_approval", actor="test", payload={})
+        memory.add_work_event(work_id, "job_completed", actor="worker", payload={"job_id": "job1", "result": {"status": "patch_ready", "patch_path": str(patch_path), "changed_files": [".env"]}})
+        memory.conn.commit()
+
+    with pytest.raises(ActivationError, match="preflight failed"):
+        ActivationService(
+            ActivationConfig(
+                db_path=db_path,
+                project_root=project,
+                self_patch_run_root=project / "artifacts" / "self_patch",
+                test_command=("python", "-c", "pass"),
+                verify_activation=False,
+            )
+        ).activate_work_item(work_id, actor="test")
+
+    assert not (project / ".env").exists()
+    assert service.work_item(work_id)["work_item"]["status"] == "reviewing"
+
+
 def _make_git_project(tmp_path) -> Path:
     project = tmp_path / "project"
     (project / "src").mkdir(parents=True)
@@ -263,6 +406,63 @@ def _make_registry_patch(project: Path, command: list[str] | None = None) -> Pat
     return patch
 
 
+def _make_registry_v2_patch(project: Path, *, action_id: str, command: list[str] | None = None) -> Path:
+    command = command or ["python", "-c", "import json; print(json.dumps({'ok': True}))"]
+    (project / "registry").mkdir()
+    (project / "registry" / "actions.json").write_text(
+        """{
+  "schema_version": "neurokernel-action-registry-v2",
+  "actions": [
+    {
+      "action_id": "%s",
+      "version": "1.0.0",
+      "title": "테스트 probe v2",
+      "description": "activation v2 출력 계약 확인용 probe",
+      "status": "active",
+      "risk_level": "low",
+      "side_effect": false,
+      "requires_approval": false,
+      "role": "readonly_action",
+      "executor": "readonly_command",
+      "target": ["local"],
+      "inputs_schema": {"type": "object", "properties": {}, "required": []},
+      "outputs_schema": {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]},
+      "executor_config": {
+        "command": %s,
+        "output": "json",
+        "timeout_seconds": 5
+      },
+      "test_plan": ["ok 필드를 반환한다"],
+      "examples": ["테스트 probe 확인"]
+    }
+  ]
+}
+"""
+        % (action_id, __import__("json").dumps(command, ensure_ascii=False)),
+        encoding="utf-8",
+    )
+    patch = project / "artifacts" / "self_patch" / "job1" / "proposal.patch"
+    patch.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "add", "-N", "registry/actions.json"], cwd=project, check=True)
+    diff = subprocess.run(["git", "diff", "--no-ext-diff", "--binary"], cwd=project, text=True, encoding="utf-8", capture_output=True, check=True).stdout
+    patch.write_text(diff, encoding="utf-8")
+    subprocess.run(["git", "reset", "--", "registry/actions.json"], cwd=project, check=True)
+    subprocess.run(["git", "clean", "-fd", "registry"], cwd=project, check=True)
+    return patch
+
+
+def _make_blocked_env_patch(project: Path) -> Path:
+    (project / ".env").write_text("TOKEN=should_not_activate\n", encoding="utf-8")
+    patch = project / "artifacts" / "self_patch" / "job1" / "proposal.patch"
+    patch.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "add", "-N", ".env"], cwd=project, check=True)
+    diff = subprocess.run(["git", "diff", "--no-ext-diff", "--binary"], cwd=project, text=True, encoding="utf-8", capture_output=True, check=True).stdout
+    patch.write_text(diff, encoding="utf-8")
+    subprocess.run(["git", "reset", "--", ".env"], cwd=project, check=True)
+    subprocess.run(["git", "clean", "-fd", ".env"], cwd=project, check=True)
+    return patch
+
+
 def _git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=cwd, text=True, encoding="utf-8", capture_output=True, check=True)
 
@@ -312,11 +512,11 @@ def _cpu_usage_intent():
     }
 
 
-def _registry_probe_intent():
+def _registry_probe_intent(action_id: str = "get_test_probe"):
     payload = _cpu_usage_intent()
     payload["proposal"] = {
         **payload["proposal"],
-        "action_id": "get_test_probe",
+        "action_id": action_id,
         "capability_name": "테스트 probe",
         "purpose": "registry 기반 테스트 probe를 조회한다.",
         "target": "local",

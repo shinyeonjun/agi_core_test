@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from neurokernel_seed.harness.action_catalog import REGISTRY_SCHEMA_VERSION, build_action_catalog, load_action_registry
+from neurokernel_seed.harness.action_catalog import REGISTRY_SCHEMA_VERSION, REGISTRY_SCHEMA_VERSION_V2, build_action_catalog, load_action_registry
 from neurokernel_seed.harness.service import HarnessService
 
 
@@ -56,6 +56,54 @@ def test_dynamic_registry_action_can_be_loaded_and_executed(tmp_path):
     assert result["execution_result"]["result"] == {"ok": True, "value": 7}
 
 
+def test_dynamic_registry_v2_loads_contract_fields(tmp_path):
+    registry = tmp_path / "actions.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "schema_version": REGISTRY_SCHEMA_VERSION_V2,
+                "actions": [
+                    {
+                        "action_id": "get_test_probe_v2",
+                        "version": "1.2.3",
+                        "title": "테스트 probe v2",
+                        "description": "계약 기반 registry v2 동작 확인",
+                        "status": "active",
+                        "risk_level": "low",
+                        "side_effect": False,
+                        "requires_approval": False,
+                        "role": "readonly_action",
+                        "executor": "readonly_command",
+                        "target": ["local"],
+                        "inputs_schema": {"type": "object", "properties": {}, "required": []},
+                        "outputs_schema": {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]},
+                        "executor_config": {
+                            "command": ["python", "-c", "import json; print(json.dumps({'ok': True}))"],
+                            "output": "json",
+                            "timeout_seconds": 5,
+                        },
+                        "test_plan": ["ok 필드를 반환한다"],
+                        "examples": ["테스트 probe 확인"],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    catalog = build_action_catalog(registry_path=registry)
+    action = catalog["get_test_probe_v2"]
+
+    assert action.version == "1.2.3"
+    assert action.description == "계약 기반 registry v2 동작 확인"
+    assert action.status == "active"
+    assert action.inputs_schema["type"] == "object"
+    assert action.outputs_schema["required"] == ["ok"]
+    assert action.test_plan == ({"name": "check_1", "assertions": ["ok 필드를 반환한다"]},)
+    assert action.examples == ("테스트 probe 확인",)
+
+
 def test_dynamic_registry_rejects_entries_without_tests(tmp_path):
     registry = tmp_path / "actions.json"
     registry.write_text(
@@ -80,6 +128,39 @@ def test_dynamic_registry_rejects_entries_without_tests(tmp_path):
     )
 
     with pytest.raises(ValueError, match="test_plan is required"):
+        load_action_registry(registry)
+
+
+def test_dynamic_registry_v2_rejects_missing_contract_fields(tmp_path):
+    registry = tmp_path / "actions.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "schema_version": REGISTRY_SCHEMA_VERSION_V2,
+                "actions": [
+                    {
+                        "action_id": "get_incomplete_probe",
+                        "version": "1.0.0",
+                        "title": "불완전 probe",
+                        "status": "active",
+                        "risk_level": "low",
+                        "side_effect": False,
+                        "requires_approval": False,
+                        "role": "readonly_action",
+                        "executor": "readonly_command",
+                        "target": ["local"],
+                        "inputs_schema": {},
+                        "outputs_schema": {},
+                        "test_plan": ["never loads"],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="missing required action spec fields"):
         load_action_registry(registry)
 
 

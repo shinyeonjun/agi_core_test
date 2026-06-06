@@ -57,6 +57,12 @@ class ActivationService:
 
         patch_path = self._resolve_patch_path(patch_result)
         commands: list[dict[str, Any]] = []
+        preflight = _preflight_patch_result(patch_result)
+        if not preflight.get("passed"):
+            with HarnessMemory(self.config.db_path) as memory:
+                memory.add_work_event(work_id, "activation_failed", actor=actor, payload={"stage": "preflight", "preflight": preflight})
+                _transition_if_possible(memory, work_id, "reviewing", actor=actor, payload={"stage": "preflight", "preflight": preflight})
+            raise ActivationError(f"activation preflight failed: {preflight.get('reason')}")
         pre_sha = _git_output(self.runner, ["git", "rev-parse", "HEAD"], cwd=project_root, commands=commands)
         if self.config.require_clean_git:
             status = _git_output(self.runner, ["git", "status", "--porcelain"], cwd=project_root, commands=commands)
@@ -164,14 +170,22 @@ class ActivationService:
             action = catalog[action_id]
         except Exception as exc:
             return {"passed": False, "mode": "catalog_load_failed", "action_id": action_id, "reason": redact_text(str(exc)), "commands": []}
+        spec_check = _activation_action_spec_check(action)
+        if not spec_check.get("passed"):
+            return {"passed": False, "mode": "action_schema_check", "action_id": action_id, "schema_check": spec_check, "commands": []}
         smoke = _smoke_action(project_root, self.config.db_path, action, timeout_seconds=self.config.smoke_timeout_seconds)
+        output_check = _output_schema_smoke_check(smoke, action.outputs_schema)
         return {
-            "passed": bool(smoke.get("passed")),
+            "passed": bool(smoke.get("passed")) and bool(output_check.get("passed")),
             "mode": "action_smoke",
             "action_id": action_id,
             "action_source": action.source,
+            "action_version": action.version,
+            "action_status": action.status,
             "executor": action.executor,
+            "schema_check": spec_check,
             "smoke": smoke,
+            "output_check": output_check,
             "commands": [],
         }
 
@@ -243,6 +257,35 @@ def _require_project_root(project_root: Path) -> None:
         raise ActivationError("activation requires a git repository")
 
 
+def _preflight_patch_result(patch_result: dict[str, Any]) -> dict[str, Any]:
+    changed_files = patch_result.get("changed_files")
+    if changed_files is None:
+        return {"passed": True, "mode": "no_changed_files_declared"}
+    if not isinstance(changed_files, list) or not all(isinstance(item, str) for item in changed_files):
+        return {"passed": False, "reason": "changed_files must be a string list"}
+    invalid = []
+    blocked = []
+    for path in changed_files:
+        normalized = path.replace("\\", "/").strip()
+        parts = [part for part in normalized.split("/") if part]
+        if not normalized or normalized.startswith("/") or ".." in parts or (parts and ":" in parts[0]):
+            invalid.append(path)
+            continue
+        if _is_sensitive_patch_path(normalized):
+            blocked.append(path)
+    if invalid:
+        return {"passed": False, "reason": "changed_files contains invalid paths", "invalid_paths": invalid}
+    if blocked:
+        return {"passed": False, "reason": "patch touches blocked paths", "blocked_paths": blocked}
+    return {"passed": True, "changed_files": changed_files}
+
+
+def _is_sensitive_patch_path(path: str) -> bool:
+    if path == ".env" or (path.startswith(".env.") and path != ".env.example"):
+        return True
+    return path.startswith(("secrets/", "data/private/"))
+
+
 def _resolve_child(root: Path, child: Path) -> Path:
     if child.is_absolute():
         return child.resolve()
@@ -306,6 +349,70 @@ def _smoke_action(project_root: Path, db_path: Path, action: ActionDefinition, *
         result = readonly_system_module.ReadOnlyExecutor(project_root=project_root, memory_path=db_path).execute(action.action_id, params, {"source": "activation_smoke"}).as_dict()
         return {"passed": bool(result.get("success")), "execution_result": result}
     return {"passed": False, "reason": f"executor is not smoke-testable: {action.executor}", "action_id": action.action_id}
+
+
+def _activation_action_spec_check(action: ActionDefinition) -> dict[str, Any]:
+    if action.status != "active":
+        return {"passed": False, "reason": f"action status must be active before execution: {action.status}"}
+    if not action.version:
+        return {"passed": False, "reason": "action version is required"}
+    if not action.description:
+        return {"passed": False, "reason": "action description is required"}
+    if not action.test_plan:
+        return {"passed": False, "reason": "action test_plan is required"}
+    if action.executor not in {"readonly_system", "readonly_command", "benchmark"}:
+        return {"passed": False, "reason": f"executor is not allowed: {action.executor}"}
+    if action.risk_level not in {"none", "low", "medium"}:
+        return {"passed": False, "reason": f"risk_level is not activation-safe: {action.risk_level}"}
+    if action.risk_level == "medium" and not action.requires_approval:
+        return {"passed": False, "reason": "medium risk action must require approval"}
+    if action.side_effect and not action.requires_approval:
+        return {"passed": False, "reason": "side-effect action must require approval"}
+    return {"passed": True}
+
+
+def _output_schema_smoke_check(smoke: dict[str, Any], outputs_schema: dict[str, Any]) -> dict[str, Any]:
+    if not outputs_schema:
+        return {"passed": True, "mode": "no_outputs_schema"}
+    result = smoke.get("execution_result")
+    if not isinstance(result, dict):
+        return {"passed": False, "reason": "smoke execution_result is missing"}
+    payload = result.get("result")
+    if not isinstance(payload, dict):
+        return {"passed": False, "reason": "executor result must be an object"}
+    required = outputs_schema.get("required") if isinstance(outputs_schema.get("required"), list) else []
+    missing = [str(key) for key in required if str(key) not in payload]
+    if missing:
+        return {"passed": False, "reason": "executor result missing required output fields", "missing": missing}
+    properties = outputs_schema.get("properties") if isinstance(outputs_schema.get("properties"), dict) else {}
+    type_errors = []
+    for key, schema in properties.items():
+        if key not in payload or not isinstance(schema, dict) or "type" not in schema:
+            continue
+        expected_type = str(schema["type"])
+        if not _matches_json_schema_type(payload[key], expected_type):
+            type_errors.append({"field": key, "expected": expected_type, "actual": type(payload[key]).__name__})
+    if type_errors:
+        return {"passed": False, "reason": "executor result output field type mismatch", "type_errors": type_errors}
+    return {"passed": True, "required": required, "checked_properties": sorted(properties)}
+
+
+def _matches_json_schema_type(value: Any, expected_type: str) -> bool:
+    if expected_type == "boolean":
+        return isinstance(value, bool)
+    if expected_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected_type == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if expected_type == "string":
+        return isinstance(value, str)
+    if expected_type == "object":
+        return isinstance(value, dict)
+    if expected_type == "array":
+        return isinstance(value, list)
+    if expected_type == "null":
+        return value is None
+    return False
 
 
 def _default_params(action: ActionDefinition) -> dict[str, Any] | None:
