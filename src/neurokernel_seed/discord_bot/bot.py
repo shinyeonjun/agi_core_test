@@ -174,7 +174,7 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
         nonlocal notify_task
         print(f"Discord bot logged in as {client.user} | channel={config.channel_id} | core={config.core_url}", flush=True)
         if config.work_notify_enabled and notify_task is None:
-            notify_task = asyncio.create_task(_work_notification_loop(client, core, config, activation_view_factory, retry_view_factory))
+            notify_task = asyncio.create_task(_work_notification_loop(client, core, config, activation_view_factory, retry_view_factory, promote_view_factory))
 
     def proposal_view_factory(proposal_id: str):
         return ProposalReviewView(proposal_id)
@@ -187,6 +187,9 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
 
     def retry_view_factory(work_id: str):
         return WorkRetryView(work_id)
+
+    def promote_view_factory(work_id: str):
+        return WorkPromoteView(work_id)
 
     class ProposalReviewView(discord.ui.View):
         def __init__(self, proposal_id: str):
@@ -320,6 +323,34 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
             except Exception as exc:
                 await interaction.response.send_message(f"재시도 실패: `{type(exc).__name__}: {exc}`", ephemeral=True)
 
+    class WorkPromoteView(discord.ui.View):
+        def __init__(self, work_id: str):
+            super().__init__(timeout=60 * 60 * 24)
+            self.work_id = work_id
+
+        async def _allowed(self, interaction: Any) -> bool:
+            user_id = int(getattr(getattr(interaction, "user", None), "id", 0) or 0)
+            if config.allowed_user_ids and user_id not in config.allowed_user_ids:
+                await interaction.response.send_message("이 버튼은 허용된 사용자만 누를 수 있어.", ephemeral=True)
+                return False
+            return True
+
+        @discord.ui.button(label="개발 작업으로 전환", style=discord.ButtonStyle.primary)
+        async def promote(self, interaction: Any, button: Any) -> None:
+            if not await self._allowed(interaction):
+                return
+            try:
+                payload = await _call(core.post, f"/work-items/{self.work_id}/promote-self-patch", {"actor": _interaction_user_id(interaction)})
+                child = payload.get("child_work_item", {}) if isinstance(payload, dict) else {}
+                queue = payload.get("queue", {}) if isinstance(payload, dict) else {}
+                if isinstance(payload, dict) and child:
+                    queued = "큐에 들어갔어" if isinstance(queue, dict) and queue.get("queued") else f"큐 대기 실패: {queue.get('reason') if isinstance(queue, dict) else 'unknown'}"
+                    await interaction.response.edit_message(content=f"개발 작업으로 전환했어: {child.get('title') or self.work_id}\nchild: `{child.get('work_id')}`\n{queued}", view=None)
+                    return
+                await interaction.response.send_message(format_code_block(payload), ephemeral=True)
+            except Exception as exc:
+                await interaction.response.send_message(f"전환 실패: `{type(exc).__name__}: {exc}`", ephemeral=True)
+
     @client.event
     async def on_message(message: Any) -> None:
         if message.author.bot:
@@ -337,7 +368,7 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
         channel_id = _discord_channel_id(message)
         await _record_message(core, message, role="user", content=content)
         try:
-            response = await _handle_command(command_line, core, config, user_id=user_id, channel_id=channel_id, proposal_view_factory=proposal_view_factory, work_view_factory=work_view_factory, activation_view_factory=activation_view_factory, retry_view_factory=retry_view_factory)
+            response = await _handle_command(command_line, core, config, user_id=user_id, channel_id=channel_id, proposal_view_factory=proposal_view_factory, work_view_factory=work_view_factory, activation_view_factory=activation_view_factory, retry_view_factory=retry_view_factory, promote_view_factory=promote_view_factory)
         except Exception as exc:  # Discord handlers should never crash the bot.
             response = f"실행 실패: `{type(exc).__name__}: {exc}`"
         response_text = response.text if isinstance(response, BotResponse) else str(response)
@@ -347,7 +378,14 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
     client.run(config.token)
 
 
-async def _work_notification_loop(client: Any, core: CoreClient, config: DiscordBotConfig, activation_view_factory: Any | None, retry_view_factory: Any | None) -> None:
+async def _work_notification_loop(
+    client: Any,
+    core: CoreClient,
+    config: DiscordBotConfig,
+    activation_view_factory: Any | None,
+    retry_view_factory: Any | None,
+    promote_view_factory: Any | None,
+) -> None:
     seen: dict[str, tuple[str, str]] = {}
     first_poll = True
     while True:
@@ -355,7 +393,7 @@ async def _work_notification_loop(client: Any, core: CoreClient, config: Discord
             payload = await _call(core.get, "/work-items?limit=30")
             items = payload.get("work_items") if isinstance(payload, dict) else []
             if isinstance(items, list):
-                await _notify_work_changes(client, core, config, activation_view_factory, retry_view_factory, items, seen=seen, first_poll=first_poll)
+                await _notify_work_changes(client, core, config, activation_view_factory, retry_view_factory, promote_view_factory, items, seen=seen, first_poll=first_poll)
             first_poll = False
         except Exception as exc:
             print(f"[discord-work-notifier] poll failed: {type(exc).__name__}: {exc}", flush=True)
@@ -368,6 +406,7 @@ async def _notify_work_changes(
     config: DiscordBotConfig,
     activation_view_factory: Any | None,
     retry_view_factory: Any | None,
+    promote_view_factory: Any | None,
     items: list[Any],
     *,
     seen: dict[str, tuple[str, str]],
@@ -399,12 +438,14 @@ async def _notify_work_changes(
             view = activation_view_factory(work_id)
         elif view_kind == "retry" and retry_view_factory:
             view = retry_view_factory(work_id)
+        elif view_kind == "promote" and promote_view_factory:
+            view = promote_view_factory(work_id)
         for index, chunk in enumerate(_discord_chunks(text)):
             await channel.send(chunk, view=view if index == 0 else None)
 
 
 def _is_notifiable_work_status(status: str) -> bool:
-    return status in {"waiting_approval", "reviewing", "blocked", "failed", "completed"}
+    return status in {"planned", "waiting_approval", "reviewing", "blocked", "failed", "completed"}
 
 
 async def _resolve_notification_channel(client: Any, item: dict[str, Any], config: DiscordBotConfig) -> Any | None:
@@ -431,6 +472,8 @@ def _format_work_notification(payload: dict[str, Any]) -> tuple[str, str | None]
     changed_files = result.get("changed_files") if isinstance(result.get("changed_files"), list) else []
     changed_text = ", ".join(str(path) for path in changed_files[:5])
 
+    if status == "planned" and str(item.get("type") or "") == "external_work":
+        return f"계획이 접수됐어: {title}\n실제 코드 구현으로 넘기려면 개발 작업으로 전환해야 해.", "promote"
     if status == "waiting_approval" and result_status == "patch_ready":
         lines = [
             f"개발 후보가 테스트를 통과했어: {title}",
@@ -504,7 +547,19 @@ def _command_line_from_content(content: str, config: DiscordBotConfig) -> str | 
     return f"auto {content}"
 
 
-async def _handle_command(command_line: str, core: CoreClient, config: DiscordBotConfig, *, user_id: str | None = None, channel_id: str | None = None, proposal_view_factory: Any | None = None, work_view_factory: Any | None = None, activation_view_factory: Any | None = None, retry_view_factory: Any | None = None) -> str | BotResponse:
+async def _handle_command(
+    command_line: str,
+    core: CoreClient,
+    config: DiscordBotConfig,
+    *,
+    user_id: str | None = None,
+    channel_id: str | None = None,
+    proposal_view_factory: Any | None = None,
+    work_view_factory: Any | None = None,
+    activation_view_factory: Any | None = None,
+    retry_view_factory: Any | None = None,
+    promote_view_factory: Any | None = None,
+) -> str | BotResponse:
     command, _, rest = command_line.partition(" ")
     command = command.lower().strip()
     rest = rest.strip()
@@ -529,7 +584,7 @@ async def _handle_command(command_line: str, core: CoreClient, config: DiscordBo
     if command == "memory":
         return await _handle_memory(rest, core, user_id=user_id, channel_id=channel_id)
     if command == "work":
-        return await _handle_work(rest, core, user_id=user_id, channel_id=channel_id, activation_view_factory=activation_view_factory, retry_view_factory=retry_view_factory)
+        return await _handle_work(rest, core, user_id=user_id, channel_id=channel_id, activation_view_factory=activation_view_factory, retry_view_factory=retry_view_factory, promote_view_factory=promote_view_factory)
     if command == "run":
         return await _run_preset(rest, core, user_id=user_id, channel_id=channel_id)
     if command == "benchmark":
@@ -558,6 +613,7 @@ async def _handle_command(command_line: str, core: CoreClient, config: DiscordBo
             work_view_factory=work_view_factory,
             activation_view_factory=activation_view_factory,
             retry_view_factory=retry_view_factory,
+            promote_view_factory=promote_view_factory,
         )
         if route_response:
             return route_response
@@ -708,6 +764,7 @@ async def _maybe_route_work(
     work_view_factory: Any | None,
     activation_view_factory: Any | None = None,
     retry_view_factory: Any | None = None,
+    promote_view_factory: Any | None = None,
 ) -> BotResponse | None:
     payload = await _call(
         core.post,
@@ -722,7 +779,7 @@ async def _maybe_route_work(
         return None
     route = str(payload.get("route") or payload.get("route_decision", {}).get("route") or "clarify")
     if route == "work_status":
-        response = await _handle_work("list", core, user_id=user_id, channel_id=channel_id, activation_view_factory=activation_view_factory, retry_view_factory=retry_view_factory)
+        response = await _handle_work("list", core, user_id=user_id, channel_id=channel_id, activation_view_factory=activation_view_factory, retry_view_factory=retry_view_factory, promote_view_factory=promote_view_factory)
         return response if isinstance(response, BotResponse) else BotResponse(response)
     if route == "runtime_task":
         return None
@@ -852,6 +909,7 @@ async def _handle_work(
     channel_id: str | None = None,
     activation_view_factory: Any | None = None,
     retry_view_factory: Any | None = None,
+    promote_view_factory: Any | None = None,
 ) -> str | BotResponse:
     command, _, tail = rest.partition(" ")
     command = command.lower().strip() or "list"
@@ -861,12 +919,17 @@ async def _handle_work(
         jobs_payload = await _call(core.get, "/work-jobs?limit=10")
         items = payload.get("work_items") if isinstance(payload, dict) else []
         jobs = jobs_payload.get("jobs") if isinstance(jobs_payload, dict) else []
-        return await _humanize(
+        status_payload = _build_work_status_payload(items if isinstance(items, list) else [], jobs if isinstance(jobs, list) else [])
+        text = await _humanize(
             core,
-            _build_work_status_payload(items if isinstance(items, list) else [], jobs if isinstance(jobs, list) else []),
+            status_payload,
             user_id=user_id,
             channel_id=channel_id,
         )
+        promotable = _first_promotable_work_id(status_payload)
+        if promotable and promote_view_factory:
+            return BotResponse(text, view=promote_view_factory(promotable))
+        return text
     if command in {"show", "get"}:
         work_id = tail.split()[0] if tail else ""
         if not work_id:
@@ -876,11 +939,24 @@ async def _handle_work(
         if not item:
             return "그 작업을 못 찾았어."
         text = _format_work_item_response(item, payload if isinstance(payload, dict) else {})
+        if item.get("type") == "external_work" and item.get("status") == "planned" and promote_view_factory:
+            return BotResponse(text, view=promote_view_factory(str(item.get("work_id"))))
         if item.get("status") == "waiting_approval" and activation_view_factory:
             return BotResponse(text, view=activation_view_factory(str(item.get("work_id"))))
         if item.get("status") in {"reviewing", "blocked", "failed"} and retry_view_factory:
             return BotResponse(text, view=retry_view_factory(str(item.get("work_id"))))
         return text
+    if command == "promote":
+        work_id = tail.split()[0] if tail else ""
+        if not work_id:
+            return "개발 작업으로 전환할 작업 id를 붙여줘."
+        payload = await _call(core.post, f"/work-items/{quote(work_id)}/promote-self-patch", {"actor": "discord"})
+        if isinstance(payload, dict) and payload.get("child_work_item"):
+            child = payload.get("child_work_item") if isinstance(payload.get("child_work_item"), dict) else {}
+            queue = payload.get("queue") if isinstance(payload.get("queue"), dict) else {}
+            queued = "큐에 들어갔어" if queue.get("queued") else f"큐 대기 실패: {queue.get('reason') or 'unknown'}"
+            return f"개발 작업으로 전환했어: {child.get('title') or work_id}\nchild: `{child.get('work_id')}`\n{queued}"
+        return format_code_block(payload)
     if command == "retry":
         work_id = tail.split()[0] if tail else ""
         if not work_id:
@@ -899,7 +975,7 @@ async def _handle_work(
             reload_note = "\n서비스 재시작이 필요해." if payload.get("service_reload_required") else ""
             return f"장착 완료: `{payload.get('action_id') or work_id}`{_activation_verify_note(payload)}{reload_note}"
         return format_code_block(payload)
-    return "`work list`, `work show <id>`, `work retry <id>`로 볼 수 있어."
+    return "`work list`, `work show <id>`, `work promote <id>`, `work retry <id>`로 볼 수 있어."
 
 
 def _build_work_status_payload(items: list[Any], jobs: list[Any]) -> dict[str, Any]:
@@ -955,8 +1031,19 @@ def _work_progress(item: dict[str, Any], jobs: list[dict[str, Any]]) -> dict[str
         "user_action_required": user_action_required,
         "worker_action_required": status in {"accepted", "running"} or (status == "planned" and work_type == "external_work"),
         "activation_possible": status == "waiting_approval",
+        "promotion_possible": status == "planned" and work_type == "external_work",
         "retry_possible": status in {"reviewing", "blocked", "failed"} and work_type == "self_patch",
     }
+
+
+def _first_promotable_work_id(status_payload: dict[str, Any]) -> str | None:
+    progress = status_payload.get("progress") if isinstance(status_payload.get("progress"), list) else []
+    for item in progress:
+        if isinstance(item, dict) and item.get("promotion_possible"):
+            work_id = str(item.get("work_id") or "").strip()
+            if work_id:
+                return work_id
+    return None
 
 
 def _self_patch_stage(status: str, latest_job_status: str | None) -> str:

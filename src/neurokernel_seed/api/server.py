@@ -67,6 +67,11 @@ def create_app(*, db_path: str | Path = "data/harness.db", project_root: str | P
         payload = payload or {}
         return service.retry_work_item(work_id, actor=str(payload.get("actor") or "api"), max_attempts=int(payload.get("max_attempts") or 3))
 
+    @app.post("/work-items/{work_id}/promote-self-patch")
+    def work_item_promote_self_patch(work_id: str, payload: dict[str, Any] | None = None):
+        payload = payload or {}
+        return service.promote_work_item_to_self_patch(work_id, actor=str(payload.get("actor") or "api"), max_attempts=int(payload.get("max_attempts") or 3))
+
     @app.post("/work-items/{work_id}/note")
     def work_item_note(work_id: str, payload: dict[str, Any]):
         return service.add_work_note(work_id, actor=str(payload.get("actor") or "api"), note=str(payload.get("note") or ""))

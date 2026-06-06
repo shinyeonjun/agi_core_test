@@ -71,6 +71,52 @@ def test_dispatcher_moves_accepted_work_to_planned_and_acks_job(tmp_path):
     assert item["notes"]
 
 
+def test_promoting_external_work_creates_child_self_patch_and_enqueues(tmp_path):
+    queue = InMemoryWorkQueue()
+    service = HarnessService(db_path=tmp_path / "harness.db", project_root=tmp_path, work_queue=queue)
+    created = service.create_work_item_from_route(
+        user_text="자동 진단 리포트 기능 만들어줘",
+        user_id="discord:1",
+        channel_id="chan",
+        route_decision=_external_work_route(),
+    )
+    parent_id = created["work_item"]["work_id"]
+    service.transition_work_item(parent_id, "accepted", actor="discord:1")
+
+    promoted = service.promote_work_item_to_self_patch(parent_id, actor="discord:1")
+
+    assert promoted["promoted"] is True
+    child = promoted["child_work_item"]
+    assert child["type"] == "self_patch"
+    assert child["status"] == "accepted"
+    assert child["parent_work_id"] == parent_id
+    assert promoted["queue"]["queued"] is True
+    assert queue.messages[-1][0] == "self_patch"
+    assert queue.messages[-1][2]["work_id"] == child["work_id"]
+    detail = service.work_item(parent_id)
+    assert any(event["event_type"] == "promoted_to_self_patch" for event in detail["events"])
+
+
+def test_promoting_external_work_reuses_existing_child_self_patch(tmp_path):
+    queue = InMemoryWorkQueue()
+    service = HarnessService(db_path=tmp_path / "harness.db", project_root=tmp_path, work_queue=queue)
+    created = service.create_work_item_from_route(
+        user_text="자동 진단 리포트 기능 만들어줘",
+        user_id="discord:1",
+        channel_id="chan",
+        route_decision=_external_work_route(),
+    )
+    parent_id = created["work_item"]["work_id"]
+    first = service.promote_work_item_to_self_patch(parent_id, actor="discord:1")
+    second = service.promote_work_item_to_self_patch(parent_id, actor="discord:1")
+
+    assert first["promoted"] is True
+    assert second["promoted"] is False
+    assert second["reason"] == "child_self_patch_exists"
+    assert second["child_work_item"]["work_id"] == first["child_work_item"]["work_id"]
+    assert len(queue.messages) == 1
+
+
 def test_dispatcher_runs_self_patch_and_waits_for_activation_approval(tmp_path):
     queue = InMemoryWorkQueue()
     service = HarnessService(db_path=tmp_path / "harness.db", project_root=tmp_path, work_queue=queue)

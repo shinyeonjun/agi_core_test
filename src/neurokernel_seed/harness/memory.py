@@ -384,6 +384,17 @@ class HarnessMemory:
         rows = self.conn.execute(f"SELECT * FROM work_items{where} ORDER BY updated_at DESC, created_at DESC LIMIT ?", (*params, limit)).fetchall()
         return [_row(row) for row in rows]
 
+    def child_work_items(self, parent_work_id: str, *, work_type: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit), 100))
+        clauses = ["parent_work_id=?"]
+        params: list[Any] = [_required_text(parent_work_id, "parent_work_id")]
+        if work_type:
+            clauses.append("type=?")
+            params.append(work_type)
+        where = " WHERE " + " AND ".join(clauses)
+        rows = self.conn.execute(f"SELECT * FROM work_items{where} ORDER BY updated_at DESC, created_at DESC LIMIT ?", (*params, limit)).fetchall()
+        return [_row(row) for row in rows]
+
     def transition_work_item(self, work_id: str, next_status: str, *, actor: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         current = self.get_work_item(work_id)
         current_status = str(current.get("status") or "")

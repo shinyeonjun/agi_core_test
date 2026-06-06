@@ -149,6 +149,69 @@ class WorkItemService:
                 _transition_back_after_retry_enqueue_failure(memory, work_id, status, actor=actor, job_id=job_id)
                 return {"queued": False, "reason": str(exc), "job": job, "work_item": memory.get_work_item(work_id)}
 
+    def promote_to_self_patch(self, work_id: str, *, actor: str = "api", max_attempts: int = 3) -> dict[str, Any]:
+        with HarnessMemory(self.db_path) as memory:
+            parent = memory.get_work_item(work_id)
+            parent_type = str(parent.get("type") or "")
+            parent_status = str(parent.get("status") or "")
+            if parent_type != "external_work":
+                raise ValueError("only external_work items can be promoted to self_patch")
+            if parent_status in {"rejected", "cancelled", "completed", "archived"}:
+                raise ValueError(f"work item is not promotable from status: {parent_status}")
+
+            existing_children = memory.child_work_items(work_id, work_type="self_patch", limit=10)
+            reusable_child = next(
+                (child for child in existing_children if str(child.get("status") or "") not in {"rejected", "cancelled", "failed", "archived"}),
+                None,
+            )
+            if reusable_child:
+                existing_job = memory.find_active_work_job(str(reusable_child["work_id"]))
+                return {
+                    "promoted": False,
+                    "reason": "child_self_patch_exists",
+                    "parent_work_item": parent,
+                    "child_work_item": reusable_child,
+                    "queue": {"queued": False, "reason": "active_job_exists", "job": existing_job} if existing_job else None,
+                }
+
+            metadata = parent.get("metadata_json") if isinstance(parent.get("metadata_json"), dict) else {}
+            child = memory.create_work_item(
+                work_id=new_id("work", str(parent.get("title") or "self_patch")),
+                work_type="self_patch",
+                title=str(parent.get("title") or "self_patch"),
+                goal=str(parent.get("goal") or ""),
+                status="accepted",
+                priority=str(parent.get("priority") or "medium"),
+                risk_level=str(parent.get("risk_level") or "low"),
+                owner_user_id=parent.get("owner_user_id"),
+                channel_id=parent.get("channel_id"),
+                source_message_id=parent.get("source_message_id"),
+                parent_work_id=work_id,
+                linked_entity_type="promoted_external_work",
+                linked_entity_id=work_id,
+                route_reason=f"promoted from external_work {work_id}",
+                confidence=float(parent.get("confidence") or 0.0),
+                metadata={
+                    "promoted_from_work_id": work_id,
+                    "parent_status_at_promotion": parent_status,
+                    "parent_metadata": metadata,
+                    "deliverables": metadata.get("deliverables") or ["implementation_patch", "tests", "activation_candidate"],
+                    "open_questions": metadata.get("open_questions") or [],
+                },
+                actor=actor,
+            )
+            memory.add_work_event(work_id, "promoted_to_self_patch", actor=actor, payload={"child_work_id": child["work_id"]})
+            memory.add_work_note(work_id, actor=actor, note=f"개발 작업으로 전환됨: {child['work_id']}")
+            parent_after = memory.get_work_item(work_id)
+
+        queue_result = self.enqueue(str(child["work_id"]), actor=actor, max_attempts=max_attempts)
+        return {
+            "promoted": True,
+            "parent_work_item": parent_after,
+            "child_work_item": child,
+            "queue": queue_result,
+        }
+
     def create_from_route(
         self,
         *,

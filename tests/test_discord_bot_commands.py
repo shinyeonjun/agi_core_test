@@ -237,6 +237,7 @@ def test_work_status_payload_explains_external_work_is_planned_not_attached():
     assert payload["progress"][0]["automation_stage"] == "plan_recorded_no_implementation_worker_running"
     assert payload["progress"][0]["worker_action_required"] is True
     assert payload["progress"][0]["activation_possible"] is False
+    assert payload["progress"][0]["promotion_possible"] is True
 
 
 def test_work_status_payload_marks_self_patch_waiting_for_activation():
@@ -257,6 +258,25 @@ def test_work_status_payload_marks_self_patch_waiting_for_activation():
     assert payload["progress"][0]["automation_stage"] == "patch_ready_waiting_for_activation_approval"
     assert payload["progress"][0]["user_action_required"] is True
     assert payload["progress"][0]["activation_possible"] is True
+    assert payload["progress"][0]["promotion_possible"] is False
+
+
+def test_format_work_notification_offers_promote_for_planned_external_work():
+    text, view_kind = _format_work_notification(
+        {
+            "work_item": {
+                "work_id": "work1",
+                "type": "external_work",
+                "title": "?먮룞 吏꾨떒 由ы룷??湲곕뒫",
+                "status": "planned",
+            },
+            "events": [],
+        }
+    )
+
+    assert view_kind == "promote"
+    assert "계획" in text
+    assert "개발 작업" in text
 
 
 def test_auto_executable_allows_low_risk_readonly_lookup():
