@@ -261,6 +261,37 @@ def test_work_status_payload_marks_self_patch_waiting_for_activation():
     assert payload["progress"][0]["promotion_possible"] is False
 
 
+def test_work_status_payload_hides_promotion_when_external_work_has_self_patch_child():
+    payload = _build_work_status_payload(
+        [
+            {
+                "work_id": "parent",
+                "type": "external_work",
+                "title": "diagnostic report",
+                "status": "planned",
+                "priority": "high",
+                "risk_level": "low",
+            },
+            {
+                "work_id": "child",
+                "parent_work_id": "parent",
+                "type": "self_patch",
+                "title": "diagnostic report",
+                "status": "waiting_approval",
+                "priority": "high",
+                "risk_level": "low",
+            },
+        ],
+        [{"job_id": "job_child", "work_id": "child", "status": "completed"}],
+    )
+
+    parent = payload["progress"][0]
+    assert parent["automation_stage"] == "implementation_patch_ready_waiting_for_activation"
+    assert parent["child_work_id"] == "child"
+    assert parent["activation_possible"] is True
+    assert parent["promotion_possible"] is False
+
+
 def test_format_work_notification_offers_promote_for_planned_external_work():
     text, view_kind = _format_work_notification(
         {
@@ -277,6 +308,31 @@ def test_format_work_notification_offers_promote_for_planned_external_work():
     assert view_kind == "promote"
     assert "계획" in text
     assert "개발 작업" in text
+
+
+def test_format_work_notification_hides_promote_for_planned_external_work_with_child():
+    text, view_kind = _format_work_notification(
+        {
+            "work_item": {
+                "work_id": "parent",
+                "type": "external_work",
+                "title": "diagnostic report",
+                "status": "planned",
+            },
+            "child_work_items": [
+                {
+                    "work_id": "child",
+                    "type": "self_patch",
+                    "title": "diagnostic report",
+                    "status": "waiting_approval",
+                }
+            ],
+            "events": [],
+        }
+    )
+
+    assert view_kind is None
+    assert "장착 승인" in text
 
 
 def test_auto_executable_allows_low_risk_readonly_lookup():

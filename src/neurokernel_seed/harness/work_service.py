@@ -33,7 +33,8 @@ class WorkItemService:
             events = memory.work_events(work_id)
             notes = memory.work_notes(work_id)
             jobs = memory.list_work_jobs(work_id=work_id, limit=20)
-        return {"work_item": item, "events": events, "notes": notes, "jobs": jobs}
+            children = memory.child_work_items(work_id, limit=20)
+        return {"work_item": item, "events": events, "notes": notes, "jobs": jobs, "child_work_items": children}
 
     def list_jobs(
         self,

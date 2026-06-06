@@ -464,6 +464,7 @@ async def _resolve_notification_channel(client: Any, item: dict[str, Any], confi
 
 def _format_work_notification(payload: dict[str, Any]) -> tuple[str, str | None]:
     item = payload.get("work_item") if isinstance(payload.get("work_item"), dict) else {}
+    children = payload.get("child_work_items") if isinstance(payload.get("child_work_items"), list) else []
     work_id = str(item.get("work_id") or "")
     title = str(item.get("title") or work_id or "작업")
     status = str(item.get("status") or "unknown")
@@ -472,6 +473,9 @@ def _format_work_notification(payload: dict[str, Any]) -> tuple[str, str | None]
     changed_files = result.get("changed_files") if isinstance(result.get("changed_files"), list) else []
     changed_text = ", ".join(str(path) for path in changed_files[:5])
 
+    child_summary = _external_work_child_summary(children)
+    if status == "planned" and str(item.get("type") or "") == "external_work" and child_summary:
+        return child_summary, None
     if status == "planned" and str(item.get("type") or "") == "external_work":
         return f"계획이 접수됐어: {title}\n실제 코드 구현으로 넘기려면 개발 작업으로 전환해야 해.", "promote"
     if status == "waiting_approval" and result_status == "patch_ready":
@@ -986,6 +990,11 @@ def _build_work_status_payload(items: list[Any], jobs: list[Any]) -> dict[str, A
         work_id = str(job.get("work_id") or "")
         if work_id:
             jobs_by_work.setdefault(work_id, []).append(job)
+    children_by_parent: dict[str, list[dict[str, Any]]] = {}
+    for item in clean_items:
+        parent_id = str(item.get("parent_work_id") or "").strip()
+        if parent_id:
+            children_by_parent.setdefault(parent_id, []).append(item)
     return {
         "kind": "work_status",
         "lifecycle": {
@@ -1002,22 +1011,33 @@ def _build_work_status_payload(items: list[Any], jobs: list[Any]) -> dict[str, A
         },
         "work_items": clean_items,
         "jobs": clean_jobs[:5],
-        "progress": [_work_progress(item, jobs_by_work.get(str(item.get("work_id") or ""), [])) for item in clean_items],
+        "progress": [
+            _work_progress(
+                item,
+                jobs_by_work.get(str(item.get("work_id") or ""), []),
+                child_items=children_by_parent.get(str(item.get("work_id") or ""), []),
+            )
+            for item in clean_items
+        ],
     }
 
 
-def _work_progress(item: dict[str, Any], jobs: list[dict[str, Any]]) -> dict[str, Any]:
+def _work_progress(item: dict[str, Any], jobs: list[dict[str, Any]], *, child_items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    child_items = child_items or []
     work_type = str(item.get("type") or "")
     status = str(item.get("status") or "")
     latest_job = jobs[0] if jobs else {}
     latest_job_status = str(latest_job.get("status") or "") if latest_job else None
-    user_action_required = status in {"proposed", "reviewing", "waiting_approval", "blocked", "failed"}
+    active_child = _first_live_self_patch_child(child_items)
+    child_status = str(active_child.get("status") or "") if active_child else None
+    user_action_required = status in {"proposed", "reviewing", "waiting_approval", "blocked", "failed"} or child_status in {"waiting_approval", "reviewing", "blocked", "failed"}
     if work_type == "self_patch":
         stage = _self_patch_stage(status, latest_job_status)
     elif work_type == "external_work":
-        stage = _external_work_stage(status, latest_job_status)
+        stage = _external_work_stage(status, latest_job_status, child_status=child_status)
     else:
         stage = _generic_work_stage(status, latest_job_status)
+    promotion_possible = status == "planned" and work_type == "external_work" and active_child is None
     return {
         "work_id": item.get("work_id"),
         "title": item.get("title"),
@@ -1027,11 +1047,13 @@ def _work_progress(item: dict[str, Any], jobs: list[dict[str, Any]]) -> dict[str
         "risk_level": item.get("risk_level"),
         "latest_job_id": latest_job.get("job_id") if latest_job else None,
         "latest_job_status": latest_job_status,
+        "child_work_id": active_child.get("work_id") if active_child else None,
+        "child_status": child_status,
         "automation_stage": stage,
         "user_action_required": user_action_required,
-        "worker_action_required": status in {"accepted", "running"} or (status == "planned" and work_type == "external_work"),
-        "activation_possible": status == "waiting_approval",
-        "promotion_possible": status == "planned" and work_type == "external_work",
+        "worker_action_required": status in {"accepted", "running"} or (status == "planned" and work_type == "external_work" and active_child is None),
+        "activation_possible": status == "waiting_approval" or child_status == "waiting_approval",
+        "promotion_possible": promotion_possible,
         "retry_possible": status in {"reviewing", "blocked", "failed"} and work_type == "self_patch",
     }
 
@@ -1064,7 +1086,15 @@ def _self_patch_stage(status: str, latest_job_status: str | None) -> str:
     return "not_active"
 
 
-def _external_work_stage(status: str, latest_job_status: str | None) -> str:
+def _external_work_stage(status: str, latest_job_status: str | None, *, child_status: str | None = None) -> str:
+    if child_status == "waiting_approval":
+        return "implementation_patch_ready_waiting_for_activation"
+    if child_status == "completed":
+        return "implementation_child_completed"
+    if child_status == "running":
+        return "implementation_worker_running"
+    if child_status in {"reviewing", "blocked", "failed"}:
+        return "implementation_child_needs_review"
     if status == "proposed":
         return "waiting_for_user_to_accept_work"
     if status == "accepted":
@@ -1078,6 +1108,32 @@ def _external_work_stage(status: str, latest_job_status: str | None) -> str:
     if status in {"blocked", "failed"}:
         return "work_blocked_or_failed"
     return "not_active"
+
+
+def _first_live_self_patch_child(children: list[dict[str, Any]]) -> dict[str, Any] | None:
+    terminal = {"rejected", "cancelled", "failed", "archived"}
+    for child in children:
+        if str(child.get("type") or "") == "self_patch" and str(child.get("status") or "") not in terminal:
+            return child
+    return None
+
+
+def _external_work_child_summary(children: list[Any]) -> str | None:
+    live_children = [child for child in children if isinstance(child, dict)]
+    child = _first_live_self_patch_child(live_children)
+    if not child:
+        return None
+    title = str(child.get("title") or "작업")
+    status = str(child.get("status") or "")
+    if status == "waiting_approval":
+        return f"개발 후보가 준비됐어: {title}\n이제 새 개발 전환이 아니라 장착 승인 단계야."
+    if status == "completed":
+        return f"작업이 이미 장착됐어: {title}\n새 개발 전환은 필요 없어."
+    if status == "running":
+        return f"개발 작업이 이미 진행 중이야: {title}"
+    if status in {"reviewing", "blocked", "failed"}:
+        return f"개발 작업이 수정 대기 중이야: {title}\n전환을 다시 누르는 게 아니라 수정/재시도 단계야."
+    return f"개발 작업이 이미 만들어져 있어: {title}\n새 개발 전환은 필요 없어."
 
 
 def _generic_work_stage(status: str, latest_job_status: str | None) -> str:

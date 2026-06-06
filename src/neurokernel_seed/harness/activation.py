@@ -146,6 +146,7 @@ class ActivationService:
             memory.add_work_event(work_id, "activation_verified", actor=actor, payload=verification)
             memory.add_work_event(work_id, "activated", actor=actor, payload=result)
             _transition_if_possible(memory, work_id, "completed", actor=actor, payload=result)
+            _complete_parent_work_if_possible(memory, work, actor=actor, payload=result)
             if proposal:
                 try:
                     memory.transition_capability_proposal(str(proposal["proposal_id"]), "active", actor=actor, payload=result)
@@ -446,6 +447,31 @@ def _transition_if_possible(memory: HarnessMemory, work_id: str, next_status: st
     except ValueError:
         memory.add_work_event(work_id, "activation_transition_skipped", actor=actor, payload={"next_status": next_status, "payload": payload})
         memory.conn.commit()
+
+
+def _complete_parent_work_if_possible(memory: HarnessMemory, work: dict[str, Any], *, actor: str, payload: dict[str, Any]) -> None:
+    parent_work_id = str(work.get("parent_work_id") or "").strip()
+    if not parent_work_id:
+        return
+    try:
+        parent = memory.get_work_item(parent_work_id)
+    except KeyError:
+        memory.add_work_event(str(work.get("work_id") or ""), "parent_completion_skipped", actor=actor, payload={"reason": "parent_not_found", "parent_work_id": parent_work_id})
+        memory.conn.commit()
+        return
+    if str(parent.get("type") or "") != "external_work":
+        return
+    _transition_if_possible(
+        memory,
+        parent_work_id,
+        "completed",
+        actor=actor,
+        payload={
+            "reason": "child_self_patch_activated",
+            "child_work_id": work.get("work_id"),
+            "activation": payload,
+        },
+    )
 
 
 def _command_record(label: str, cmd: list[str], result: subprocess.CompletedProcess[str]) -> dict[str, Any]:

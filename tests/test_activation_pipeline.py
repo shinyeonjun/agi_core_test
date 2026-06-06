@@ -54,6 +54,61 @@ def test_activation_applies_patch_runs_tests_and_marks_proposal_active(tmp_path)
     assert service.capability_proposal(proposal_id)["proposal"]["status"] == "active"
 
 
+def test_activation_completes_promoted_external_work_parent(tmp_path):
+    project = _make_git_project(tmp_path)
+    db_path = tmp_path / "harness.db"
+    with HarnessMemory(db_path) as memory:
+        parent = memory.create_work_item(
+            work_id="work_parent",
+            work_type="external_work",
+            title="diagnostic report",
+            goal="Add diagnostic report capability",
+            status="planned",
+            priority="high",
+            risk_level="low",
+            metadata={},
+            actor="test",
+        )
+        child = memory.create_work_item(
+            work_id="work_child",
+            work_type="self_patch",
+            title="diagnostic report",
+            goal="Add diagnostic report capability",
+            status="accepted",
+            priority="high",
+            risk_level="low",
+            parent_work_id=parent["work_id"],
+            linked_entity_type="promoted_external_work",
+            linked_entity_id=parent["work_id"],
+            metadata={},
+            actor="test",
+        )
+        patch_path = _make_patch(project, tmp_path, work_id=child["work_id"])
+        memory.transition_work_item(child["work_id"], "waiting_approval", actor="test", payload={"patch_path": str(patch_path)})
+        memory.add_work_event(
+            child["work_id"],
+            "job_completed",
+            actor="worker",
+            payload={"job_id": "job1", "result": {"status": "patch_ready", "patch_path": str(patch_path), "changed_files": ["src/demo.py"]}},
+        )
+        memory.conn.commit()
+
+    result = ActivationService(
+        ActivationConfig(
+            db_path=db_path,
+            project_root=project,
+            self_patch_run_root=project / "artifacts" / "self_patch",
+            test_command=("python", "-c", "from pathlib import Path; assert Path('src/demo.py').read_text().strip() == 'VALUE = 2'"),
+            verify_activation=False,
+        )
+    ).activate_work_item("work_child", actor="test")
+
+    assert result["activated"] is True
+    with HarnessMemory(db_path) as memory:
+        assert memory.get_work_item("work_child")["status"] == "completed"
+        assert memory.get_work_item("work_parent")["status"] == "completed"
+
+
 def test_activation_blocks_dirty_live_repo(tmp_path):
     project = _make_git_project(tmp_path)
     db_path = tmp_path / "harness.db"
