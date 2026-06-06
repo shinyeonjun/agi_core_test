@@ -2,7 +2,16 @@ from pathlib import Path
 
 import pytest
 
-from neurokernel_seed.language.codex_harness import CodexLanguageConfig, CodexLanguageError, CodexLanguageHarness
+from neurokernel_seed.language.codex_harness import (
+    CodexLanguageConfig,
+    CodexLanguageError,
+    CodexLanguageHarness,
+    _capability_prompt,
+    _preference_prompt,
+    _to_core_prompt,
+    _to_human_prompt,
+    _work_route_prompt,
+)
 from neurokernel_seed.language.contracts import validate_preference_intent
 from neurokernel_seed.language.sanitizer import HumanReplySanitizerError, clean_human_reply, contains_internal_language
 
@@ -47,6 +56,22 @@ def test_language_to_core_catalog_router_has_no_action_specific_cpu_predicate():
 
     assert "_mentions_per_core_cpu_usage" not in source
     assert "_direct_catalog_intent" not in source
+
+
+def test_scope_of_agency_is_injected_into_language_prompts():
+    prompts = [
+        _to_core_prompt("상태 봐줘", {}),
+        _to_human_prompt({"kind": "work_status", "progress": []}, style="ko_short", context={}),
+        _preference_prompt("앞으로 짧게 말해줘", {}),
+        _capability_prompt("CPU 코어별 사용률 볼 수 있게 해줘", {}),
+        _work_route_prompt("현재 작업 상태 보여줘", {}),
+    ]
+
+    for prompt in prompts:
+        assert "# Scope of Agency" in prompt
+        assert "Do not describe a planned external work item as active implementation." in prompt
+        assert "promote it to a self-patch development work item" in prompt
+        assert "Prefer human-facing words" in prompt
 
 
 def test_language_to_human_fails_when_codex_is_unavailable(tmp_path):
