@@ -863,11 +863,7 @@ async def _handle_work(
         jobs = jobs_payload.get("jobs") if isinstance(jobs_payload, dict) else []
         return await _humanize(
             core,
-            {
-                "kind": "work_status",
-                "work_items": items[:10] if isinstance(items, list) else [],
-                "jobs": jobs[:5] if isinstance(jobs, list) else [],
-            },
+            _build_work_status_payload(items if isinstance(items, list) else [], jobs if isinstance(jobs, list) else []),
             user_id=user_id,
             channel_id=channel_id,
         )
@@ -904,6 +900,111 @@ async def _handle_work(
             return f"장착 완료: `{payload.get('action_id') or work_id}`{_activation_verify_note(payload)}{reload_note}"
         return format_code_block(payload)
     return "`work list`, `work show <id>`, `work retry <id>`로 볼 수 있어."
+
+
+def _build_work_status_payload(items: list[Any], jobs: list[Any]) -> dict[str, Any]:
+    clean_items = [item for item in items[:10] if isinstance(item, dict)]
+    clean_jobs = [job for job in jobs[:10] if isinstance(job, dict)]
+    jobs_by_work: dict[str, list[dict[str, Any]]] = {}
+    for job in clean_jobs:
+        work_id = str(job.get("work_id") or "")
+        if work_id:
+            jobs_by_work.setdefault(work_id, []).append(job)
+    return {
+        "kind": "work_status",
+        "lifecycle": {
+            "proposed": "waiting_for_user_decision",
+            "accepted": "queued_or_ready_for_worker",
+            "planned": "recorded_plan_without_active_worker",
+            "running": "worker_is_processing",
+            "reviewing": "worker_finished_but_needs_fix",
+            "waiting_approval": "patch_or_result_ready_for_user_approval",
+            "completed": "finished",
+            "blocked": "cannot_continue_without_review",
+            "failed": "failed",
+            "cancelled": "cancelled",
+        },
+        "work_items": clean_items,
+        "jobs": clean_jobs[:5],
+        "progress": [_work_progress(item, jobs_by_work.get(str(item.get("work_id") or ""), [])) for item in clean_items],
+    }
+
+
+def _work_progress(item: dict[str, Any], jobs: list[dict[str, Any]]) -> dict[str, Any]:
+    work_type = str(item.get("type") or "")
+    status = str(item.get("status") or "")
+    latest_job = jobs[0] if jobs else {}
+    latest_job_status = str(latest_job.get("status") or "") if latest_job else None
+    user_action_required = status in {"proposed", "reviewing", "waiting_approval", "blocked", "failed"}
+    if work_type == "self_patch":
+        stage = _self_patch_stage(status, latest_job_status)
+    elif work_type == "external_work":
+        stage = _external_work_stage(status, latest_job_status)
+    else:
+        stage = _generic_work_stage(status, latest_job_status)
+    return {
+        "work_id": item.get("work_id"),
+        "title": item.get("title"),
+        "type": work_type,
+        "status": status,
+        "priority": item.get("priority"),
+        "risk_level": item.get("risk_level"),
+        "latest_job_id": latest_job.get("job_id") if latest_job else None,
+        "latest_job_status": latest_job_status,
+        "automation_stage": stage,
+        "user_action_required": user_action_required,
+        "worker_action_required": status in {"accepted", "running"} or (status == "planned" and work_type == "external_work"),
+        "activation_possible": status == "waiting_approval",
+        "retry_possible": status in {"reviewing", "blocked", "failed"} and work_type == "self_patch",
+    }
+
+
+def _self_patch_stage(status: str, latest_job_status: str | None) -> str:
+    if status == "proposed":
+        return "waiting_for_user_to_accept_development"
+    if status == "accepted":
+        return "accepted_and_waiting_for_development_worker"
+    if status == "running" or latest_job_status == "running":
+        return "development_worker_running"
+    if status == "waiting_approval":
+        return "patch_ready_waiting_for_activation_approval"
+    if status == "reviewing":
+        return "development_attempt_finished_needs_fix"
+    if status in {"blocked", "failed"}:
+        return "development_blocked_or_failed"
+    if status == "completed":
+        return "capability_attached_or_work_completed"
+    return "not_active"
+
+
+def _external_work_stage(status: str, latest_job_status: str | None) -> str:
+    if status == "proposed":
+        return "waiting_for_user_to_accept_work"
+    if status == "accepted":
+        return "accepted_and_waiting_for_planning_worker"
+    if status == "running" or latest_job_status == "running":
+        return "planning_worker_running"
+    if status == "planned":
+        return "plan_recorded_no_implementation_worker_running"
+    if status == "completed":
+        return "work_completed"
+    if status in {"blocked", "failed"}:
+        return "work_blocked_or_failed"
+    return "not_active"
+
+
+def _generic_work_stage(status: str, latest_job_status: str | None) -> str:
+    if latest_job_status == "running":
+        return "worker_running"
+    if status in {"accepted", "running"}:
+        return "worker_pending_or_running"
+    if status == "waiting_approval":
+        return "waiting_for_user_approval"
+    if status == "completed":
+        return "completed"
+    if status in {"blocked", "failed", "reviewing"}:
+        return "needs_review"
+    return "not_active"
 
 
 def _activation_verify_note(payload: Any) -> str:

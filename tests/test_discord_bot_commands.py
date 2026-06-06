@@ -4,6 +4,7 @@ import pytest
 
 from neurokernel_seed.discord_bot.bot import (
     DiscordBotConfig,
+    _build_work_status_payload,
     _command_line_from_content,
     _discord_chunks,
     _handle_command,
@@ -151,6 +152,7 @@ def test_auto_work_status_uses_work_router_and_language_humanizer():
                     "work_items": [
                         {
                             "work_id": "work_item_1",
+                            "type": "external_work",
                             "title": "자동 진단 리포트 기능",
                             "status": "planned",
                         }
@@ -197,6 +199,7 @@ def test_auto_work_status_uses_work_router_and_language_humanizer():
                 core_result = payload.get("core_result") if isinstance(payload, dict) else {}
                 assert core_result.get("kind") == "work_status"
                 assert core_result.get("work_items")[0]["title"] == "자동 진단 리포트 기능"
+                assert core_result.get("progress")[0]["automation_stage"] == "plan_recorded_no_implementation_worker_running"
                 return {"reply": "진행 중인 건 자동 진단 리포트 기능이고, 최근 실행은 끝났어."}
             raise AssertionError(f"unexpected POST {path}")
 
@@ -213,6 +216,47 @@ def test_auto_work_status_uses_work_router_and_language_humanizer():
         ("GET", "/work-jobs?limit=10"),
         ("POST", "/language/to-human"),
     ]
+
+
+def test_work_status_payload_explains_external_work_is_planned_not_attached():
+    payload = _build_work_status_payload(
+        [
+            {
+                "work_id": "work1",
+                "type": "external_work",
+                "title": "자동 진단 리포트 기능",
+                "status": "planned",
+                "priority": "high",
+                "risk_level": "low",
+            }
+        ],
+        [{"job_id": "job1", "work_id": "work1", "status": "completed"}],
+    )
+
+    assert payload["kind"] == "work_status"
+    assert payload["progress"][0]["automation_stage"] == "plan_recorded_no_implementation_worker_running"
+    assert payload["progress"][0]["worker_action_required"] is True
+    assert payload["progress"][0]["activation_possible"] is False
+
+
+def test_work_status_payload_marks_self_patch_waiting_for_activation():
+    payload = _build_work_status_payload(
+        [
+            {
+                "work_id": "work2",
+                "type": "self_patch",
+                "title": "CPU 코어별 사용률 확인",
+                "status": "waiting_approval",
+                "priority": "high",
+                "risk_level": "low",
+            }
+        ],
+        [{"job_id": "job2", "work_id": "work2", "status": "completed"}],
+    )
+
+    assert payload["progress"][0]["automation_stage"] == "patch_ready_waiting_for_activation_approval"
+    assert payload["progress"][0]["user_action_required"] is True
+    assert payload["progress"][0]["activation_possible"] is True
 
 
 def test_auto_executable_allows_low_risk_readonly_lookup():
