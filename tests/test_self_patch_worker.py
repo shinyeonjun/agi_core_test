@@ -96,6 +96,32 @@ def test_self_patch_worker_blocks_diff_check_failure(tmp_path):
     assert result["next_required_action"] == "worker_review_patch_format_errors"
 
 
+def test_self_patch_worker_salvages_patch_after_codex_timeout(tmp_path):
+    project = _make_git_project(tmp_path)
+    runner = FakeSelfPatchRunner(codex_returncode=124)
+    worker = CodexSelfPatchWorker(
+        SelfPatchConfig(
+            project_root=project,
+            run_root=tmp_path / "runs",
+            codex_bin="codex",
+            test_command=("python", "-m", "pytest", "-q"),
+            isolation_mode="worktree",
+        ),
+        runner=runner,
+    )
+
+    result = worker.run(
+        job_id="job_codex_timeout_with_patch",
+        work={"work_id": "work_cpu_usage", "type": "self_patch", "title": "CPU usage", "goal": "Add CPU usage"},
+        payload={"job_id": "job_codex_timeout_with_patch", "work_id": "work_cpu_usage"},
+    )
+
+    assert result["status"] == "patch_ready"
+    assert result["codex_completed"] is False
+    assert result["codex"]["returncode"] == 124
+    assert "src/demo.py" in result["changed_files"]
+
+
 def test_run_command_returns_timeout_result(tmp_path):
     started = time.monotonic()
 
@@ -151,8 +177,9 @@ def test_run_command_keeps_silent_workspace_progress_alive(tmp_path):
 
 
 class FakeSelfPatchRunner:
-    def __init__(self, *, trailing_whitespace: bool = False):
+    def __init__(self, *, trailing_whitespace: bool = False, codex_returncode: int = 0):
         self.trailing_whitespace = trailing_whitespace
+        self.codex_returncode = codex_returncode
 
     def __call__(
         self,
@@ -173,7 +200,8 @@ class FakeSelfPatchRunner:
         if "codex" in cmd:
             target = Path(cwd) / "src" / "demo.py"
             target.write_text("VALUE = 2  \n" if self.trailing_whitespace else "VALUE = 2\n", encoding="utf-8")
-            return subprocess.CompletedProcess(cmd, 0, stdout="patched", stderr="")
+            stderr = "Command timed out after 420 seconds." if self.codex_returncode else ""
+            return subprocess.CompletedProcess(cmd, self.codex_returncode, stdout="patched", stderr=stderr)
         if cmd[:3] == ["python", "-m", "pytest"]:
             return subprocess.CompletedProcess(cmd, 0, stdout="1 passed", stderr="")
         return subprocess.CompletedProcess(cmd, 99, stdout="", stderr="unexpected command")

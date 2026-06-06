@@ -439,11 +439,12 @@ def _format_work_notification(payload: dict[str, Any]) -> tuple[str, str | None]
         if changed_text:
             lines.append(f"바뀐 파일: {changed_text}")
         return "\n".join(lines), "activation"
-    if status == "reviewing" and result_status in {"test_failed", "diff_check_failed", "codex_failed"}:
+    if status == "reviewing" and result_status in {"test_failed", "diff_check_failed", "codex_failed", "codex_failed_no_patch"}:
         reason_by_status = {
             "test_failed": "테스트 실패",
             "diff_check_failed": "패치 형식 검사 실패",
             "codex_failed": "개발 워커 실행 실패",
+            "codex_failed_no_patch": "개발 워커가 패치 없이 종료 실패",
         }
         reason = reason_by_status.get(result_status, "수정 필요")
         lines = [

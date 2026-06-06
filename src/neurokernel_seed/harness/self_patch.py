@@ -111,8 +111,6 @@ class CodexSelfPatchWorker:
         commands.append(_command_record("codex", codex_cmd, codex_result))
         _write_text(run_dir / "codex_stdout.txt", codex_result.stdout)
         _write_text(run_dir / "codex_stderr.txt", codex_result.stderr)
-        if codex_result.returncode != 0:
-            raise SelfPatchError(f"codex self-patch failed: {_trim(redact_text(codex_result.stderr or codex_result.stdout))}")
 
         test_result = self.runner(
             list(self.config.test_command),
@@ -156,6 +154,7 @@ class CodexSelfPatchWorker:
             has_patch=bool(patch_text.strip()),
             tests_passed=test_result.returncode == 0,
             diff_check_passed=diff_check_result.returncode == 0,
+            codex_passed=codex_result.returncode == 0,
         )
         result = {
             "status": status,
@@ -168,6 +167,8 @@ class CodexSelfPatchWorker:
             "patch_path": str(patch_path),
             "patch_bytes": len(patch_text.encode("utf-8")),
             "changed_files": changed_files,
+            "codex_completed": codex_result.returncode == 0,
+            "codex_warning": None if codex_result.returncode == 0 else _trim(redact_text(codex_result.stderr or codex_result.stdout)),
             "codex": _public_command_result(codex_result),
             "test": _public_command_result(test_result),
             "diff_check": _public_command_result(diff_check_result),
@@ -324,8 +325,10 @@ def _changed_files(runner: CommandRunner, workspace: Path, commands: list[dict[s
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
-def _result_status(*, has_patch: bool, tests_passed: bool, diff_check_passed: bool) -> str:
+def _result_status(*, has_patch: bool, tests_passed: bool, diff_check_passed: bool, codex_passed: bool) -> str:
     if not has_patch:
+        if not codex_passed:
+            return "codex_failed_no_patch"
         return "no_patch"
     if not diff_check_passed:
         return "diff_check_failed"
@@ -341,6 +344,8 @@ def _next_required_action(status: str) -> str:
         return "human_or_worker_review_failed_patch"
     if status == "diff_check_failed":
         return "worker_review_patch_format_errors"
+    if status == "codex_failed_no_patch":
+        return "retry_self_patch_after_codex_failure"
     return "revise_work_item_or_prompt"
 
 
@@ -377,6 +382,7 @@ def _write_evidence(run_dir: Path, result: dict[str, Any], *, work: dict[str, An
         "changed_files": result.get("changed_files"),
         "checks": {
             "codex_returncode": (result.get("codex") or {}).get("returncode"),
+            "codex_completed": result.get("codex_completed"),
             "test_returncode": (result.get("test") or {}).get("returncode"),
             "diff_check_returncode": (result.get("diff_check") or {}).get("returncode"),
         },
@@ -398,6 +404,7 @@ def _write_summary_markdown(run_dir: Path, result: dict[str, Any]) -> None:
         f"- work_id: `{result.get('work_id')}`",
         f"- isolation: `{(result.get('isolation') or {}).get('mode')}`",
         f"- patch_bytes: `{result.get('patch_bytes')}`",
+        f"- codex_completed: `{result.get('codex_completed')}`",
         f"- next_required_action: `{result.get('next_required_action')}`",
         "",
         "## Changed Files",
