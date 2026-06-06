@@ -19,10 +19,10 @@ def _missing_codex_config(tmp_path: Path) -> CodexLanguageConfig:
 def test_language_to_core_fails_when_codex_is_unavailable(tmp_path):
     harness = CodexLanguageHarness(_missing_codex_config(tmp_path))
     with pytest.raises(CodexLanguageError, match="codex binary not found"):
-        harness.to_core("오렌지파이 메모리 상태 봐줘")
+        harness.to_core("오늘 프로젝트 방향에 대해 같이 이야기하자")
 
 
-def test_language_to_core_routes_known_per_core_cpu_lookup_without_codex(tmp_path):
+def test_language_to_core_routes_catalog_metadata_without_codex(tmp_path):
     harness = CodexLanguageHarness(_missing_codex_config(tmp_path))
 
     result = harness.to_core("cpu 코어별 사용률 확인해줘")
@@ -30,6 +30,23 @@ def test_language_to_core_routes_known_per_core_cpu_lookup_without_codex(tmp_pat
     assert result["intent"] == "task"
     assert result["task_spec"]["allowed_actions"] == ["get_cpu_per_core_usage"]
     assert result["requires_confirmation"] is False
+
+
+def test_language_to_core_routes_memory_lookup_from_catalog_without_codex(tmp_path):
+    harness = CodexLanguageHarness(_missing_codex_config(tmp_path))
+
+    result = harness.to_core("오렌지파이 메모리 상태 봐줘")
+
+    assert result["intent"] == "task"
+    assert result["task_spec"]["allowed_actions"] == ["get_memory_usage"]
+    assert result["requires_confirmation"] is False
+
+
+def test_language_to_core_catalog_router_has_no_action_specific_cpu_predicate():
+    source = Path("src/neurokernel_seed/language/codex_harness.py").read_text(encoding="utf-8")
+
+    assert "_mentions_per_core_cpu_usage" not in source
+    assert "_direct_catalog_intent" not in source
 
 
 def test_language_to_human_fails_when_codex_is_unavailable(tmp_path):

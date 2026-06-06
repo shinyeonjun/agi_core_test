@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -9,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from neurokernel_seed.harness.action_catalog import build_action_catalog, public_catalog
+from neurokernel_seed.harness.action_catalog import ActionDefinition, build_action_catalog, public_catalog
 
 from .contracts import (
     LanguageContractError,
@@ -36,6 +37,12 @@ class CodexLanguageConfig:
     model: str | None = None
 
 
+@dataclass(frozen=True)
+class CatalogIntentMatch:
+    action: ActionDefinition
+    score: float
+
+
 class CodexLanguageHarness:
     def __init__(self, config: CodexLanguageConfig | None = None):
         self._config = config
@@ -48,7 +55,7 @@ class CodexLanguageHarness:
 
     def to_core(self, user_text: str, *, context: dict[str, Any] | None = None) -> dict[str, Any]:
         context = context or {}
-        direct = _direct_catalog_intent(user_text)
+        direct = _catalog_matched_intent(user_text)
         if direct is not None:
             return validate_language_intent(direct, catalog=build_action_catalog()).as_dict()
         self._require_codex()
@@ -154,37 +161,127 @@ def _required_env(name: str) -> str:
     return value
 
 
-def _direct_catalog_intent(user_text: str) -> dict[str, Any] | None:
-    text = " ".join(str(user_text or "").lower().split())
-    catalog = build_action_catalog()
-    if "get_cpu_per_core_usage" in catalog and _mentions_per_core_cpu_usage(text):
-        return {
-            "intent": "task",
-            "reply": "CPU 코어별 사용률을 확인해볼게.",
-            "task_spec": _readonly_task("오렌지파이 CPU 코어별 사용률 확인", "get_cpu_per_core_usage", "각 CPU 코어별 사용률을 확인한다"),
-            "dev_task": None,
-            "approval": None,
-            "confidence": 0.98,
-            "requires_confirmation": False,
-            "clarifying_question": None,
-            "safety_notes": [],
-        }
-    return None
+_TOKEN_RE = re.compile(r"[a-z0-9]+|[가-힣]+", re.IGNORECASE)
+_CATALOG_MATCH_MIN_SCORE = 3.0
+_CATALOG_MATCH_MIN_MARGIN = 1.0
+_DIRECT_EXECUTORS = {"readonly_system", "readonly_command"}
+_LOW_RISK_LEVELS = {"none", "low"}
+_ROUTING_STOPWORDS = {
+    "get",
+    "조회",
+    "확인",
+    "해줘",
+    "해주세요",
+    "알려줘",
+    "보여줘",
+    "봐줘",
+    "상태",
+    "현재",
+    "오렌지파이",
+    "orangepi",
+    "orangepi5",
+}
 
 
-def _mentions_per_core_cpu_usage(text: str) -> bool:
+def _catalog_matched_intent(user_text: str) -> dict[str, Any] | None:
+    match = _best_catalog_match(user_text, build_action_catalog())
+    if match is None:
+        return None
+    action = match.action
+    params = _default_params(action)
+    if params is None:
+        return None
+    return {
+        "intent": "task",
+        "reply": f"{action.title}할게.",
+        "task_spec": _readonly_task(action.title, action.action_id, f"{action.title} 결과를 확인한다", params=params),
+        "dev_task": None,
+        "approval": None,
+        "confidence": min(0.98, 0.72 + (match.score / 20.0)),
+        "requires_confirmation": False,
+        "clarifying_question": None,
+        "safety_notes": [],
+    }
+
+
+def _best_catalog_match(user_text: str, catalog: dict[str, ActionDefinition]) -> CatalogIntentMatch | None:
+    query_tokens = _tokenize_for_match(user_text)
+    if not query_tokens:
+        return None
+    candidates: list[CatalogIntentMatch] = []
+    for action in catalog.values():
+        if not _can_direct_route(action):
+            continue
+        score = _catalog_score(query_tokens, action)
+        if score >= _CATALOG_MATCH_MIN_SCORE:
+            candidates.append(CatalogIntentMatch(action=action, score=score))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item.score, reverse=True)
+    if len(candidates) > 1 and candidates[0].score - candidates[1].score < _CATALOG_MATCH_MIN_MARGIN:
+        return None
+    return candidates[0]
+
+
+def _can_direct_route(action: ActionDefinition) -> bool:
     return (
-        ("cpu" in text or "시피유" in text or "프로세서" in text)
-        and ("코어" in text or "core" in text)
-        and ("사용률" in text or "사용량" in text or "usage" in text or "percent" in text)
+        action.risk_level in _LOW_RISK_LEVELS
+        and not action.side_effect
+        and not action.requires_approval
+        and action.executor in _DIRECT_EXECUTORS
     )
 
 
-def _readonly_task(goal: str, action_id: str, success_criterion: str) -> dict[str, Any]:
+def _catalog_score(query_tokens: set[str], action: ActionDefinition) -> float:
+    weighted_terms = _weighted_action_terms(action)
+    score = 0.0
+    for query_token in query_tokens:
+        score += max((weight for term, weight in weighted_terms.items() if _term_matches(query_token, term)), default=0.0)
+    return score
+
+
+def _weighted_action_terms(action: ActionDefinition) -> dict[str, float]:
+    weights: dict[str, float] = {}
+    for term in _tokenize_for_match(action.action_id.replace("_", " ")):
+        weights[term] = max(weights.get(term, 0.0), 2.0)
+    for term in _tokenize_for_match(action.title):
+        weights[term] = max(weights.get(term, 0.0), 3.0)
+    for term in _tokenize_for_match(action.role):
+        weights[term] = max(weights.get(term, 0.0), 0.5)
+    for name in action.params_schema:
+        for term in _tokenize_for_match(str(name).replace("_", " ")):
+            weights[term] = max(weights.get(term, 0.0), 1.0)
+    return weights
+
+
+def _tokenize_for_match(text: str) -> set[str]:
+    tokens = {token.lower() for token in _TOKEN_RE.findall(str(text or ""))}
+    return {token for token in tokens if len(token) > 1 and token not in _ROUTING_STOPWORDS}
+
+
+def _term_matches(query_token: str, action_term: str) -> bool:
+    if query_token == action_term:
+        return True
+    if len(query_token) < 2 or len(action_term) < 2:
+        return False
+    return query_token in action_term or action_term in query_token
+
+
+def _default_params(action: ActionDefinition) -> dict[str, Any] | None:
+    params: dict[str, Any] = {}
+    for name, schema in action.params_schema.items():
+        if isinstance(schema, dict) and "default" in schema:
+            params[str(name)] = schema["default"]
+        else:
+            return None
+    return params
+
+
+def _readonly_task(goal: str, action_id: str, success_criterion: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "goal": goal,
         "target": "orangepi5",
-        "context": {"params": {"path": None, "limit": None, "model": None, "episodes": None, "service": None, "lines": None}},
+        "context": {"params": params or {}},
         "allowed_actions": [action_id],
         "blocked_actions": [],
         "success_criteria": [success_criterion],
@@ -239,9 +336,6 @@ def _to_core_prompt(user_text: str, context: dict[str, Any]) -> str:
             "</example>",
             '<example input="오렌지파이 메모리 상태 어때?">',
             '{"intent":"task","reply":"메모리 상태를 확인해볼게.","task_spec":{"goal":"오렌지파이 메모리 상태 확인","target":"orangepi5","context":{"params":{"path":null,"limit":null,"model":null,"episodes":null,"service":null,"lines":null}},"allowed_actions":["get_memory_usage"],"blocked_actions":[],"success_criteria":["메모리 사용량을 확인한다"],"risk_level":"low","requires_approval":false,"timeout_seconds":30,"mode":"readonly","rollback_plan":null},"dev_task":null,"approval":null,"confidence":0.96,"requires_confirmation":false,"clarifying_question":null,"safety_notes":[]}',
-            "</example>",
-            '<example input="cpu 코어별 사용률 확인해줘">',
-            '{"intent":"task","reply":"CPU 코어별 사용률을 확인해볼게.","task_spec":{"goal":"오렌지파이 CPU 코어별 사용률 확인","target":"orangepi5","context":{"params":{"path":null,"limit":null,"model":null,"episodes":null,"service":null,"lines":null}},"allowed_actions":["get_cpu_per_core_usage"],"blocked_actions":[],"success_criteria":["각 CPU 코어별 사용률을 확인한다"],"risk_level":"low","requires_approval":false,"timeout_seconds":30,"mode":"readonly","rollback_plan":null},"dev_task":null,"approval":null,"confidence":0.97,"requires_confirmation":false,"clarifying_question":null,"safety_notes":[]}',
             "</example>",
             '<example input="모델 파일 잘 있어?">',
             '{"intent":"task","reply":"모델 파일이 있는지 확인해볼게.","task_spec":{"goal":"모델 파일 존재 확인","target":"orangepi5","context":{"params":{"path":"artifacts","limit":null,"model":null,"episodes":null,"service":null,"lines":null}},"allowed_actions":["list_artifacts"],"blocked_actions":[],"success_criteria":["모델 파일 목록을 확인한다"],"risk_level":"low","requires_approval":false,"timeout_seconds":30,"mode":"readonly","rollback_plan":null},"dev_task":null,"approval":null,"confidence":0.95,"requires_confirmation":false,"clarifying_question":null,"safety_notes":[]}',
