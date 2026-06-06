@@ -128,6 +128,8 @@ def test_retry_reviewing_self_patch_requeues_with_previous_failure_context(tmp_p
     assert retry_payload["retry"]["previous_status"] == "reviewing"
     assert retry_payload["retry"]["previous_result"]["status"] == "test_failed"
     assert retry_payload["retry"]["previous_result"]["test"]["returncode"] == 1
+    assert retry_payload["retry"]["previous_result"]["failure_analysis"]["primary_failure"] == "test_failed"
+    assert retry_payload["retry"]["previous_result"]["failure_analysis"]["next_step"] == "inspect_test_tail_and_fix_patch"
 
 
 def test_dispatcher_returns_self_patch_exception_to_reviewing(tmp_path):
@@ -189,6 +191,14 @@ class FakeFailedSelfPatchRunner:
             "changed_files": ["src/neurokernel_seed/harness/executors/readonly_system.py"],
             "test": {"returncode": 1, "stdout_tail": "assert False", "stderr_tail": ""},
             "diff_check": {"returncode": 0, "stdout_tail": "", "stderr_tail": ""},
+            "failure_analysis": {
+                "schema_version": "neurokernel-self-patch-failure-analysis-v1",
+                "primary_failure": "test_failed",
+                "summary": "Patch exists, but the verification command failed.",
+                "retryable": True,
+                "next_step": "inspect_test_tail_and_fix_patch",
+                "signals": {"test_returncode": 1},
+            },
         }
 
 

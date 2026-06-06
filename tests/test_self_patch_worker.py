@@ -43,6 +43,9 @@ def test_self_patch_worker_creates_patch_artifact(tmp_path):
     assert Path(result["run_dir"], "contract.json").exists()
     assert Path(result["run_dir"], "evidence.json").exists()
     assert Path(result["run_dir"], "summary.md").exists()
+    assert Path(result["run_dir"], "failure_analysis.json").exists()
+    assert result["failure_analysis"]["passed"] is True
+    assert result["failure_analysis"]["primary_failure"] is None
 
 
 def test_self_patch_worker_uses_git_worktree_for_git_repo(tmp_path):
@@ -94,6 +97,8 @@ def test_self_patch_worker_blocks_diff_check_failure(tmp_path):
     assert result["status"] == "diff_check_failed"
     assert result["diff_check"]["returncode"] != 0
     assert result["next_required_action"] == "worker_review_patch_format_errors"
+    assert result["failure_analysis"]["primary_failure"] == "diff_check_failed"
+    assert result["failure_analysis"]["retryable"] is True
 
 
 def test_self_patch_worker_salvages_patch_after_codex_timeout(tmp_path):
@@ -120,6 +125,34 @@ def test_self_patch_worker_salvages_patch_after_codex_timeout(tmp_path):
     assert result["codex_completed"] is False
     assert result["codex"]["returncode"] == 124
     assert "src/demo.py" in result["changed_files"]
+    assert result["failure_analysis"]["passed"] is True
+    assert result["failure_analysis"]["signals"]["codex_timed_out"] is True
+
+
+def test_self_patch_worker_writes_test_failure_analysis(tmp_path):
+    project = _make_git_project(tmp_path)
+    runner = FakeSelfPatchRunner(test_returncode=1)
+    worker = CodexSelfPatchWorker(
+        SelfPatchConfig(
+            project_root=project,
+            run_root=tmp_path / "runs",
+            codex_bin="codex",
+            test_command=("python", "-m", "pytest", "-q"),
+            isolation_mode="worktree",
+        ),
+        runner=runner,
+    )
+
+    result = worker.run(
+        job_id="job_test_failure",
+        work={"work_id": "work_cpu_usage", "type": "self_patch", "title": "CPU usage", "goal": "Add CPU usage"},
+        payload={"job_id": "job_test_failure", "work_id": "work_cpu_usage"},
+    )
+
+    assert result["status"] == "test_failed"
+    assert result["failure_analysis"]["primary_failure"] == "test_failed"
+    assert result["failure_analysis"]["test_tail"]["returncode"] == 1
+    assert Path(result["run_dir"], "failure_analysis.json").exists()
 
 
 def test_run_command_returns_timeout_result(tmp_path):
@@ -177,9 +210,10 @@ def test_run_command_keeps_silent_workspace_progress_alive(tmp_path):
 
 
 class FakeSelfPatchRunner:
-    def __init__(self, *, trailing_whitespace: bool = False, codex_returncode: int = 0):
+    def __init__(self, *, trailing_whitespace: bool = False, codex_returncode: int = 0, test_returncode: int = 0):
         self.trailing_whitespace = trailing_whitespace
         self.codex_returncode = codex_returncode
+        self.test_returncode = test_returncode
 
     def __call__(
         self,
@@ -203,7 +237,8 @@ class FakeSelfPatchRunner:
             stderr = "Command timed out after 420 seconds." if self.codex_returncode else ""
             return subprocess.CompletedProcess(cmd, self.codex_returncode, stdout="patched", stderr=stderr)
         if cmd[:3] == ["python", "-m", "pytest"]:
-            return subprocess.CompletedProcess(cmd, 0, stdout="1 passed", stderr="")
+            stdout = "1 passed" if self.test_returncode == 0 else "FAILED tests/test_demo.py::test_demo"
+            return subprocess.CompletedProcess(cmd, self.test_returncode, stdout=stdout, stderr="")
         return subprocess.CompletedProcess(cmd, 99, stdout="", stderr="unexpected command")
 
 

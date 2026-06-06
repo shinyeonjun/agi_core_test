@@ -156,6 +156,14 @@ class CodexSelfPatchWorker:
             diff_check_passed=diff_check_result.returncode == 0,
             codex_passed=codex_result.returncode == 0,
         )
+        failure_analysis = _analyze_self_patch_result(
+            status=status,
+            codex_result=codex_result,
+            test_result=test_result,
+            diff_check_result=diff_check_result,
+            changed_files=changed_files,
+            patch_text=patch_text,
+        )
         result = {
             "status": status,
             "job_id": job_id,
@@ -172,6 +180,7 @@ class CodexSelfPatchWorker:
             "codex": _public_command_result(codex_result),
             "test": _public_command_result(test_result),
             "diff_check": _public_command_result(diff_check_result),
+            "failure_analysis": failure_analysis,
             "commands": commands,
             "next_required_action": _next_required_action(status),
             "created_at_epoch": time.time(),
@@ -349,6 +358,97 @@ def _next_required_action(status: str) -> str:
     return "revise_work_item_or_prompt"
 
 
+def _analyze_self_patch_result(
+    *,
+    status: str,
+    codex_result: subprocess.CompletedProcess[str],
+    test_result: subprocess.CompletedProcess[str],
+    diff_check_result: subprocess.CompletedProcess[str],
+    changed_files: list[str],
+    patch_text: str,
+) -> dict[str, Any]:
+    signals = {
+        "codex_returncode": codex_result.returncode,
+        "test_returncode": test_result.returncode,
+        "diff_check_returncode": diff_check_result.returncode,
+        "changed_file_count": len(changed_files),
+        "patch_bytes": len(patch_text.encode("utf-8")),
+        "codex_timed_out": codex_result.returncode == 124,
+        "codex_stalled": codex_result.returncode == 125,
+        "test_timed_out": test_result.returncode == 124,
+        "test_stalled": test_result.returncode == 125,
+    }
+    primary_failure = _primary_failure(status, signals)
+    summary = _failure_summary(status, primary_failure, changed_files)
+    analysis = {
+        "schema_version": "neurokernel-self-patch-failure-analysis-v1",
+        "status": status,
+        "passed": status == "patch_ready",
+        "primary_failure": primary_failure,
+        "retryable": status in {"test_failed", "diff_check_failed", "codex_failed_no_patch"},
+        "summary": summary,
+        "signals": signals,
+        "changed_files": changed_files,
+        "next_step": _analysis_next_step(primary_failure),
+    }
+    if primary_failure in {"test_failed", "test_timeout_or_stall"}:
+        analysis["test_tail"] = _public_command_result(test_result)
+    if primary_failure in {"diff_check_failed"}:
+        analysis["diff_check_tail"] = _public_command_result(diff_check_result)
+    if primary_failure in {"codex_failed_no_patch", "codex_timeout_or_stall"}:
+        analysis["codex_tail"] = _public_command_result(codex_result)
+    return analysis
+
+
+def _primary_failure(status: str, signals: dict[str, Any]) -> str | None:
+    if status == "patch_ready":
+        return None
+    if status == "no_patch":
+        return "no_patch"
+    if status == "codex_failed_no_patch":
+        if signals.get("codex_timed_out") or signals.get("codex_stalled"):
+            return "codex_timeout_or_stall"
+        return "codex_failed_no_patch"
+    if status == "diff_check_failed":
+        return "diff_check_failed"
+    if status == "test_failed":
+        if signals.get("test_timed_out") or signals.get("test_stalled"):
+            return "test_timeout_or_stall"
+        return "test_failed"
+    return "unknown"
+
+
+def _failure_summary(status: str, primary_failure: str | None, changed_files: list[str]) -> str:
+    if status == "patch_ready":
+        return f"Patch is ready with {len(changed_files)} changed file(s)."
+    if primary_failure == "no_patch":
+        return "Worker completed but produced no repository changes."
+    if primary_failure == "codex_timeout_or_stall":
+        return "Codex worker stopped before producing a usable patch because it timed out or stalled."
+    if primary_failure == "codex_failed_no_patch":
+        return "Codex worker failed and no patch was produced."
+    if primary_failure == "diff_check_failed":
+        return "Patch exists, but git diff --check reported formatting or whitespace problems."
+    if primary_failure == "test_timeout_or_stall":
+        return "Patch exists, but the verification command timed out or stalled."
+    if primary_failure == "test_failed":
+        return "Patch exists, but the verification command failed."
+    return f"Self-patch finished with status={status}."
+
+
+def _analysis_next_step(primary_failure: str | None) -> str:
+    mapping = {
+        None: "review_patch_for_activation",
+        "no_patch": "clarify_or_narrow_work_item",
+        "codex_timeout_or_stall": "retry_with_failure_context_and_smaller_scope",
+        "codex_failed_no_patch": "inspect_codex_stderr_then_retry",
+        "diff_check_failed": "fix_patch_format_then_rerun_tests",
+        "test_timeout_or_stall": "inspect_test_command_or_reduce_test_scope",
+        "test_failed": "inspect_test_tail_and_fix_patch",
+    }
+    return mapping.get(primary_failure, "inspect_artifacts")
+
+
 def _write_contract(run_dir: Path, result: dict[str, Any]) -> None:
     contract = {
         "schema_version": "neurokernel-self-patch-artifact-v2",
@@ -368,6 +468,7 @@ def _write_contract(run_dir: Path, result: dict[str, Any]) -> None:
         "status": result.get("status"),
         "patch_path": result.get("patch_path"),
         "activation_ready": result.get("status") == "patch_ready",
+        "failure_analysis": result.get("failure_analysis"),
     }
     _write_text(run_dir / "contract.json", _json_dump(contract))
 
@@ -386,12 +487,14 @@ def _write_evidence(run_dir: Path, result: dict[str, Any], *, work: dict[str, An
             "test_returncode": (result.get("test") or {}).get("returncode"),
             "diff_check_returncode": (result.get("diff_check") or {}).get("returncode"),
         },
+        "failure_analysis": result.get("failure_analysis"),
         "work_title": work.get("title"),
         "work_goal": work.get("goal"),
         "queue_payload": payload,
         "commands": result.get("commands") or [],
     }
     _write_text(run_dir / "evidence.json", _json_dump(evidence))
+    _write_text(run_dir / "failure_analysis.json", _json_dump(result.get("failure_analysis") or {}))
 
 
 def _write_summary_markdown(run_dir: Path, result: dict[str, Any]) -> None:
@@ -406,6 +509,7 @@ def _write_summary_markdown(run_dir: Path, result: dict[str, Any]) -> None:
         f"- patch_bytes: `{result.get('patch_bytes')}`",
         f"- codex_completed: `{result.get('codex_completed')}`",
         f"- next_required_action: `{result.get('next_required_action')}`",
+        f"- primary_failure: `{(result.get('failure_analysis') or {}).get('primary_failure')}`",
         "",
         "## Changed Files",
         "",

@@ -162,7 +162,12 @@ def _result_note(work_type: str, job_id: str, result: dict[str, Any]) -> str:
     if work_type == "self_patch":
         patch_path = result.get("patch_path") or ""
         changed = ", ".join(result.get("changed_files") or [])
-        return f"Self-patch job {job_id} finished with status={status}. patch={patch_path}. changed_files={changed or 'none'}."
+        analysis = result.get("failure_analysis") if isinstance(result.get("failure_analysis"), dict) else {}
+        primary_failure = analysis.get("primary_failure")
+        summary = analysis.get("summary")
+        failure = f" primary_failure={primary_failure}." if primary_failure else ""
+        summary_text = f" summary={summary}" if summary else ""
+        return f"Self-patch job {job_id} finished with status={status}.{failure} patch={patch_path}. changed_files={changed or 'none'}.{summary_text}"
     return str(result.get("note") or _dispatch_note(work_type, job_id))
 
 

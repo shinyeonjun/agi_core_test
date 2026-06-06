@@ -226,6 +226,16 @@ def _trim_self_patch_result(result: dict[str, Any]) -> dict[str, Any]:
         "error": result.get("error"),
         "next_required_action": result.get("next_required_action"),
     }
+    failure_analysis = result.get("failure_analysis")
+    if isinstance(failure_analysis, dict):
+        trimmed["failure_analysis"] = {
+            "schema_version": failure_analysis.get("schema_version"),
+            "primary_failure": failure_analysis.get("primary_failure"),
+            "summary": failure_analysis.get("summary"),
+            "retryable": failure_analysis.get("retryable"),
+            "next_step": failure_analysis.get("next_step"),
+            "signals": failure_analysis.get("signals") if isinstance(failure_analysis.get("signals"), dict) else {},
+        }
     for key in ("test", "diff_check", "codex"):
         value = result.get(key)
         if isinstance(value, dict):
