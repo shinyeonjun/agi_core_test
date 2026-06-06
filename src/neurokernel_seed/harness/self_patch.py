@@ -5,6 +5,7 @@ import signal
 import shlex
 import shutil
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +26,10 @@ class CommandRunner(Protocol):
         cwd: Path,
         input_text: str | None = None,
         timeout_seconds: int,
+        idle_timeout_seconds: int | None = None,
+        watchdog_root: Path | None = None,
+        watchdog_poll_seconds: float = 2.0,
+        watchdog_file_scan_seconds: float = 10.0,
     ) -> subprocess.CompletedProcess[str]:
         ...
 
@@ -36,6 +41,10 @@ class SelfPatchConfig:
     codex_bin: str = "codex"
     codex_timeout_seconds: int = 420
     test_timeout_seconds: int = 300
+    codex_idle_timeout_seconds: int = 120
+    test_idle_timeout_seconds: int = 90
+    watchdog_poll_seconds: float = 2.0
+    watchdog_file_scan_seconds: float = 10.0
     test_command: tuple[str, ...] = ("python", "-m", "pytest", "-q")
     codex_model: str | None = None
     sandbox: str = "workspace-write"
@@ -94,6 +103,10 @@ class CodexSelfPatchWorker:
             cwd=workspace,
             input_text=prompt,
             timeout_seconds=self.config.codex_timeout_seconds,
+            idle_timeout_seconds=self.config.codex_idle_timeout_seconds,
+            watchdog_root=workspace,
+            watchdog_poll_seconds=self.config.watchdog_poll_seconds,
+            watchdog_file_scan_seconds=self.config.watchdog_file_scan_seconds,
         )
         commands.append(_command_record("codex", codex_cmd, codex_result))
         _write_text(run_dir / "codex_stdout.txt", codex_result.stdout)
@@ -106,6 +119,10 @@ class CodexSelfPatchWorker:
             cwd=workspace,
             input_text=None,
             timeout_seconds=self.config.test_timeout_seconds,
+            idle_timeout_seconds=self.config.test_idle_timeout_seconds,
+            watchdog_root=workspace,
+            watchdog_poll_seconds=self.config.watchdog_poll_seconds,
+            watchdog_file_scan_seconds=self.config.watchdog_file_scan_seconds,
         )
         commands.append(_command_record("test", list(self.config.test_command), test_result))
         _write_text(run_dir / "test_stdout.txt", test_result.stdout)
@@ -172,6 +189,10 @@ def build_self_patch_config_from_env(*, project_root: str | Path = ".") -> SelfP
         codex_bin=os.environ.get("NEUROKERNEL_SELF_PATCH_CODEX_BIN") or os.environ.get("NEUROKERNEL_CODEX_BIN", "codex"),
         codex_timeout_seconds=int(os.environ.get("NEUROKERNEL_SELF_PATCH_CODEX_TIMEOUT", "420")),
         test_timeout_seconds=int(os.environ.get("NEUROKERNEL_SELF_PATCH_TEST_TIMEOUT", "300")),
+        codex_idle_timeout_seconds=int(os.environ.get("NEUROKERNEL_SELF_PATCH_CODEX_IDLE_TIMEOUT", "120")),
+        test_idle_timeout_seconds=int(os.environ.get("NEUROKERNEL_SELF_PATCH_TEST_IDLE_TIMEOUT", "90")),
+        watchdog_poll_seconds=float(os.environ.get("NEUROKERNEL_SELF_PATCH_WATCHDOG_POLL", "2.0")),
+        watchdog_file_scan_seconds=float(os.environ.get("NEUROKERNEL_SELF_PATCH_WATCHDOG_FILE_SCAN", "10.0")),
         test_command=tuple(_split_command(os.environ.get("NEUROKERNEL_SELF_PATCH_TEST_COMMAND", "python -m pytest -q"))),
         codex_model=os.environ.get("NEUROKERNEL_SELF_PATCH_CODEX_MODEL") or None,
         sandbox=os.environ.get("NEUROKERNEL_SELF_PATCH_SANDBOX", "workspace-write"),
@@ -399,7 +420,17 @@ def _write_summary_markdown(run_dir: Path, result: dict[str, Any]) -> None:
     _write_text(run_dir / "summary.md", "\n".join(lines))
 
 
-def _run_command(cmd: list[str], *, cwd: Path, input_text: str | None = None, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
+def _run_command(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    input_text: str | None = None,
+    timeout_seconds: int,
+    idle_timeout_seconds: int | None = None,
+    watchdog_root: Path | None = None,
+    watchdog_poll_seconds: float = 2.0,
+    watchdog_file_scan_seconds: float = 10.0,
+) -> subprocess.CompletedProcess[str]:
     kwargs: dict[str, Any] = {
         "cwd": cwd,
         "stdin": subprocess.PIPE if input_text is not None else None,
@@ -415,18 +446,113 @@ def _run_command(cmd: list[str], *, cwd: Path, input_text: str | None = None, ti
         kwargs["start_new_session"] = True
 
     proc = subprocess.Popen(cmd, **kwargs)
-    try:
-        stdout, stderr = proc.communicate(input=input_text, timeout=timeout_seconds)
-        return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
-    except subprocess.TimeoutExpired:
+    if input_text is not None and proc.stdin is not None:
+        try:
+            proc.stdin.write(input_text)
+            proc.stdin.close()
+        except BrokenPipeError:
+            pass
+
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    activity = {"last": time.monotonic()}
+    stdout_thread = _pipe_reader(proc.stdout, stdout_chunks, activity) if proc.stdout is not None else None
+    stderr_thread = _pipe_reader(proc.stderr, stderr_chunks, activity) if proc.stderr is not None else None
+
+    started = time.monotonic()
+    last_workspace_check = started
+    last_workspace_mtime = _workspace_mtime(watchdog_root) if watchdog_root is not None else None
+    stop_reason: str | None = None
+    poll_seconds = max(0.1, watchdog_poll_seconds)
+
+    while proc.poll() is None:
+        now = time.monotonic()
+        if timeout_seconds > 0 and now - started >= timeout_seconds:
+            stop_reason = f"Command timed out after {timeout_seconds} seconds."
+            break
+        if (
+            idle_timeout_seconds is not None
+            and idle_timeout_seconds > 0
+            and now - activity["last"] >= idle_timeout_seconds
+        ):
+            if watchdog_root is not None and now - last_workspace_check >= max(0.1, watchdog_file_scan_seconds):
+                current_mtime = _workspace_mtime(watchdog_root)
+                last_workspace_check = now
+                if current_mtime is not None and current_mtime != last_workspace_mtime:
+                    last_workspace_mtime = current_mtime
+                    activity["last"] = now
+                    continue
+            stop_reason = f"Command stalled after {idle_timeout_seconds} seconds without output or workspace changes."
+            break
+        time.sleep(min(poll_seconds, 1.0))
+
+    if stop_reason is not None:
         _terminate_process_group(proc)
         try:
-            stdout, stderr = proc.communicate(timeout=5)
+            proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             _kill_process_group(proc)
-            stdout, stderr = proc.communicate()
-        timeout_note = f"\nCommand timed out after {timeout_seconds} seconds."
-        return subprocess.CompletedProcess(cmd, 124, stdout or "", (stderr or "") + timeout_note)
+            proc.wait()
+        _join_reader(stdout_thread)
+        _join_reader(stderr_thread)
+        code = 124 if "timed out" in stop_reason else 125
+        return subprocess.CompletedProcess(cmd, code, "".join(stdout_chunks), "".join(stderr_chunks) + f"\n{stop_reason}")
+
+    _join_reader(stdout_thread)
+    _join_reader(stderr_thread)
+    return subprocess.CompletedProcess(cmd, proc.returncode, "".join(stdout_chunks), "".join(stderr_chunks))
+
+
+def _pipe_reader(pipe: Any, chunks: list[str], activity: dict[str, float]) -> threading.Thread:
+    def read_loop() -> None:
+        try:
+            for chunk in iter(pipe.readline, ""):
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                activity["last"] = time.monotonic()
+        finally:
+            try:
+                pipe.close()
+            except Exception:
+                pass
+
+    thread = threading.Thread(target=read_loop, daemon=True)
+    thread.start()
+    return thread
+
+
+def _join_reader(thread: threading.Thread | None) -> None:
+    if thread is not None:
+        thread.join(timeout=2)
+
+
+def _workspace_mtime(root: Path | None, *, max_files: int = 5_000) -> int | None:
+    if root is None or not root.exists():
+        return None
+    ignored = {".git", "venv", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
+    newest = root.stat().st_mtime_ns
+    seen = 0
+    stack = [root]
+    while stack and seen < max_files:
+        current = stack.pop()
+        try:
+            for child in current.iterdir():
+                if child.name in ignored:
+                    continue
+                seen += 1
+                try:
+                    stat = child.stat()
+                except OSError:
+                    continue
+                newest = max(newest, stat.st_mtime_ns)
+                if child.is_dir():
+                    stack.append(child)
+                if seen >= max_files:
+                    break
+        except OSError:
+            continue
+    return newest
 
 
 def _terminate_process_group(proc: subprocess.Popen[str]) -> None:

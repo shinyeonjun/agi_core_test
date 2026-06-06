@@ -110,11 +110,62 @@ def test_run_command_returns_timeout_result(tmp_path):
     assert time.monotonic() - started < 4
 
 
+def test_run_command_returns_stalled_result(tmp_path):
+    started = time.monotonic()
+
+    result = _run_command(
+        [sys.executable, "-c", "import time; time.sleep(5)"],
+        cwd=tmp_path,
+        timeout_seconds=10,
+        idle_timeout_seconds=1,
+        watchdog_root=tmp_path,
+        watchdog_poll_seconds=0.1,
+        watchdog_file_scan_seconds=0.1,
+    )
+
+    assert result.returncode == 125
+    assert "stalled" in result.stderr
+    assert time.monotonic() - started < 4
+
+
+def test_run_command_keeps_silent_workspace_progress_alive(tmp_path):
+    script = (
+        "import pathlib, time\n"
+        "root = pathlib.Path.cwd()\n"
+        "for index in range(4):\n"
+        "    (root / 'heartbeat.txt').write_text(str(index), encoding='utf-8')\n"
+        "    time.sleep(0.35)\n"
+    )
+
+    result = _run_command(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        timeout_seconds=10,
+        idle_timeout_seconds=1,
+        watchdog_root=tmp_path,
+        watchdog_poll_seconds=0.1,
+        watchdog_file_scan_seconds=0.1,
+    )
+
+    assert result.returncode == 0
+
+
 class FakeSelfPatchRunner:
     def __init__(self, *, trailing_whitespace: bool = False):
         self.trailing_whitespace = trailing_whitespace
 
-    def __call__(self, cmd, *, cwd, input_text=None, timeout_seconds=30):
+    def __call__(
+        self,
+        cmd,
+        *,
+        cwd,
+        input_text=None,
+        timeout_seconds=30,
+        idle_timeout_seconds=None,
+        watchdog_root=None,
+        watchdog_poll_seconds=2.0,
+        watchdog_file_scan_seconds=10.0,
+    ):
         if cmd[:2] == ["git", "diff"]:
             return subprocess.run(cmd, cwd=cwd, text=True, encoding="utf-8", capture_output=True, check=False)
         if cmd[0] == "git":
