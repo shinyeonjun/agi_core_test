@@ -12,7 +12,6 @@ from neurokernel_seed.discord_bot.bot import (
     _latest_self_patch_result,
     _message_allowed,
     _parse_user_ids,
-    _work_command_from_conversation,
 )
 from neurokernel_seed.discord_bot.commands import build_benchmark_task, build_preset_task, parse_task_json
 
@@ -140,13 +139,7 @@ def test_nonempty_prefix_keeps_prefixed_command_mode():
     assert _command_line_from_content("!nk help", config) == "help"
 
 
-def test_work_command_from_conversation_routes_work_status_questions():
-    assert _work_command_from_conversation("현재 작업 상태 보여줘") == "list"
-    assert _work_command_from_conversation("큐에 남은 작업 알려줘") == "list"
-    assert _work_command_from_conversation("오늘 날씨 어때") is None
-
-
-def test_auto_work_status_uses_work_api_before_language_task_router():
+def test_auto_work_status_uses_work_router_and_language_humanizer():
     class FakeCore:
         def __init__(self):
             self.calls = []
@@ -177,16 +170,49 @@ def test_auto_work_status_uses_work_api_before_language_task_router():
             raise AssertionError(f"unexpected GET {path}")
 
         def post(self, path, payload=None):
-            raise AssertionError(f"language/task router should not run for work status: {path}")
+            self.calls.append(("POST", path))
+            if path == "/language/preferences":
+                return {"kind": "none"}
+            if path == "/language/to-core":
+                return {
+                    "reply": "최근 기록을 확인해볼게.",
+                    "task_spec": {
+                        "risk_level": "low",
+                        "requires_approval": False,
+                        "mode": "readonly",
+                        "allowed_actions": ["get_recent_trace"],
+                    },
+                }
+            if path == "/work/route":
+                return {
+                    "route": "work_status",
+                    "reason": "The user asks for current work progress.",
+                    "confidence": 0.95,
+                    "work_item": None,
+                    "requires_confirmation": False,
+                    "clarifying_question": None,
+                    "safety_notes": [],
+                }
+            if path == "/language/to-human":
+                core_result = payload.get("core_result") if isinstance(payload, dict) else {}
+                assert core_result.get("kind") == "work_status"
+                assert core_result.get("work_items")[0]["title"] == "자동 진단 리포트 기능"
+                return {"reply": "진행 중인 건 자동 진단 리포트 기능이고, 최근 실행은 끝났어."}
+            raise AssertionError(f"unexpected POST {path}")
 
     core = FakeCore()
     config = _bot_config(prefix="", reply_without_prefix=True)
     response = asyncio.run(_handle_command("auto 현재 작업 상태 보여줘", core, config, user_id="u1", channel_id="c1"))
 
-    assert "자동 진단 리포트 기능" in response
-    assert "planned" in response
-    assert "completed" in response
-    assert core.calls == [("GET", "/work-items?limit=10"), ("GET", "/work-jobs?limit=10")]
+    assert response.text == "진행 중인 건 자동 진단 리포트 기능이고, 최근 실행은 끝났어."
+    assert core.calls == [
+        ("POST", "/language/preferences"),
+        ("POST", "/language/to-core"),
+        ("POST", "/work/route"),
+        ("GET", "/work-items?limit=10"),
+        ("GET", "/work-jobs?limit=10"),
+        ("POST", "/language/to-human"),
+    ]
 
 
 def test_auto_executable_allows_low_risk_readonly_lookup():

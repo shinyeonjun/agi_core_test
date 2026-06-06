@@ -529,7 +529,7 @@ async def _handle_command(command_line: str, core: CoreClient, config: DiscordBo
     if command == "memory":
         return await _handle_memory(rest, core, user_id=user_id, channel_id=channel_id)
     if command == "work":
-        return await _handle_work(rest, core, activation_view_factory=activation_view_factory, retry_view_factory=retry_view_factory)
+        return await _handle_work(rest, core, user_id=user_id, channel_id=channel_id, activation_view_factory=activation_view_factory, retry_view_factory=retry_view_factory)
     if command == "run":
         return await _run_preset(rest, core, user_id=user_id, channel_id=channel_id)
     if command == "benchmark":
@@ -544,27 +544,29 @@ async def _handle_command(command_line: str, core: CoreClient, config: DiscordBo
     if command == "auto":
         if not rest:
             return ""
-        control_response = await _maybe_handle_conversation_control(
-            rest,
-            core,
-            activation_view_factory=activation_view_factory,
-            retry_view_factory=retry_view_factory,
-        )
-        if control_response:
-            return control_response
         preference_reply = await _maybe_save_conversational_preferences(rest, core, user_id=user_id)
         if preference_reply:
             return preference_reply
         payload = await _language_to_core(core, rest, user_id=user_id, channel_id=channel_id)
+        route_response = await _maybe_route_work(
+            rest,
+            payload,
+            core,
+            user_id=user_id,
+            channel_id=channel_id,
+            proposal_view_factory=proposal_view_factory,
+            work_view_factory=work_view_factory,
+            activation_view_factory=activation_view_factory,
+            retry_view_factory=retry_view_factory,
+        )
+        if route_response:
+            return route_response
         task = payload.get("task_spec") if isinstance(payload, dict) else None
         if config.auto_do_low_risk and _is_auto_executable_task(task):
             return await _create_and_run(task, core, user_id=user_id, channel_id=channel_id)
         if isinstance(task, dict) and not config.auto_do_low_risk:
             reply = _required_text(payload.get("reply"), "language reply")
             return f"{reply}\n실행하려면 `do {rest}`라고 말해줘."
-        route_response = await _maybe_route_work(rest, payload, core, user_id=user_id, channel_id=channel_id, proposal_view_factory=proposal_view_factory, work_view_factory=work_view_factory)
-        if route_response:
-            return route_response
         return _required_text(payload.get("clarifying_question") or payload.get("reply"), "language reply")
     if command == "plan":
         if not rest:
@@ -704,6 +706,8 @@ async def _maybe_route_work(
     channel_id: str | None,
     proposal_view_factory: Any | None,
     work_view_factory: Any | None,
+    activation_view_factory: Any | None = None,
+    retry_view_factory: Any | None = None,
 ) -> BotResponse | None:
     payload = await _call(
         core.post,
@@ -717,6 +721,9 @@ async def _maybe_route_work(
     if not isinstance(payload, dict):
         return None
     route = str(payload.get("route") or payload.get("route_decision", {}).get("route") or "clarify")
+    if route == "work_status":
+        response = await _handle_work("list", core, user_id=user_id, channel_id=channel_id, activation_view_factory=activation_view_factory, retry_view_factory=retry_view_factory)
+        return response if isinstance(response, BotResponse) else BotResponse(response)
     if route == "runtime_task":
         return None
     if route in {"unsafe", "clarify"}:
@@ -741,30 +748,6 @@ async def _maybe_route_work(
             return None
         view = work_view_factory(str(work_item.get("work_id"))) if work_view_factory else None
         return BotResponse(_format_work_item_response(work_item, payload), view=view)
-    return None
-
-
-async def _maybe_handle_conversation_control(
-    text: str,
-    core: CoreClient,
-    *,
-    activation_view_factory: Any | None,
-    retry_view_factory: Any | None,
-) -> str | BotResponse | None:
-    work_command = _work_command_from_conversation(text)
-    if work_command:
-        return await _handle_work(work_command, core, activation_view_factory=activation_view_factory, retry_view_factory=retry_view_factory)
-    return None
-
-
-def _work_command_from_conversation(text: str) -> str | None:
-    normalized = " ".join(text.lower().strip().split())
-    if not normalized:
-        return None
-    work_terms = ("작업", "워크", "work", "queue", "큐", "job", "잡", "개발 후보", "기능 후보")
-    status_terms = ("상태", "목록", "리스트", "보여", "알려", "진행", "남은", "최근", "대기", "큐")
-    if any(term in normalized for term in work_terms) and any(term in normalized for term in status_terms):
-        return "list"
     return None
 
 
@@ -861,7 +844,15 @@ async def _handle_memory(rest: str, core: CoreClient, *, user_id: str | None, ch
     return "`memory recent` 또는 `memory context`로 말해줘."
 
 
-async def _handle_work(rest: str, core: CoreClient, *, activation_view_factory: Any | None = None, retry_view_factory: Any | None = None) -> str | BotResponse:
+async def _handle_work(
+    rest: str,
+    core: CoreClient,
+    *,
+    user_id: str | None = None,
+    channel_id: str | None = None,
+    activation_view_factory: Any | None = None,
+    retry_view_factory: Any | None = None,
+) -> str | BotResponse:
     command, _, tail = rest.partition(" ")
     command = command.lower().strip() or "list"
     tail = tail.strip()
@@ -870,18 +861,16 @@ async def _handle_work(rest: str, core: CoreClient, *, activation_view_factory: 
         jobs_payload = await _call(core.get, "/work-jobs?limit=10")
         items = payload.get("work_items") if isinstance(payload, dict) else []
         jobs = jobs_payload.get("jobs") if isinstance(jobs_payload, dict) else []
-        if not items and not jobs:
-            return "아직 쌓인 작업이 없어."
-        lines = ["최근 작업 후보"]
-        for item in items[:10]:
-            lines.append(f"- {item.get('work_id')}: {item.get('title')} ({item.get('status')})")
-        if jobs:
-            lines.append("")
-            lines.append("최근 작업 실행")
-            for job in jobs[:5]:
-                title = job.get("work_title") or job.get("work_id") or "작업"
-                lines.append(f"- {job.get('job_id')}: {title} ({job.get('status')})")
-        return "\n".join(lines)
+        return await _humanize(
+            core,
+            {
+                "kind": "work_status",
+                "work_items": items[:10] if isinstance(items, list) else [],
+                "jobs": jobs[:5] if isinstance(jobs, list) else [],
+            },
+            user_id=user_id,
+            channel_id=channel_id,
+        )
     if command in {"show", "get"}:
         work_id = tail.split()[0] if tail else ""
         if not work_id:

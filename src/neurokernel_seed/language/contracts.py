@@ -10,7 +10,7 @@ from neurokernel_seed.harness.task_spec import TaskSpecError, task_spec_from_dic
 LanguageIntentKind = Literal["chat", "question", "task", "dev_task", "approval", "reject", "unknown"]
 PreferenceIntentKind = Literal["none", "preference_update", "question", "reject"]
 CapabilityIntentKind = Literal["none", "gap", "ambiguous", "forbidden"]
-WorkRouteKind = Literal["runtime_task", "self_patch", "external_work", "unsafe", "clarify"]
+WorkRouteKind = Literal["runtime_task", "work_status", "self_patch", "external_work", "unsafe", "clarify"]
 
 
 class LanguageContractError(ValueError):
@@ -131,7 +131,7 @@ ALLOWED_GAP_TYPES = {
 }
 ALLOWED_CAPABILITY_RISK_LEVELS = {"none", "low", "medium", "high", "forbidden"}
 ALLOWED_CAPABILITY_TARGETS = {"local", "orangepi5"}
-ALLOWED_WORK_ROUTES = {"runtime_task", "self_patch", "external_work", "unsafe", "clarify"}
+ALLOWED_WORK_ROUTES = {"runtime_task", "work_status", "self_patch", "external_work", "unsafe", "clarify"}
 ALLOWED_WORK_TYPES = {"runtime_task", "self_patch", "external_work"}
 ALLOWED_WORK_PRIORITIES = {"low", "medium", "high"}
 ALLOWED_WORK_RISK_LEVELS = {"none", "low", "medium", "high", "forbidden"}

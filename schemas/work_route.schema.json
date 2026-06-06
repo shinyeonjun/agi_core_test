@@ -15,7 +15,7 @@
   "properties": {
     "route": {
       "type": "string",
-      "enum": ["runtime_task", "self_patch", "external_work", "unsafe", "clarify"]
+      "enum": ["runtime_task", "work_status", "self_patch", "external_work", "unsafe", "clarify"]
     },
     "reason": { "type": "string" },
     "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
