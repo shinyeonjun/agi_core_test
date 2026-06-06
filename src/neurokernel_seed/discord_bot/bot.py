@@ -544,6 +544,14 @@ async def _handle_command(command_line: str, core: CoreClient, config: DiscordBo
     if command == "auto":
         if not rest:
             return ""
+        control_response = await _maybe_handle_conversation_control(
+            rest,
+            core,
+            activation_view_factory=activation_view_factory,
+            retry_view_factory=retry_view_factory,
+        )
+        if control_response:
+            return control_response
         preference_reply = await _maybe_save_conversational_preferences(rest, core, user_id=user_id)
         if preference_reply:
             return preference_reply
@@ -736,6 +744,30 @@ async def _maybe_route_work(
     return None
 
 
+async def _maybe_handle_conversation_control(
+    text: str,
+    core: CoreClient,
+    *,
+    activation_view_factory: Any | None,
+    retry_view_factory: Any | None,
+) -> str | BotResponse | None:
+    work_command = _work_command_from_conversation(text)
+    if work_command:
+        return await _handle_work(work_command, core, activation_view_factory=activation_view_factory, retry_view_factory=retry_view_factory)
+    return None
+
+
+def _work_command_from_conversation(text: str) -> str | None:
+    normalized = " ".join(text.lower().strip().split())
+    if not normalized:
+        return None
+    work_terms = ("작업", "워크", "work", "queue", "큐", "job", "잡", "개발 후보", "기능 후보")
+    status_terms = ("상태", "목록", "리스트", "보여", "알려", "진행", "남은", "최근", "대기", "큐")
+    if any(term in normalized for term in work_terms) and any(term in normalized for term in status_terms):
+        return "list"
+    return None
+
+
 
 
 async def _handle_prefs(rest: str, core: CoreClient, *, user_id: str | None) -> str:
@@ -835,12 +867,20 @@ async def _handle_work(rest: str, core: CoreClient, *, activation_view_factory: 
     tail = tail.strip()
     if command in {"list", "ls"}:
         payload = await _call(core.get, "/work-items?limit=10")
+        jobs_payload = await _call(core.get, "/work-jobs?limit=10")
         items = payload.get("work_items") if isinstance(payload, dict) else []
-        if not items:
+        jobs = jobs_payload.get("jobs") if isinstance(jobs_payload, dict) else []
+        if not items and not jobs:
             return "아직 쌓인 작업이 없어."
         lines = ["최근 작업 후보"]
         for item in items[:10]:
             lines.append(f"- {item.get('work_id')}: {item.get('title')} ({item.get('status')})")
+        if jobs:
+            lines.append("")
+            lines.append("최근 작업 실행")
+            for job in jobs[:5]:
+                title = job.get("work_title") or job.get("work_id") or "작업"
+                lines.append(f"- {job.get('job_id')}: {title} ({job.get('status')})")
         return "\n".join(lines)
     if command in {"show", "get"}:
         work_id = tail.split()[0] if tail else ""

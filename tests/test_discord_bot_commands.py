@@ -1,14 +1,18 @@
+import asyncio
+
 import pytest
 
 from neurokernel_seed.discord_bot.bot import (
     DiscordBotConfig,
     _command_line_from_content,
     _discord_chunks,
+    _handle_command,
     _format_work_notification,
     _is_auto_executable_task,
     _latest_self_patch_result,
     _message_allowed,
     _parse_user_ids,
+    _work_command_from_conversation,
 )
 from neurokernel_seed.discord_bot.commands import build_benchmark_task, build_preset_task, parse_task_json
 
@@ -134,6 +138,55 @@ def test_nonempty_prefix_keeps_prefixed_command_mode():
     config = _bot_config(prefix="!nk", reply_without_prefix=False)
     assert _command_line_from_content("ㅎㅎㅎㅎ", config) is None
     assert _command_line_from_content("!nk help", config) == "help"
+
+
+def test_work_command_from_conversation_routes_work_status_questions():
+    assert _work_command_from_conversation("현재 작업 상태 보여줘") == "list"
+    assert _work_command_from_conversation("큐에 남은 작업 알려줘") == "list"
+    assert _work_command_from_conversation("오늘 날씨 어때") is None
+
+
+def test_auto_work_status_uses_work_api_before_language_task_router():
+    class FakeCore:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, path):
+            self.calls.append(("GET", path))
+            if path == "/work-items?limit=10":
+                return {
+                    "work_items": [
+                        {
+                            "work_id": "work_item_1",
+                            "title": "자동 진단 리포트 기능",
+                            "status": "planned",
+                        }
+                    ]
+                }
+            if path == "/work-jobs?limit=10":
+                return {
+                    "jobs": [
+                        {
+                            "job_id": "job_1",
+                            "work_id": "work_item_1",
+                            "work_title": "자동 진단 리포트 기능",
+                            "status": "completed",
+                        }
+                    ]
+                }
+            raise AssertionError(f"unexpected GET {path}")
+
+        def post(self, path, payload=None):
+            raise AssertionError(f"language/task router should not run for work status: {path}")
+
+    core = FakeCore()
+    config = _bot_config(prefix="", reply_without_prefix=True)
+    response = asyncio.run(_handle_command("auto 현재 작업 상태 보여줘", core, config, user_id="u1", channel_id="c1"))
+
+    assert "자동 진단 리포트 기능" in response
+    assert "planned" in response
+    assert "completed" in response
+    assert core.calls == [("GET", "/work-items?limit=10"), ("GET", "/work-jobs?limit=10")]
 
 
 def test_auto_executable_allows_low_risk_readonly_lookup():
