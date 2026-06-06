@@ -1,6 +1,15 @@
 import pytest
 
-from neurokernel_seed.discord_bot.bot import DiscordBotConfig, _command_line_from_content, _discord_chunks, _is_auto_executable_task, _message_allowed, _parse_user_ids
+from neurokernel_seed.discord_bot.bot import (
+    DiscordBotConfig,
+    _command_line_from_content,
+    _discord_chunks,
+    _format_work_notification,
+    _is_auto_executable_task,
+    _latest_self_patch_result,
+    _message_allowed,
+    _parse_user_ids,
+)
 from neurokernel_seed.discord_bot.commands import build_benchmark_task, build_preset_task, parse_task_json
 
 
@@ -158,3 +167,50 @@ def test_auto_executable_blocks_benchmark_for_conversational_mode():
             "allowed_actions": ["run_safe_benchmark"],
         }
     )
+
+
+def test_latest_self_patch_result_reads_completed_event_payload():
+    result = _latest_self_patch_result(
+        [
+            {"event_type": "running", "payload_json": "{}"},
+            {"event_type": "job_completed", "payload_json": '{"result":{"status":"test_failed","changed_files":["a.py"]}}'},
+        ]
+    )
+
+    assert result == {"status": "test_failed", "changed_files": ["a.py"]}
+
+
+def test_format_work_notification_reports_failed_patch_without_activation_button():
+    text, wants_activation = _format_work_notification(
+        {
+            "work_item": {"work_id": "work1", "title": "CPU 코어별 사용률 확인", "status": "reviewing"},
+            "events": [
+                {
+                    "event_type": "job_completed",
+                    "payload_json": '{"result":{"status":"test_failed","changed_files":["src/x.py","tests/test_x.py"]}}',
+                }
+            ],
+        }
+    )
+
+    assert not wants_activation
+    assert "테스트 실패" in text
+    assert "CPU 코어별 사용률 확인" in text
+    assert "src/x.py" in text
+
+
+def test_format_work_notification_offers_activation_for_patch_ready():
+    text, wants_activation = _format_work_notification(
+        {
+            "work_item": {"work_id": "work1", "title": "CPU 코어별 사용률 확인", "status": "waiting_approval"},
+            "events": [
+                {
+                    "event_type": "job_completed",
+                    "payload_json": '{"result":{"status":"patch_ready","changed_files":["src/x.py"]}}',
+                }
+            ],
+        }
+    )
+
+    assert wants_activation
+    assert "테스트를 통과" in text

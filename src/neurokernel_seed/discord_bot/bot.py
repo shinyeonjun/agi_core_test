@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import asyncio
 import os
 from urllib.parse import quote
 from dataclasses import dataclass
@@ -34,6 +35,8 @@ class DiscordBotConfig:
     allowed_user_ids: tuple[int, ...] = ()
     reply_without_prefix: bool = False
     auto_do_low_risk: bool = False
+    work_notify_enabled: bool = True
+    work_notify_interval_seconds: float = 10.0
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,8 @@ def config_from_env(
     allowed_user_ids: tuple[int, ...] | None = None,
     reply_without_prefix: bool | None = None,
     auto_do_low_risk: bool | None = None,
+    work_notify_enabled: bool | None = None,
+    work_notify_interval_seconds: float | None = None,
 ) -> DiscordBotConfig:
     token = os.environ.get(token_env, "").strip()
     if not token:
@@ -98,6 +103,12 @@ def config_from_env(
     resolved_auto_do_low_risk = auto_do_low_risk
     if resolved_auto_do_low_risk is None:
         resolved_auto_do_low_risk = _required_bool_env("NEUROKERNEL_BOT_AUTO_DO_LOW_RISK")
+    resolved_work_notify_enabled = work_notify_enabled
+    if resolved_work_notify_enabled is None:
+        resolved_work_notify_enabled = _optional_bool_env("NEUROKERNEL_BOT_WORK_NOTIFY_ENABLED", default=True)
+    resolved_work_notify_interval = work_notify_interval_seconds
+    if resolved_work_notify_interval is None:
+        resolved_work_notify_interval = float(os.environ.get("NEUROKERNEL_BOT_WORK_NOTIFY_INTERVAL", "10"))
     return DiscordBotConfig(
         token=token,
         channel_id=resolved_channel_id,
@@ -107,6 +118,8 @@ def config_from_env(
         allowed_user_ids=resolved_allowed_user_ids,
         reply_without_prefix=resolved_reply_without_prefix,
         auto_do_low_risk=resolved_auto_do_low_risk,
+        work_notify_enabled=resolved_work_notify_enabled,
+        work_notify_interval_seconds=resolved_work_notify_interval,
     )
 
 
@@ -132,6 +145,18 @@ def _required_bool_env(name: str) -> bool:
     raise RuntimeError(f"{name} must be a boolean")
 
 
+def _optional_bool_env(name: str, *, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None or value.strip() == "":
+        return default
+    lowered = value.strip().lower()
+    if lowered in {"1", "true", "yes", "y"}:
+        return True
+    if lowered in {"0", "false", "no", "n"}:
+        return False
+    raise RuntimeError(f"{name} must be a boolean")
+
+
 def run_discord_bot(config: DiscordBotConfig) -> None:
     try:
         import discord
@@ -142,10 +167,14 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
     intents.message_content = True
     client = discord.Client(intents=intents)
     core = CoreClient(config.core_url)
+    notify_task: asyncio.Task[Any] | None = None
 
     @client.event
     async def on_ready() -> None:
+        nonlocal notify_task
         print(f"Discord bot logged in as {client.user} | channel={config.channel_id} | core={config.core_url}", flush=True)
+        if config.work_notify_enabled and notify_task is None:
+            notify_task = asyncio.create_task(_work_notification_loop(client, core, config, activation_view_factory))
 
     def proposal_view_factory(proposal_id: str):
         return ProposalReviewView(proposal_id)
@@ -286,6 +315,134 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
         await _reply(message, response_text, view=response.view if isinstance(response, BotResponse) else None)
 
     client.run(config.token)
+
+
+async def _work_notification_loop(client: Any, core: CoreClient, config: DiscordBotConfig, activation_view_factory: Any | None) -> None:
+    seen: dict[str, tuple[str, str]] = {}
+    first_poll = True
+    while True:
+        try:
+            payload = await _call(core.get, "/work-items?limit=30")
+            items = payload.get("work_items") if isinstance(payload, dict) else []
+            if isinstance(items, list):
+                await _notify_work_changes(client, core, config, activation_view_factory, items, seen=seen, first_poll=first_poll)
+            first_poll = False
+        except Exception as exc:
+            print(f"[discord-work-notifier] poll failed: {type(exc).__name__}: {exc}", flush=True)
+        await asyncio.sleep(max(1.0, float(config.work_notify_interval_seconds)))
+
+
+async def _notify_work_changes(
+    client: Any,
+    core: CoreClient,
+    config: DiscordBotConfig,
+    activation_view_factory: Any | None,
+    items: list[Any],
+    *,
+    seen: dict[str, tuple[str, str]],
+    first_poll: bool,
+) -> None:
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        work_id = str(item.get("work_id") or "").strip()
+        if not work_id:
+            continue
+        status = str(item.get("status") or "")
+        updated_at = str(item.get("updated_at") or "")
+        signature = (status, updated_at)
+        previous = seen.get(work_id)
+        seen[work_id] = signature
+        if first_poll or previous == signature or not _is_notifiable_work_status(status):
+            continue
+        detail = await _call(core.get, f"/work-items/{quote(work_id)}")
+        if not isinstance(detail, dict):
+            continue
+        text, wants_activation = _format_work_notification(detail)
+        channel = await _resolve_notification_channel(client, item, config)
+        if channel is None:
+            print(f"[discord-work-notifier] channel not found for work_id={work_id}", flush=True)
+            continue
+        view = activation_view_factory(work_id) if wants_activation and activation_view_factory else None
+        for index, chunk in enumerate(_discord_chunks(text)):
+            await channel.send(chunk, view=view if index == 0 else None)
+
+
+def _is_notifiable_work_status(status: str) -> bool:
+    return status in {"waiting_approval", "reviewing", "blocked", "failed", "completed"}
+
+
+async def _resolve_notification_channel(client: Any, item: dict[str, Any], config: DiscordBotConfig) -> Any | None:
+    raw_channel_id = item.get("channel_id") or config.channel_id
+    try:
+        channel_id = int(raw_channel_id)
+    except (TypeError, ValueError):
+        channel_id = config.channel_id
+    channel = client.get_channel(channel_id) if hasattr(client, "get_channel") else None
+    if channel is not None:
+        return channel
+    if hasattr(client, "fetch_channel"):
+        return await client.fetch_channel(channel_id)
+    return None
+
+
+def _format_work_notification(payload: dict[str, Any]) -> tuple[str, bool]:
+    item = payload.get("work_item") if isinstance(payload.get("work_item"), dict) else {}
+    work_id = str(item.get("work_id") or "")
+    title = str(item.get("title") or work_id or "작업")
+    status = str(item.get("status") or "unknown")
+    result = _latest_self_patch_result(payload.get("events"))
+    result_status = str(result.get("status") or "")
+    changed_files = result.get("changed_files") if isinstance(result.get("changed_files"), list) else []
+    changed_text = ", ".join(str(path) for path in changed_files[:5])
+
+    if status == "waiting_approval" and result_status == "patch_ready":
+        lines = [
+            f"개발 후보가 테스트를 통과했어: {title}",
+            "이제 장착 승인만 남았어.",
+        ]
+        if changed_text:
+            lines.append(f"바뀐 파일: {changed_text}")
+        return "\n".join(lines), True
+    if status == "reviewing" and result_status in {"test_failed", "diff_check_failed"}:
+        reason = "테스트 실패" if result_status == "test_failed" else "패치 형식 검사 실패"
+        lines = [
+            f"개발 시도는 끝났는데 바로 장착하면 안 돼: {title}",
+            f"이유: {reason}",
+        ]
+        if changed_text:
+            lines.append(f"건드린 파일: {changed_text}")
+        lines.append("패치는 보존했고, 다음엔 실패 로그를 보고 수정해야 해.")
+        return "\n".join(lines), False
+    if status == "blocked":
+        return f"작업이 막혔어: {title}\n패치가 없거나 워커가 더 진행할 수 없는 상태야.", False
+    if status == "failed":
+        return f"작업이 실패했어: {title}\n상태를 확인해서 원인부터 봐야 해.", False
+    if status == "completed":
+        return f"작업이 완료됐어: {title}", False
+    return f"작업 상태가 바뀌었어: {title}\n현재 상태: {status}", False
+
+
+def _latest_self_patch_result(events: Any) -> dict[str, Any]:
+    if not isinstance(events, list):
+        return {}
+    for event in reversed(events):
+        if not isinstance(event, dict) or event.get("event_type") != "job_completed":
+            continue
+        payload = event.get("payload_json")
+        if isinstance(payload, str):
+            try:
+                import json
+
+                payload = json.loads(payload)
+            except Exception:
+                continue
+        if not isinstance(payload, dict):
+            continue
+        result = payload.get("result")
+        if isinstance(result, dict):
+            return result
+    return {}
 
 
 def _command_line_from_content(content: str, config: DiscordBotConfig) -> str | None:
