@@ -273,6 +273,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("serve-work-worker")
     p.add_argument("--db", default="data/harness.db")
+    p.add_argument("--project-root", default=".")
     p.add_argument("--worker-id")
     p.add_argument("--queues", nargs="+", default=["self_patch", "external_work"])
     p.add_argument("--block-ms", type=int, default=0)

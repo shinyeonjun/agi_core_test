@@ -71,9 +71,49 @@ def test_dispatcher_moves_accepted_work_to_planned_and_acks_job(tmp_path):
     assert item["notes"]
 
 
+def test_dispatcher_runs_self_patch_and_waits_for_activation_approval(tmp_path):
+    queue = InMemoryWorkQueue()
+    service = HarnessService(db_path=tmp_path / "harness.db", project_root=tmp_path, work_queue=queue)
+    proposal = service.create_capability_proposal_from_intent(
+        user_text="CPU ?ъ슜瑜?蹂????덉뼱?",
+        user_id="discord:1",
+        channel_id="chan",
+        capability_intent=_cpu_usage_intent(),
+    )
+    work_id = proposal["work_item"]["work_id"]
+    service.transition_capability_proposal(proposal["proposal"]["proposal_id"], "approved_for_dev", actor="discord:1")
+
+    dispatcher = WorkDispatcher(
+        config=WorkDispatcherConfig(db_path=Path(tmp_path / "harness.db"), project_root=tmp_path, worker_id="test-worker", queues=("self_patch",), once=True),
+        work_queue=queue,
+        self_patch_runner=FakeSelfPatchRunner(),
+    )
+    processed = dispatcher.run_once()
+
+    assert processed == 1
+    assert queue.acked
+    item = service.work_item(work_id)
+    assert item["work_item"]["status"] == "waiting_approval"
+    assert item["jobs"][0]["status"] == "completed"
+    assert item["jobs"][0]["payload_json"]["work_type"] == "self_patch"
+    assert "patch=" in item["notes"][-1]["note_redacted"]
+
+
 def test_dispatcher_defaults_to_trigger_style_blocking_read():
     assert WorkDispatcherConfig().block_ms == 0
     assert WorkDispatcherConfig().idle_sleep_seconds == 0.0
+
+
+class FakeSelfPatchRunner:
+    def run(self, *, job_id, work, payload):
+        return {
+            "status": "patch_ready",
+            "job_id": job_id,
+            "work_id": work["work_id"],
+            "patch_path": "artifacts/self_patch/job/proposal.patch",
+            "changed_files": ["src/neurokernel_seed/harness/executors/readonly_system.py"],
+            "test": {"returncode": 0},
+        }
 
 
 def _external_work_route():

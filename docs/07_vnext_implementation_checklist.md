@@ -2,6 +2,39 @@
 
 This checklist is the next work order after the v4.1 benchmark.
 
+## AGI Harness Self-Improvement Track
+
+- [x] Discord natural-language entrypoint.
+- [x] Capability gap/proposal ledger.
+- [x] Redis-backed work queue.
+- [x] Work dispatcher.
+- [x] SelfPatchWorker v1:
+  - [x] copies the project into an isolated workspace,
+  - [x] runs Codex in the isolated workspace,
+  - [x] runs the configured test command,
+  - [x] writes `proposal.patch`,
+  - [x] writes `summary.json`,
+  - [x] moves successful patches to `waiting_approval`.
+- [ ] Activation Pipeline:
+  - [ ] apply reviewed patch to the live repo,
+  - [ ] rerun tests in the live repo,
+  - [ ] reload the Orange Pi service,
+  - [ ] verify the newly added action through Discord,
+  - [ ] mark the capability proposal active only after verification.
+- [ ] Dynamic Action Registry:
+  - [ ] load action definitions from a versioned registry file,
+  - [ ] bind registry entries to executor adapters,
+  - [ ] reject registry entries without tests.
+- [ ] Project/Research/Data worker:
+  - [ ] split broad work into durable subtasks,
+  - [ ] collect sources,
+  - [ ] write analysis artifacts,
+  - [ ] propose datasets/training jobs.
+- [ ] Training worker:
+  - [ ] track model/data/version lineage,
+  - [ ] compare benchmark results against frozen baselines,
+  - [ ] promote models only when gates pass.
+
 ## Phase 0 - Freeze And Verify
 
 - [ ] Keep `v4_first_hard_success` as the rollback baseline.

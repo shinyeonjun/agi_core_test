@@ -295,7 +295,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "serve-work-worker":
         from neurokernel_seed.harness.worker import serve_worker
-        serve_worker(db_path=args.db, worker_id=args.worker_id, queues=args.queues, block_ms=args.block_ms, once=args.once)
+        serve_worker(db_path=args.db, project_root=args.project_root, worker_id=args.worker_id, queues=args.queues, block_ms=args.block_ms, once=args.once)
         return 0
     if args.cmd == "language-to-core":
         from neurokernel_seed.language.codex_harness import CodexLanguageHarness, config_from_env

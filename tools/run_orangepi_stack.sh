@@ -48,6 +48,10 @@ require_env NEUROKERNEL_WORKER_ENABLED
 require_env NEUROKERNEL_WORKER_QUEUES
 require_env NEUROKERNEL_WORKER_BLOCK_MS
 require_env NEUROKERNEL_REDIS_URL
+require_env NEUROKERNEL_SELF_PATCH_RUN_ROOT
+require_env NEUROKERNEL_SELF_PATCH_TEST_COMMAND
+require_env NEUROKERNEL_SELF_PATCH_CODEX_TIMEOUT
+require_env NEUROKERNEL_SELF_PATCH_TEST_TIMEOUT
 require_env NEUROKERNEL_CODEX_BIN
 require_env NEUROKERNEL_LANGUAGE_WORKSPACE
 require_env NEUROKERNEL_LANGUAGE_SCHEMA_DIR
@@ -112,6 +116,7 @@ if [[ "$NEUROKERNEL_WORKER_ENABLED" =~ ^(1|true|yes|y)$ ]]; then
   # shellcheck disable=SC2086
   python -m neurokernel_seed.cli serve-work-worker \
     --db "$HARNESS_DB" \
+    --project-root "$PROJECT_ROOT" \
     --block-ms "$NEUROKERNEL_WORKER_BLOCK_MS" \
     --queues $NEUROKERNEL_WORKER_QUEUES \
     >> "$LOG_DIR/work_worker.log" 2>&1 &
