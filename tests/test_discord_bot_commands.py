@@ -147,6 +147,17 @@ def test_auto_executable_allows_low_risk_readonly_lookup():
     )
 
 
+def test_auto_executable_allows_per_core_cpu_lookup():
+    assert _is_auto_executable_task(
+        {
+            "risk_level": "low",
+            "requires_approval": False,
+            "mode": "readonly",
+            "allowed_actions": ["get_cpu_per_core_usage"],
+        }
+    )
+
+
 def test_auto_executable_blocks_reboot_even_if_task_exists():
     assert not _is_auto_executable_task(
         {

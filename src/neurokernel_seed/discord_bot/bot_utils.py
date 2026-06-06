@@ -82,6 +82,7 @@ def is_auto_executable_task(task: Any) -> bool:
         "get_disk_usage",
         "get_memory_usage",
         "get_cpu_temp",
+        "get_cpu_per_core_usage",
         "get_service_status",
         "tail_logs",
         "list_artifacts",

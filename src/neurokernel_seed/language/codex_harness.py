@@ -48,6 +48,9 @@ class CodexLanguageHarness:
 
     def to_core(self, user_text: str, *, context: dict[str, Any] | None = None) -> dict[str, Any]:
         context = context or {}
+        direct = _direct_catalog_intent(user_text)
+        if direct is not None:
+            return validate_language_intent(direct, catalog=build_action_catalog()).as_dict()
         self._require_codex()
         prompt = _to_core_prompt(user_text, context)
         payload = self._run_codex(prompt, self.config.schema_dir / "language_intent.schema.json")
@@ -151,6 +154,48 @@ def _required_env(name: str) -> str:
     return value
 
 
+def _direct_catalog_intent(user_text: str) -> dict[str, Any] | None:
+    text = " ".join(str(user_text or "").lower().split())
+    catalog = build_action_catalog()
+    if "get_cpu_per_core_usage" in catalog and _mentions_per_core_cpu_usage(text):
+        return {
+            "intent": "task",
+            "reply": "CPU 코어별 사용률을 확인해볼게.",
+            "task_spec": _readonly_task("오렌지파이 CPU 코어별 사용률 확인", "get_cpu_per_core_usage", "각 CPU 코어별 사용률을 확인한다"),
+            "dev_task": None,
+            "approval": None,
+            "confidence": 0.98,
+            "requires_confirmation": False,
+            "clarifying_question": None,
+            "safety_notes": [],
+        }
+    return None
+
+
+def _mentions_per_core_cpu_usage(text: str) -> bool:
+    return (
+        ("cpu" in text or "시피유" in text or "프로세서" in text)
+        and ("코어" in text or "core" in text)
+        and ("사용률" in text or "사용량" in text or "usage" in text or "percent" in text)
+    )
+
+
+def _readonly_task(goal: str, action_id: str, success_criterion: str) -> dict[str, Any]:
+    return {
+        "goal": goal,
+        "target": "orangepi5",
+        "context": {"params": {"path": None, "limit": None, "model": None, "episodes": None, "service": None, "lines": None}},
+        "allowed_actions": [action_id],
+        "blocked_actions": [],
+        "success_criteria": [success_criterion],
+        "risk_level": "low",
+        "requires_approval": False,
+        "timeout_seconds": 30,
+        "mode": "readonly",
+        "rollback_plan": None,
+    }
+
+
 def _codex_command_prefix(codex_bin: str) -> list[str]:
     if os.name == "nt":
         return ["cmd.exe", "/d", "/c", codex_bin]
@@ -194,6 +239,9 @@ def _to_core_prompt(user_text: str, context: dict[str, Any]) -> str:
             "</example>",
             '<example input="오렌지파이 메모리 상태 어때?">',
             '{"intent":"task","reply":"메모리 상태를 확인해볼게.","task_spec":{"goal":"오렌지파이 메모리 상태 확인","target":"orangepi5","context":{"params":{"path":null,"limit":null,"model":null,"episodes":null,"service":null,"lines":null}},"allowed_actions":["get_memory_usage"],"blocked_actions":[],"success_criteria":["메모리 사용량을 확인한다"],"risk_level":"low","requires_approval":false,"timeout_seconds":30,"mode":"readonly","rollback_plan":null},"dev_task":null,"approval":null,"confidence":0.96,"requires_confirmation":false,"clarifying_question":null,"safety_notes":[]}',
+            "</example>",
+            '<example input="cpu 코어별 사용률 확인해줘">',
+            '{"intent":"task","reply":"CPU 코어별 사용률을 확인해볼게.","task_spec":{"goal":"오렌지파이 CPU 코어별 사용률 확인","target":"orangepi5","context":{"params":{"path":null,"limit":null,"model":null,"episodes":null,"service":null,"lines":null}},"allowed_actions":["get_cpu_per_core_usage"],"blocked_actions":[],"success_criteria":["각 CPU 코어별 사용률을 확인한다"],"risk_level":"low","requires_approval":false,"timeout_seconds":30,"mode":"readonly","rollback_plan":null},"dev_task":null,"approval":null,"confidence":0.97,"requires_confirmation":false,"clarifying_question":null,"safety_notes":[]}',
             "</example>",
             '<example input="모델 파일 잘 있어?">',
             '{"intent":"task","reply":"모델 파일이 있는지 확인해볼게.","task_spec":{"goal":"모델 파일 존재 확인","target":"orangepi5","context":{"params":{"path":"artifacts","limit":null,"model":null,"episodes":null,"service":null,"lines":null}},"allowed_actions":["list_artifacts"],"blocked_actions":[],"success_criteria":["모델 파일 목록을 확인한다"],"risk_level":"low","requires_approval":false,"timeout_seconds":30,"mode":"readonly","rollback_plan":null},"dev_task":null,"approval":null,"confidence":0.95,"requires_confirmation":false,"clarifying_question":null,"safety_notes":[]}',
