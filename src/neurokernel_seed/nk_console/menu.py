@@ -94,6 +94,51 @@ DASHBOARD_COMMANDS = (
 )
 
 
+ACTION_PROCESS_STEPS = {
+    "train": (
+        "world 학습용 features 경로를 확인합니다. NEUROKERNEL_TRAIN_FEATURES가 없으면 직접 입력해야 합니다.",
+        "features/manifest 스키마와 dataset gate를 검사합니다.",
+        "노트북에서 world model을 학습하고 test split 평가를 저장합니다.",
+        "ONNX로 내보내고 gate ablation 벤치를 실행합니다.",
+        "후보 run과 benchmark 결과를 artifacts/training_runs에 저장합니다.",
+    ),
+    "runtime-pipeline": (
+        "OrangePi harness DB를 로컬로 캐시합니다.",
+        "runtime replay를 만들고 runtime_features로 전처리합니다.",
+        "노트북 CUDA/CPU 설정으로 runtime_action 후보 모델을 학습합니다.",
+        "로컬 후보와 OrangePi 현행 runtime을 같은 features로 벤치합니다.",
+        "로컬 후보가 벤치에서 이기면 runtime 슬롯만 OrangePi에 배포합니다.",
+    ),
+    "runtime-compare": (
+        "로컬 runtime 후보 모델을 현재 runtime_features test split으로 벤치합니다.",
+        "OrangePi 현행 runtime 모델을 로컬로 복사해 같은 features로 벤치합니다.",
+        "score, 품질 gate, 스키마 호환성을 비교합니다.",
+        "비교 리포트를 artifacts/model_benchmarks/runtime_action에 저장합니다.",
+    ),
+    "deploy-all-best": (
+        "OrangePi 현행 world 모델을 캐시하고 world 최고 후보와 벤치 비교합니다.",
+        "OrangePi 현행 runtime 모델과 로컬 runtime 후보를 벤치 비교합니다.",
+        "world/runtime 중 로컬 후보가 이긴 슬롯만 골라 배포합니다.",
+        "통합 배포 리포트를 artifacts/model_benchmarks/deploy에 저장합니다.",
+    ),
+    "status": (
+        "OrangePi의 현재 world/runtime 슬롯을 조회합니다.",
+        "로컬 runtime 데이터와 후보 모델 상태를 확인합니다.",
+        "다음 추천 작업을 계산해 표시합니다.",
+    ),
+    "compare": (
+        "필요하면 OrangePi 현행 world 모델을 캐시하고 gate ablation 벤치를 실행합니다.",
+        "로컬 training_runs에서 최고 world 후보를 찾습니다.",
+        "현행 world와 최고 후보의 벤치 점수를 비교합니다.",
+    ),
+    "current-bench-all": (
+        "OrangePi 현행 world 모델을 로컬로 복사하고 gate ablation 벤치를 실행합니다.",
+        "OrangePi 현행 runtime 모델을 로컬로 복사하고 현재 runtime_features로 평가합니다.",
+        "벤치 환경, 모델 경로, 스키마 호환성, 점수를 JSON 원장에 저장합니다.",
+    ),
+}
+
+
 KNOWN_ACTIONS = {
     "data",
     "runtime-pipeline",
@@ -131,6 +176,10 @@ def normalize_action(action: str) -> str:
     return ACTION_ALIASES.get(action, action)
 
 
+def process_steps(action: str) -> tuple[str, ...]:
+    return ACTION_PROCESS_STEPS.get(normalize_action(action), ())
+
+
 def dashboard_action(raw: str) -> str | None:
     value = raw.split()[0].lower()
     for command in DASHBOARD_COMMANDS:
@@ -146,6 +195,7 @@ def build_menu_args(base: argparse.Namespace, action: str) -> argparse.Namespace
     runtime_replay = os.getenv("NEUROKERNEL_RUNTIME_REPLAY_OUT", "data/model_ready/runtime_replay.jsonl")
     runtime_features = os.getenv("NEUROKERNEL_RUNTIME_FEATURES_OUT", "data/model_ready/runtime_features.jsonl")
     runtime_model = os.getenv("NEUROKERNEL_RUNTIME_ACTION_MODEL_OUT", "artifacts/runtime_action_model.pt")
+    world_features = os.getenv("NEUROKERNEL_TRAIN_FEATURES")
     menu_args.run_name = None
     menu_args.model = None
     menu_args.out_dir = None
@@ -166,7 +216,7 @@ def build_menu_args(base: argparse.Namespace, action: str) -> argparse.Namespace
     menu_args.features_out = runtime_features
     menu_args.model_out = runtime_model
     menu_args.replay = runtime_replay
-    menu_args.features = runtime_features
+    menu_args.features = world_features if menu_args.action in {"check", "train", "data"} else runtime_features
     if menu_args.action == "runtime-data":
         menu_args.out = runtime_replay
     elif menu_args.action == "runtime-features":

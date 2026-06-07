@@ -79,6 +79,7 @@ def test_nk_dashboard_loops_until_exit(monkeypatch, capsys):
     assert result == 0
     assert calls.count("top") >= 1
     assert "NeuroKernel 벤치 기반 학습 콘솔" in output
+    assert "진행 프로세스" in output
     assert "비교" in output
     assert "종료" in output
 
@@ -119,6 +120,7 @@ def test_nk_menu_shows_primary_actions(monkeypatch):
     compare_runtime_args = nk_menu.build_menu_args(base, "runtime-compare")
     deploy_all_args = nk_menu.build_menu_args(base, "deploy-all-best")
     current_bench_args = nk_menu.build_menu_args(base, "current-bench-all")
+    world_train_args = nk_menu.build_menu_args(base, "train")
 
     assert pipeline_args.deploy_runtime is True
     assert pipeline_args.device == "cuda"
@@ -147,6 +149,9 @@ def test_nk_menu_shows_primary_actions(monkeypatch):
     assert deploy_all_args.model == "artifacts/runtime_action_model.pt"
     assert deploy_all_args.refresh_current_bench is True
     assert current_bench_args.features == "data/model_ready/runtime_features.jsonl"
+    assert world_train_args.features is None
+    assert nk_menu.process_steps("runtime-pipeline")[0].startswith("OrangePi")
+    assert nk_menu.process_steps("train")[0].startswith("world 학습용 features")
 
 
 def test_nk_parser_accepts_korean_runtime_shortcuts():

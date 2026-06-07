@@ -73,6 +73,7 @@ class DashboardController:
     def _run_menu_action(self, base_args: argparse.Namespace, action: str, raw: str) -> bool:
         menu_args = menu.build_menu_args(base_args, action)
         menu.apply_inline_value(menu_args, raw)
+        self._print_process(menu_args.action)
         try:
             self._ask_for_missing_args(menu_args)
             result = self._run_action(menu_args)
@@ -83,6 +84,15 @@ class DashboardController:
         self._print_result(menu_args.action, result)
         self._wait_for_enter()
         return True
+
+    def _print_process(self, action: str) -> None:
+        steps = menu.process_steps(action)
+        if not steps:
+            return
+        print()
+        print(self._style("진행 프로세스", "cyan"))
+        for index, step in enumerate(steps, start=1):
+            print(f"{index}. {step}")
 
     def _print_command_grid(self) -> None:
         print()
@@ -115,6 +125,8 @@ class DashboardController:
             return None
 
     def _ask_for_missing_args(self, args: argparse.Namespace) -> None:
+        if args.action in {"check", "train"} and not getattr(args, "features", None):
+            args.features = self._required_prompt("world features 경로")
         if args.action in {"check", "train"} and not getattr(args, "run_name", None):
             args.run_name = self._optional_prompt("실행 이름")
         elif args.action in {"deploy", "deploy-use", "use"} and not getattr(args, "run_name", None):
