@@ -2,7 +2,8 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _isolate_runtime_action_registry(monkeypatch):
+def _isolate_runtime_action_registry(monkeypatch, tmp_path):
     # ?? ???? ?? ??? ?? action registry? ???? ? ??.
     # registry ??? ???? ???? ??? ??? ?? ???.
     monkeypatch.delenv("NEUROKERNEL_ACTION_REGISTRY", raising=False)
+    monkeypatch.setenv("NEUROKERNEL_MODEL_BENCHMARK_DIR", str(tmp_path / "model_benchmarks"))
