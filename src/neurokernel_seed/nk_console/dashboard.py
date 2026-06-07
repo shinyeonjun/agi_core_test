@@ -64,8 +64,8 @@ class DashboardController:
 
     def print_dashboard(self, args: argparse.Namespace) -> None:
         print()
-        print(self._style("NK", "cyan") + "  NeuroKernel 자동 학습 콘솔")
-        print("OrangePi 데이터를 모으고, 노트북 CUDA로 학습한 뒤, 품질 통과 모델만 배포합니다.")
+        print(self._style("NK", "cyan") + "  NeuroKernel 벤치 기반 학습 콘솔")
+        print("OrangePi 데이터와 노트북 CUDA 학습을 연결하고, 현행 모델보다 벤치에서 이긴 모델만 배포합니다.")
         self._print_command_grid()
         print()
         self._print_status_snapshot(args)
@@ -90,8 +90,8 @@ class DashboardController:
         for command in menu.DASHBOARD_COMMANDS:
             print(f"{command.key:<4} {command.label:<10} {command.hint}")
         print()
-        print("빠른 입력  오토파일럿 | 시드 | 학습만 | 런타임배포 | 상태 | 종료")
-        print("직접 실행  nk 오토파일럿 --device cuda  또는  nk runtime-train --device cuda")
+        print("빠른 입력  월드학습 | 런타임학습 | 런타임비교 | 월드배포 | 상태 | 종료")
+        print("직접 실행  nk 런타임학습 --device cuda  또는  nk runtime-compare --device cuda")
 
     def _print_status_snapshot(self, args: argparse.Namespace) -> None:
         current = self._probe(args, "current")
@@ -179,7 +179,7 @@ def _recommend_next_action(local: dict[str, str], runtime: dict[str, Any]) -> st
     local_rows = _rows_from_text(local["model"])
     if local_rows and remote_rows is not None and local_rows > remote_rows:
         return "런타임배포: 로컬 후보가 원격보다 최신"
-    return "오토파일럿: 데이터 갱신 후 품질 통과 시 자동 배포"
+    return "런타임학습: 데이터 갱신, 학습, 벤치 비교 후 승리 시 자동 배포"
 
 
 def _remote_runtime_rows(runtime: dict[str, Any]) -> int | None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -23,12 +24,15 @@ from neurokernel_seed.model.release import (
     list_model_releases,
     train_deploy_model,
 )
-from neurokernel_seed.model.runtime_action import train_runtime_action_model
+from neurokernel_seed.model.runtime_action import eval_runtime_action_checkpoint, train_runtime_action_model
 from neurokernel_seed.nk_console import menu as nk_menu
 from neurokernel_seed.nk_console.dashboard import DashboardController
 from neurokernel_seed.replay.runtime_dataset import RuntimeReplayEtlConfig, run_runtime_replay_etl
 from neurokernel_seed.replay.runtime_features import check_runtime_feature_gates, export_runtime_features, validate_runtime_features
 from neurokernel_seed.replay.slot_dataset import check_slot_dataset_gates, validate_slot_features
+
+
+MODEL_BENCHMARK_SCHEMA_VERSION = "neurokernel-model-benchmark-v1"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -58,12 +62,12 @@ def _build_parser() -> argparse.ArgumentParser:
             "  nk 런타임배포 --model artifacts/runtime_action_model.pt\n"
             "  nk current                       world/runtime 슬롯 상태 확인\n"
             "\n"
-            "영문 명령도 계속 지원합니다: runtime-seed, runtime-auto, runtime-cycle, deploy-runtime, deploy-use, bench-current, top"
+            "영문 명령도 계속 지원합니다: runtime-seed, runtime-auto, runtime-cycle, runtime-bench, runtime-compare, deploy-runtime, deploy-use, bench-current, top"
         ),
     )
     sub = parser.add_subparsers(dest="action", metavar="명령")
 
-    for name in ("runtime-pipeline", "autopilot", "오토파일럿", "풀자동", "전체자동"):
+    for name in ("runtime-pipeline", "autopilot", "오토파일럿", "런타임학습", "풀자동", "전체자동"):
         item = sub.add_parser(name)
         _add_runtime_pipeline_options(item)
 
@@ -108,9 +112,22 @@ def _build_parser() -> argparse.ArgumentParser:
         item.add_argument("--min-actions", type=int, default=1)
         item.add_argument("--json", action="store_true")
 
-    for name in ("runtime-train", "사용학습", "현실학습", "학습만", "런타임학습"):
+    for name in ("runtime-train", "사용학습", "현실학습", "학습만", "런타임학습만"):
         item = sub.add_parser(name)
         _add_runtime_train_options(item)
+
+    for name in ("runtime-bench", "bench-runtime", "런타임벤치"):
+        item = sub.add_parser(name)
+        _add_runtime_benchmark_options(item)
+
+    for name in ("runtime-bench-current", "bench-current-runtime", "현재런타임벤치"):
+        item = sub.add_parser(name)
+        _add_runtime_benchmark_options(item)
+        _add_remote_options(item)
+
+    for name in ("runtime-compare", "compare-runtime", "런타임비교"):
+        item = sub.add_parser(name)
+        _add_runtime_compare_options(item)
 
     for name in ("deploy-runtime", "runtime-deploy", "runtime-use", "런타임배포"):
         item = sub.add_parser(name)
@@ -163,6 +180,8 @@ def _build_parser() -> argparse.ArgumentParser:
         _add_remote_options(item)
         item.add_argument("--run-dir")
         item.add_argument("--limit", type=int, default=5)
+        item.add_argument("--refresh-current-bench", action="store_true")
+        item.add_argument("--min-delta", type=float, default=float(os.getenv("NEUROKERNEL_WORLD_BENCH_MIN_DELTA", "0.005")))
         item.add_argument("--json", action="store_true")
 
     for name in ("top", "순위"):
@@ -245,6 +264,8 @@ def _add_runtime_pipeline_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-reward-mae", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MAX_REWARD_MAE", "0.35")))
     parser.set_defaults(min_actions=4)
     parser.add_argument("--min-known-success-rows", type=int, default=int(os.getenv("NEUROKERNEL_RUNTIME_MIN_KNOWN_SUCCESS_ROWS", "5")))
+    parser.add_argument("--benchmark-split", choices=["train", "test"], default=os.getenv("NEUROKERNEL_RUNTIME_BENCH_SPLIT", "test"))
+    parser.add_argument("--min-delta", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_BENCH_MIN_DELTA", "0.01")))
     parser.add_argument("--force-deploy", action="store_true")
 
 
@@ -286,6 +307,33 @@ def _add_runtime_train_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--patience", type=int, default=20)
     parser.add_argument("--min-rows", type=int, default=10)
     parser.add_argument("--min-actions", type=int, default=1)
+    parser.add_argument("--json", action="store_true")
+
+
+def _add_runtime_benchmark_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--model", default=os.getenv("NEUROKERNEL_RUNTIME_ACTION_MODEL_OUT", "artifacts/runtime_action_model.pt"))
+    parser.add_argument("--features", default=os.getenv("NEUROKERNEL_RUNTIME_FEATURES_OUT", "data/model_ready/runtime_features.jsonl"))
+    parser.add_argument("--split", choices=["train", "test"], default=os.getenv("NEUROKERNEL_RUNTIME_BENCH_SPLIT", "test"))
+    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    parser.add_argument("--out-dir", default=os.getenv("NEUROKERNEL_MODEL_BENCHMARK_DIR", "artifacts/model_benchmarks"))
+    parser.add_argument("--candidate-kind", default="local_candidate")
+    parser.add_argument("--min-success-accuracy", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MIN_SUCCESS_ACCURACY", "0.75")))
+    parser.add_argument("--max-reward-mae", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MAX_REWARD_MAE", "0.35")))
+    parser.add_argument("--min-known-success-rows", type=int, default=int(os.getenv("NEUROKERNEL_RUNTIME_MIN_KNOWN_SUCCESS_ROWS", "5")))
+    parser.add_argument("--json", action="store_true")
+
+
+def _add_runtime_compare_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--model", default=os.getenv("NEUROKERNEL_RUNTIME_ACTION_MODEL_OUT", "artifacts/runtime_action_model.pt"))
+    parser.add_argument("--features", default=os.getenv("NEUROKERNEL_RUNTIME_FEATURES_OUT", "data/model_ready/runtime_features.jsonl"))
+    parser.add_argument("--split", choices=["train", "test"], default=os.getenv("NEUROKERNEL_RUNTIME_BENCH_SPLIT", "test"))
+    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    parser.add_argument("--out-dir", default=os.getenv("NEUROKERNEL_MODEL_BENCHMARK_DIR", "artifacts/model_benchmarks"))
+    parser.add_argument("--min-success-accuracy", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MIN_SUCCESS_ACCURACY", "0.75")))
+    parser.add_argument("--max-reward-mae", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MAX_REWARD_MAE", "0.35")))
+    parser.add_argument("--min-known-success-rows", type=int, default=int(os.getenv("NEUROKERNEL_RUNTIME_MIN_KNOWN_SUCCESS_ROWS", "5")))
+    parser.add_argument("--min-delta", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_BENCH_MIN_DELTA", "0.01")))
+    _add_remote_options(parser)
     parser.add_argument("--json", action="store_true")
 
 
@@ -355,6 +403,12 @@ def _run_action(args: argparse.Namespace) -> dict[str, Any]:
         return _run_runtime_features_action(args)
     if args.action == "runtime-train":
         return _run_runtime_training_action(args)
+    if args.action == "runtime-bench":
+        return _run_runtime_benchmark_action(args)
+    if args.action == "runtime-bench-current":
+        return _run_runtime_benchmark_current_action(args)
+    if args.action == "runtime-compare":
+        return _run_runtime_compare_action(args)
     if args.action == "deploy-runtime":
         return _run_deploy_runtime_action(args)
     if args.action == "check":
@@ -619,10 +673,47 @@ def _run_runtime_pipeline_action(args: argparse.Namespace) -> dict[str, Any]:
         )
     )
     quality = _runtime_quality_gate(train_result, args)
+    benchmark_result = None
+    compare_result = None
     deploy_result = None
     current_after = None
     deploy_requested = bool(getattr(args, "deploy_runtime", True))
-    if deploy_requested and (quality["passed"] or bool(getattr(args, "force_deploy", False))):
+    if deploy_requested:
+        compare_result = _run_runtime_compare_action(
+            argparse.Namespace(
+                action="runtime-compare",
+                model=str(train_result.get("checkpoint") or model_out),
+                features=str(features_out),
+                split=getattr(args, "benchmark_split", "test"),
+                device=getattr(args, "device", "auto"),
+                out_dir=getattr(args, "benchmark_out_dir", os.getenv("NEUROKERNEL_MODEL_BENCHMARK_DIR", "artifacts/model_benchmarks")),
+                remote_host=getattr(args, "remote_host", None),
+                remote_project=getattr(args, "remote_project", None),
+                ssh_connect_timeout=getattr(args, "ssh_connect_timeout", 10),
+                min_success_accuracy=getattr(args, "min_success_accuracy", 0.75),
+                max_reward_mae=getattr(args, "max_reward_mae", 0.35),
+                min_known_success_rows=getattr(args, "min_known_success_rows", 5),
+                min_delta=getattr(args, "min_delta", 0.01),
+            )
+        )
+        benchmark_result = compare_result.get("local")
+    else:
+        benchmark_result = _run_runtime_benchmark_action(
+            argparse.Namespace(
+                action="runtime-bench",
+                model=str(train_result.get("checkpoint") or model_out),
+                features=str(features_out),
+                split=getattr(args, "benchmark_split", "test"),
+                device=getattr(args, "device", "auto"),
+                out_dir=getattr(args, "benchmark_out_dir", os.getenv("NEUROKERNEL_MODEL_BENCHMARK_DIR", "artifacts/model_benchmarks")),
+                candidate_kind="local_candidate",
+                min_success_accuracy=getattr(args, "min_success_accuracy", 0.75),
+                max_reward_mae=getattr(args, "max_reward_mae", 0.35),
+                min_known_success_rows=getattr(args, "min_known_success_rows", 5),
+            )
+        )
+    deploy_allowed = bool(((compare_result or {}).get("decision") or {}).get("local_wins")) or bool(getattr(args, "force_deploy", False))
+    if deploy_requested and (quality["passed"] or bool(getattr(args, "force_deploy", False))) and deploy_allowed:
         deploy_result = _run_deploy_runtime_action(
             argparse.Namespace(
                 action="deploy-runtime",
@@ -643,10 +734,10 @@ def _run_runtime_pipeline_action(args: argparse.Namespace) -> dict[str, Any]:
 
     status = "deployed" if deploy_result else "trained"
     if deploy_requested and not deploy_result:
-        status = "blocked_by_quality_gate"
+        status = "blocked_by_quality_gate" if not quality["passed"] and not bool(getattr(args, "force_deploy", False)) else "blocked_by_benchmark_compare"
     report = {
         "status": status,
-        "pipeline": "runtime_action_autopilot_v1",
+        "pipeline": "runtime_action_autopilot_v2_benchmark_gated",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "quality": quality,
         "steps": {
@@ -654,6 +745,8 @@ def _run_runtime_pipeline_action(args: argparse.Namespace) -> dict[str, Any]:
             "runtime_data": data_result,
             "runtime_features": feature_result,
             "runtime_train": train_result,
+            "runtime_benchmark": benchmark_result,
+            "runtime_compare": compare_result,
             "runtime_deploy": deploy_result,
             "current_after": current_after,
         },
@@ -1055,6 +1148,294 @@ def _run_runtime_training_action(args: argparse.Namespace) -> dict[str, Any]:
     return {"status": "completed", "features": str(features), "out": str(out), **result}
 
 
+def _run_runtime_benchmark_action(args: argparse.Namespace) -> dict[str, Any]:
+    model = Path(getattr(args, "model", None) or os.getenv("NEUROKERNEL_RUNTIME_ACTION_MODEL_OUT", "artifacts/runtime_action_model.pt"))
+    features = Path(getattr(args, "features", None) or os.getenv("NEUROKERNEL_RUNTIME_FEATURES_OUT", "data/model_ready/runtime_features.jsonl"))
+    if not model.exists():
+        raise ModelReleaseError(f"runtime 모델 없음: {model}")
+    if not features.exists():
+        raise ModelReleaseError(f"runtime features 없음: {features}")
+    stamp = _utc_stamp()
+    candidate_kind = str(getattr(args, "candidate_kind", None) or "local_candidate")
+    record_dir = _runtime_benchmark_root(args) / f"{_safe_token(candidate_kind)}_{_safe_token(model.stem)}_{stamp}"
+    record = _build_runtime_benchmark_record(model=model, features=features, args=args, candidate_kind=candidate_kind)
+    return _write_runtime_benchmark_record(record, record_dir)
+
+
+def _run_runtime_benchmark_current_action(args: argparse.Namespace) -> dict[str, Any]:
+    remote_host = getattr(args, "remote_host", None) or os.getenv("NEUROKERNEL_EDGE_HOST", "orangepi5")
+    remote_project = (getattr(args, "remote_project", None) or os.getenv("NEUROKERNEL_EDGE_PROJECT", "/home/ubuntu/projects/neurokernel-agi-seed")).rstrip("/")
+    stamp = _utc_stamp()
+    record_dir = _runtime_benchmark_root(args) / f"edge_current_{stamp}"
+    record_dir.mkdir(parents=True, exist_ok=True)
+    local_model = record_dir / "current_runtime_action_model.pt"
+    local_manifest = record_dir / "current_runtime_action_model.manifest.json"
+    _copy_remote_file(str(remote_host), f"{remote_project}/artifacts/current_runtime_action_model.pt", local_model)
+    _copy_remote_file(str(remote_host), f"{remote_project}/artifacts/current_runtime_action_model.manifest.json", local_manifest)
+    record = _build_runtime_benchmark_record(
+        model=local_model,
+        features=Path(getattr(args, "features", None) or os.getenv("NEUROKERNEL_RUNTIME_FEATURES_OUT", "data/model_ready/runtime_features.jsonl")),
+        args=args,
+        candidate_kind="edge_current",
+        remote={"remote_host": remote_host, "remote_project": remote_project},
+    )
+    return _write_runtime_benchmark_record(record, record_dir)
+
+
+def _run_runtime_compare_action(args: argparse.Namespace) -> dict[str, Any]:
+    local_benchmark = _run_runtime_benchmark_action(
+        argparse.Namespace(
+            **{
+                **vars(args),
+                "action": "runtime-bench",
+                "candidate_kind": "local_candidate",
+            }
+        )
+    )
+    current_benchmark = _run_runtime_benchmark_current_action(
+        argparse.Namespace(
+            **{
+                **vars(args),
+                "action": "runtime-bench-current",
+                "candidate_kind": "edge_current",
+            }
+        )
+    )
+    decision = _compare_runtime_benchmarks(
+        local_benchmark,
+        current_benchmark,
+        min_delta=float(getattr(args, "min_delta", 0.01)),
+    )
+    report = {
+        "schema_version": MODEL_BENCHMARK_SCHEMA_VERSION,
+        "slot": "runtime_action",
+        "status": "completed",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "local": local_benchmark,
+        "current": current_benchmark,
+        "decision": decision,
+        "needs_deploy": bool(decision.get("local_wins")),
+    }
+    report_path = _write_runtime_compare_report(report, _runtime_benchmark_root(args))
+    return {**report, "report": str(report_path)}
+
+
+def _build_runtime_benchmark_record(
+    *,
+    model: Path,
+    features: Path,
+    args: argparse.Namespace,
+    candidate_kind: str,
+    remote: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    feature_fingerprint = _runtime_feature_fingerprint(features)
+    split = str(getattr(args, "split", None) or getattr(args, "benchmark_split", None) or "test")
+    record: dict[str, Any] = {
+        "schema_version": MODEL_BENCHMARK_SCHEMA_VERSION,
+        "slot": "runtime_action",
+        "candidate_kind": candidate_kind,
+        "status": "completed",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "model": str(model),
+        "manifest": str(model.with_suffix(".manifest.json")),
+        "features": str(features),
+        "feature_fingerprint": feature_fingerprint,
+        "split": split,
+        "remote": remote or {},
+    }
+    try:
+        metrics = eval_runtime_action_checkpoint(model, features, split=split, device=str(getattr(args, "device", "auto")))
+    except Exception as exc:  # noqa: BLE001 - benchmark records incompatibility instead of hiding it.
+        record.update(
+            {
+                "status": "not_comparable",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "score": None,
+                "quality": {"passed": False, "summary": "벤치 불가"},
+            }
+        )
+        return record
+    score = _runtime_benchmark_score(metrics)
+    record.update(
+        {
+            "metrics": metrics,
+            "score": score["score"],
+            "score_components": score,
+            "quality": _runtime_benchmark_quality(metrics, args),
+        }
+    )
+    return record
+
+
+def _runtime_benchmark_score(metrics: dict[str, Any]) -> dict[str, float]:
+    success = _as_float(metrics.get("success_accuracy"))
+    failure = _as_float(metrics.get("failure_present_accuracy"))
+    reward_quality = 1.0 / (1.0 + max(0.0, _as_float(metrics.get("reward_mae"))))
+    duration_quality = 1.0 / (1.0 + max(0.0, _as_float(metrics.get("duration_log1p_mae"))))
+    score = (0.45 * success) + (0.20 * failure) + (0.25 * reward_quality) + (0.10 * duration_quality)
+    return {
+        "score": round(score, 6),
+        "success_accuracy": success,
+        "failure_present_accuracy": failure,
+        "reward_quality": reward_quality,
+        "duration_quality": duration_quality,
+    }
+
+
+def _runtime_benchmark_quality(metrics: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    success_accuracy = _as_float(metrics.get("success_accuracy"))
+    reward_mae = _as_float(metrics.get("reward_mae"))
+    known_success_rows = _as_float(metrics.get("known_success_rows"))
+    min_success = float(getattr(args, "min_success_accuracy", 0.75))
+    max_reward = float(getattr(args, "max_reward_mae", 0.35))
+    min_known = int(getattr(args, "min_known_success_rows", 5))
+    checks = {
+        "success_accuracy": {"passed": success_accuracy >= min_success, "actual": success_accuracy, "threshold": min_success},
+        "reward_mae": {"passed": reward_mae <= max_reward, "actual": reward_mae, "threshold": max_reward},
+        "known_success_rows": {"passed": known_success_rows >= min_known, "actual": known_success_rows, "threshold": min_known},
+    }
+    passed = all(item["passed"] for item in checks.values())
+    return {"passed": passed, "summary": "벤치 통과" if passed else "벤치 미통과", "checks": checks}
+
+
+def _compare_runtime_benchmarks(local: dict[str, Any], current: dict[str, Any], *, min_delta: float) -> dict[str, Any]:
+    local_passed = bool((local.get("quality") or {}).get("passed"))
+    current_passed = bool((current.get("quality") or {}).get("passed"))
+    local_score = local.get("score")
+    current_score = current.get("score")
+    if not local_passed:
+        return {
+            "local_wins": False,
+            "reason": "local_benchmark_failed",
+            "local_score": local_score,
+            "current_score": current_score,
+            "min_delta": min_delta,
+        }
+    if current.get("status") != "completed":
+        return {
+            "local_wins": True,
+            "reason": "current_not_comparable",
+            "local_score": local_score,
+            "current_score": current_score,
+            "min_delta": min_delta,
+        }
+    if not current_passed:
+        return {
+            "local_wins": True,
+            "reason": "current_benchmark_failed",
+            "local_score": local_score,
+            "current_score": current_score,
+            "min_delta": min_delta,
+        }
+    local_value = _as_float(local_score)
+    current_value = _as_float(current_score)
+    delta = local_value - current_value
+    return {
+        "local_wins": delta >= min_delta,
+        "reason": "local_score_better" if delta >= min_delta else "current_score_not_worse",
+        "local_score": local_value,
+        "current_score": current_value,
+        "delta": delta,
+        "min_delta": min_delta,
+    }
+
+
+def _runtime_feature_fingerprint(features: Path) -> dict[str, Any]:
+    manifest_path = features.with_suffix(features.suffix + ".manifest.json")
+    payload = _read_json(manifest_path)
+    action_vocab = payload.get("action_vocab") or []
+    comparable = {
+        "schema_version": payload.get("schema_version"),
+        "input_dim": payload.get("input_dim"),
+        "target_dim": payload.get("target_dim"),
+        "target_names": payload.get("target_names"),
+        "action_vocab": action_vocab,
+        "numeric_feature_names": payload.get("numeric_feature_names"),
+    }
+    digest = hashlib.sha256(json.dumps(comparable, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    return {
+        "manifest": str(manifest_path),
+        "schema_version": payload.get("schema_version"),
+        "rows": payload.get("rows"),
+        "input_dim": payload.get("input_dim"),
+        "target_dim": payload.get("target_dim"),
+        "action_count": len(action_vocab),
+        "sha256": digest,
+    }
+
+
+def _runtime_benchmark_root(args: argparse.Namespace) -> Path:
+    return Path(getattr(args, "out_dir", None) or os.getenv("NEUROKERNEL_MODEL_BENCHMARK_DIR", "artifacts/model_benchmarks")) / "runtime_action"
+
+
+def _write_runtime_benchmark_record(record: dict[str, Any], record_dir: Path) -> dict[str, Any]:
+    record_dir.mkdir(parents=True, exist_ok=True)
+    record_path = record_dir / "benchmark.json"
+    payload = {**record, "benchmark_path": str(record_path)}
+    record_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    latest_path = record_dir.parent / f"latest_runtime_action_{_safe_token(str(record.get('candidate_kind') or 'candidate'))}.json"
+    latest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return payload
+
+
+def _write_runtime_compare_report(report: dict[str, Any], root: Path) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    stamp = _utc_stamp()
+    report_path = root / f"runtime_action_compare_{stamp}.json"
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    (root / "latest_runtime_action_compare.json").write_text(
+        json.dumps({**report, "report": str(report_path)}, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return report_path
+
+
+def _write_world_benchmark_record(
+    *,
+    candidate_kind: str,
+    model_path: Path,
+    result: dict[str, Any],
+    source_dir: Path,
+    release_name: str,
+    remote: dict[str, Any] | None = None,
+) -> Path:
+    aggregate = result.get("aggregate") or {}
+    macro = aggregate.get("macro_success_rate") or {}
+    score = _as_float(macro.get("hybrid_veto"))
+    record = {
+        "schema_version": MODEL_BENCHMARK_SCHEMA_VERSION,
+        "slot": "world",
+        "candidate_kind": candidate_kind,
+        "status": "completed",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "release_name": release_name,
+        "model": str(model_path),
+        "source_dir": str(source_dir),
+        "remote": remote or {},
+        "score": score,
+        "score_components": {
+            "hybrid_veto_success": score,
+            "hybrid_success": _as_float(macro.get("hybrid")),
+            "prior_success": _as_float(macro.get("prior_only")),
+            "model_only_success": _as_float(macro.get("model_only")),
+            "hybrid_veto_gain_over_prior": _as_float(aggregate.get("hybrid_veto_gain_over_prior")),
+            "model_needed_signal_group_count": int(aggregate.get("model_needed_signal_group_count") or 0),
+        },
+        "benchmark": result,
+    }
+    root = Path(os.getenv("NEUROKERNEL_MODEL_BENCHMARK_DIR", "artifacts/model_benchmarks")) / "world"
+    stamp = _utc_stamp()
+    record_dir = root / f"{_safe_token(candidate_kind)}_{_safe_token(release_name)}_{stamp}"
+    record_dir.mkdir(parents=True, exist_ok=True)
+    record_path = record_dir / "benchmark.json"
+    payload = {**record, "benchmark_path": str(record_path)}
+    record_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    latest_path = root / f"latest_world_{_safe_token(candidate_kind)}.json"
+    latest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return record_path
+
+
 def _run_deploy_runtime_action(args: argparse.Namespace) -> dict[str, Any]:
     model = Path(getattr(args, "model", None) or os.getenv("NEUROKERNEL_RUNTIME_ACTION_MODEL_OUT", "artifacts/runtime_action_model.pt"))
     manifest = model.with_suffix(".manifest.json")
@@ -1204,7 +1585,14 @@ def _run_benchmark_action(args: argparse.Namespace) -> dict[str, Any]:
     )
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "gate_ablation_result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-    return result
+    benchmark_record = _write_world_benchmark_record(
+        candidate_kind="local_candidate",
+        model_path=model_path,
+        result=result,
+        source_dir=run_dir,
+        release_name=getattr(args, "run_name", None) or model_path.stem,
+    )
+    return {**result, "benchmark_record": str(benchmark_record)}
 
 
 def _run_benchmark_current_action(args: argparse.Namespace) -> dict[str, Any]:
@@ -1235,6 +1623,14 @@ def _run_benchmark_current_action(args: argparse.Namespace) -> dict[str, Any]:
     )
     result_path = benchmark_dir / "gate_ablation_result.json"
     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    benchmark_record = _write_world_benchmark_record(
+        candidate_kind="edge_current",
+        model_path=benchmark_dir / "world_model.onnx",
+        result=result,
+        source_dir=benchmark_dir,
+        release_name=release_name,
+        remote={"remote_host": remote_host, "remote_project": remote_project},
+    )
     manifest = {
         "status": "completed",
         "source": "orangepi_current_model",
@@ -1243,6 +1639,7 @@ def _run_benchmark_current_action(args: argparse.Namespace) -> dict[str, Any]:
         "remote_project": remote_project,
         "run_dir": str(benchmark_dir),
         "gate_ablation_result": str(result_path),
+        "benchmark_record": str(benchmark_record),
     }
     (benchmark_dir / "current_core_benchmark_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     return manifest | {"benchmark": result}
@@ -1366,14 +1763,26 @@ def _run_compare(args: argparse.Namespace) -> dict[str, Any]:
     current_payload = current.get("current") or {}
     current_name = _current_name(current_payload)
     best_name = best.get("run_name") if best else None
+    current_benchmark = None
+    if bool(getattr(args, "refresh_current_bench", False)):
+        current_benchmark = _run_benchmark_current_action(args)
+    else:
+        current_benchmark = _latest_world_current_benchmark(current_name)
+    decision = _compare_world_benchmark(best, current_benchmark, min_delta=float(getattr(args, "min_delta", 0.005)))
+    if decision.get("comparable"):
+        needs_deploy = bool(best_name and current_name != best_name and decision.get("local_wins"))
+    else:
+        needs_deploy = bool(best_name and current_name != best_name)
     return {
         "status": "ok",
         "current": current,
         "current_name": current_name,
+        "current_benchmark": current_benchmark,
         "top": top,
         "best": best,
         "best_name": best_name,
-        "needs_deploy": bool(best_name and current_name != best_name),
+        "benchmark_decision": decision,
+        "needs_deploy": needs_deploy,
     }
 
 
@@ -1395,6 +1804,22 @@ def _default_current_bench_dir(release_name: str) -> Path:
     run_root = Path(os.getenv("NEUROKERNEL_TRAIN_RUN_DIR", "artifacts/training_runs"))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return run_root / f"current_core_{release_name}_{stamp}"
+
+
+def _utc_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _safe_token(value: str) -> str:
+    token = "".join(char if char.isalnum() or char in "._-" else "_" for char in str(value))
+    return token.strip("._-") or "unknown"
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 def _copy_remote_file(remote_host: str, remote_path: str, local_path: Path) -> None:
@@ -1506,6 +1931,42 @@ def _top_sort_key(item: dict[str, Any]) -> tuple[float, int, float]:
     return (item["hybrid_veto_success"], item["model_needed_signal_group_count"], item["hybrid_veto_gain_over_prior"])
 
 
+def _latest_world_current_benchmark(current_name: str) -> dict[str, Any] | None:
+    root = Path(os.getenv("NEUROKERNEL_MODEL_BENCHMARK_DIR", "artifacts/model_benchmarks")) / "world"
+    latest = _read_json(root / "latest_world_edge_current.json")
+    if latest:
+        release_name = str(latest.get("release_name") or "")
+        if not current_name or release_name == current_name or current_name == "모름":
+            return latest
+    return None
+
+
+def _compare_world_benchmark(best: dict[str, Any] | None, current_benchmark: dict[str, Any] | None, *, min_delta: float) -> dict[str, Any]:
+    if not best:
+        return {"comparable": False, "local_wins": False, "reason": "no_local_world_candidate", "min_delta": min_delta}
+    best_score = _as_float(best.get("hybrid_veto_success"))
+    if not current_benchmark:
+        return {
+            "comparable": False,
+            "local_wins": True,
+            "reason": "current_world_benchmark_missing",
+            "best_score": best_score,
+            "current_score": None,
+            "min_delta": min_delta,
+        }
+    current_score = _as_float(current_benchmark.get("score"))
+    delta = best_score - current_score
+    return {
+        "comparable": True,
+        "local_wins": delta >= min_delta,
+        "reason": "local_score_better" if delta >= min_delta else "current_score_not_worse",
+        "best_score": best_score,
+        "current_score": current_score,
+        "delta": delta,
+        "min_delta": min_delta,
+    }
+
+
 def _as_float(value: Any) -> float:
     try:
         return float(value)
@@ -1532,6 +1993,12 @@ def _print_result(action: str, result: dict[str, Any], *, json_mode: bool) -> No
         _print_runtime_features(result)
     elif action == "runtime-train":
         _print_runtime_train(result)
+    elif action == "runtime-bench":
+        _print_runtime_bench(result)
+    elif action == "runtime-bench-current":
+        _print_runtime_bench(result)
+    elif action == "runtime-compare":
+        _print_runtime_compare(result)
     elif action == "deploy-runtime":
         _print_deploy_runtime(result)
     elif action == "check":
@@ -1609,8 +2076,9 @@ def _print_runtime_pipeline(result: dict[str, Any]) -> None:
         "deployed": "배포 완료",
         "trained": "학습 완료",
         "blocked_by_quality_gate": "품질 보류",
+        "blocked_by_benchmark_compare": "벤치 보류",
     }.get(status, status)
-    print(_ok("오토파일럿", label) if status != "blocked_by_quality_gate" else _warn("오토파일럿", label))
+    print(_ok("오토파일럿", label) if status not in {"blocked_by_quality_gate", "blocked_by_benchmark_compare"} else _warn("오토파일럿", label))
     steps = result.get("steps") or {}
     data = steps.get("runtime_data") or {}
     features = steps.get("runtime_features") or {}
@@ -1629,11 +2097,17 @@ def _print_runtime_pipeline(result: dict[str, Any]) -> None:
     for name, item in (quality.get("checks") or {}).items():
         mark = "통과" if item.get("passed") else "미통과"
         print(_kv(f" - {name}", f"{mark} actual={item.get('actual')} threshold={item.get('threshold')}"))
+    compare = steps.get("runtime_compare") or {}
+    if compare:
+        decision = compare.get("decision") or {}
+        print(_kv("벤치", f"local={decision.get('local_score')} current={decision.get('current_score')} reason={decision.get('reason')}"))
     deploy = steps.get("runtime_deploy") or {}
     if deploy:
         print(_kv("배포", deploy.get("remote_model")))
     elif status == "blocked_by_quality_gate":
         print(_kv("배포", "보류됨. --force-deploy를 쓰면 강제 배포 가능"))
+    elif status == "blocked_by_benchmark_compare":
+        print(_kv("배포", "보류됨. 현행 모델이 벤치에서 밀리지 않음"))
     print(_kv("리포트", result.get("report")))
 
 
@@ -1703,6 +2177,33 @@ def _print_runtime_train(result: dict[str, Any]) -> None:
     if test:
         print(_kv("성공률", f"{float(test.get('success_accuracy', 0.0)):.3f}"))
         print(_kv("보상오차", f"{float(test.get('reward_mae', 0.0)):.3f}"))
+
+
+def _print_runtime_bench(result: dict[str, Any]) -> None:
+    passed = bool((result.get("quality") or {}).get("passed"))
+    label = "통과" if passed else result.get("status", "미통과")
+    print(_ok("런타임벤치", label) if passed else _warn("런타임벤치", label))
+    print(_kv("후보", result.get("candidate_kind")))
+    print(_kv("점수", result.get("score")))
+    metrics = result.get("metrics") or {}
+    if metrics:
+        print(_kv("성공률", f"{_as_float(metrics.get('success_accuracy')):.3f}"))
+        print(_kv("보상오차", f"{_as_float(metrics.get('reward_mae')):.3f}"))
+    if result.get("error"):
+        print(_kv("이유", result.get("error")))
+    print(_kv("기록", result.get("benchmark_path")))
+
+
+def _print_runtime_compare(result: dict[str, Any]) -> None:
+    decision = result.get("decision") or {}
+    print(_style("런타임비교", "cyan"))
+    print(_kv("로컬", decision.get("local_score")))
+    print(_kv("현재", decision.get("current_score")))
+    if "delta" in decision:
+        print(_kv("차이", f"{_as_float(decision.get('delta')):.6f}"))
+    print(_kv("판단", decision.get("reason")))
+    print(_kv("배포", "필요" if result.get("needs_deploy") else "보류"))
+    print(_kv("기록", result.get("report")))
 
 
 def _print_deploy_runtime(result: dict[str, Any]) -> None:

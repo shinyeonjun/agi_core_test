@@ -47,6 +47,8 @@ def test_nk_help_exposes_menu_commands():
     assert "runtime-seed" in help_text
     assert "runtime-auto" in help_text
     assert "runtime-cycle" in help_text
+    assert "runtime-bench" in help_text
+    assert "runtime-compare" in help_text
     assert "deploy-use" in help_text
     assert "top" in help_text
 
@@ -74,7 +76,7 @@ def test_nk_dashboard_loops_until_exit(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert result == 0
     assert calls.count("top") >= 1
-    assert "NeuroKernel 자동 학습 콘솔" in output
+    assert "NeuroKernel 벤치 기반 학습 콘솔" in output
     assert "비교" in output
     assert "종료" in output
 
@@ -86,18 +88,20 @@ def test_nk_menu_shows_primary_actions(monkeypatch):
     base = argparse.Namespace()
 
     assert [(item.key, item.action) for item in nk_menu.DASHBOARD_COMMANDS] == [
-        ("1", "runtime-pipeline"),
-        ("2", "runtime-seed"),
-        ("3", "runtime-train"),
-        ("4", "deploy-runtime"),
+        ("1", "train"),
+        ("2", "runtime-pipeline"),
+        ("3", "runtime-compare"),
+        ("4", "deploy-best"),
         ("5", "status"),
         ("6", "compare"),
         ("0", "exit"),
     ]
-    assert nk_menu.dashboard_action("오토파일럿") == "runtime-pipeline"
-    assert nk_menu.dashboard_action("시드") == "runtime-seed"
+    assert nk_menu.dashboard_action("월드학습") == "train"
+    assert nk_menu.dashboard_action("런타임학습") == "runtime-pipeline"
     assert nk_menu.dashboard_action("학습만") == "runtime-train"
-    assert nk_menu.dashboard_action("런타임배포") == "deploy-runtime"
+    assert nk_menu.dashboard_action("2") == "runtime-pipeline"
+    assert nk_menu.dashboard_action("런타임비교") == "runtime-compare"
+    assert nk_menu.dashboard_action("월드배포") == "deploy-best"
     assert nk_menu.dashboard_action("상태") == "status"
     assert nk_menu.dashboard_action("종료") == "exit"
     pipeline_args = nk_menu.build_menu_args(base, "runtime-pipeline")
@@ -108,6 +112,7 @@ def test_nk_menu_shows_primary_actions(monkeypatch):
     train_args = nk_menu.build_menu_args(base, "runtime-train")
     top_args = nk_menu.build_menu_args(base, "top")
     cycle_args = nk_menu.build_menu_args(base, "runtime-cycle")
+    compare_runtime_args = nk_menu.build_menu_args(base, "runtime-compare")
 
     assert pipeline_args.deploy_runtime is True
     assert pipeline_args.device == "cuda"
@@ -129,6 +134,10 @@ def test_nk_menu_shows_primary_actions(monkeypatch):
     assert train_args.out == "artifacts/runtime_action_model.pt"
     assert top_args.limit == 5
     assert cycle_args.deploy_runtime is True
+    assert compare_runtime_args.model == "artifacts/runtime_action_model.pt"
+    assert compare_runtime_args.features == "data/model_ready/runtime_features.jsonl"
+    assert compare_runtime_args.split == "test"
+    assert compare_runtime_args.min_delta == 0.01
 
 
 def test_nk_parser_accepts_korean_runtime_shortcuts():
@@ -606,6 +615,12 @@ def test_nk_runtime_pipeline_deploys_only_after_quality_passes(tmp_path, monkeyp
     )
     monkeypatch.setattr(
         nk_cli,
+        "_run_runtime_compare_action",
+        lambda args: calls.append(("compare", args.model, args.features))
+        or {"local": {"score": 0.92, "quality": {"passed": True}}, "current": {"score": 0.81}, "decision": {"local_wins": True, "local_score": 0.92, "current_score": 0.81}},
+    )
+    monkeypatch.setattr(
+        nk_cli,
         "_run_deploy_runtime_action",
         lambda args: calls.append(("deploy", args.model)) or {"status": "deployed_and_activated", "remote_model": "/remote/runtime.pt"},
     )
@@ -651,6 +666,7 @@ def test_nk_runtime_pipeline_deploys_only_after_quality_passes(tmp_path, monkeyp
         ("data", str(replay)),
         ("features", str(replay), str(features)),
         ("train", str(features), str(model)),
+        ("compare", str(model), str(features)),
         ("deploy", str(model)),
         ("current", "orangepi5"),
     ]
@@ -686,6 +702,12 @@ def test_nk_runtime_pipeline_blocks_deploy_when_quality_fails(tmp_path, monkeypa
             "test": {"success_accuracy": 0.4, "reward_mae": 0.9, "known_success_rows": 42.0},
         },
     )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_compare_action",
+        lambda args: calls.append(("compare", args.model, args.features))
+        or {"local": {"score": 0.44, "quality": {"passed": False}}, "current": {"score": 0.8}, "decision": {"local_wins": False, "local_score": 0.44, "current_score": 0.8}},
+    )
     monkeypatch.setattr(nk_cli, "_run_deploy_runtime_action", lambda args: calls.append(("deploy", args.model)) or {})
 
     result = nk_cli._run_action(
@@ -720,7 +742,98 @@ def test_nk_runtime_pipeline_blocks_deploy_when_quality_fails(tmp_path, monkeypa
 
     assert result["status"] == "blocked_by_quality_gate"
     assert result["quality"]["passed"] is False
+    assert ("compare", str(model), str(features)) in calls
     assert ("deploy", str(model)) not in calls
+
+
+def test_nk_runtime_bench_writes_model_benchmark_record(tmp_path, monkeypatch):
+    model = tmp_path / "runtime_action_model.pt"
+    features = tmp_path / "runtime_features.jsonl"
+    model.write_text("checkpoint", encoding="utf-8")
+    features.write_text("{}", encoding="utf-8")
+    features.with_suffix(features.suffix + ".manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "neurokernel-runtime-action-feature-v1",
+                "rows": 20,
+                "input_dim": 8,
+                "target_dim": 4,
+                "target_names": ["success", "reward", "duration_seconds_log1p", "failure_present"],
+                "action_vocab": ["inspect", "repair"],
+                "numeric_feature_names": ["x"],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        nk_cli,
+        "eval_runtime_action_checkpoint",
+        lambda checkpoint, feature_path, split, device: {
+            "checkpoint": str(checkpoint),
+            "features": str(feature_path),
+            "split": split,
+            "device": device,
+            "rows": 4.0,
+            "known_success_rows": 4.0,
+            "success_accuracy": 1.0,
+            "failure_present_accuracy": 0.75,
+            "reward_mae": 0.1,
+            "duration_log1p_mae": 0.2,
+        },
+    )
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="runtime-bench",
+            model=str(model),
+            features=str(features),
+            split="test",
+            device="cpu",
+            out_dir=str(tmp_path / "benchmarks"),
+            candidate_kind="local_candidate",
+            min_success_accuracy=0.75,
+            max_reward_mae=0.35,
+            min_known_success_rows=4,
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert result["quality"]["passed"] is True
+    assert result["score"] > 0.0
+    assert Path(result["benchmark_path"]).exists()
+    assert (tmp_path / "benchmarks" / "runtime_action" / "latest_runtime_action_local_candidate.json").exists()
+
+
+def test_nk_runtime_compare_requires_local_benchmark_to_win(tmp_path, monkeypatch):
+    local = {"status": "completed", "score": 0.91, "quality": {"passed": True}}
+    current = {"status": "completed", "score": 0.89, "quality": {"passed": True}}
+
+    monkeypatch.setattr(nk_cli, "_run_runtime_benchmark_action", lambda args: local)
+    monkeypatch.setattr(nk_cli, "_run_runtime_benchmark_current_action", lambda args: current)
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="runtime-compare",
+            model="artifacts/runtime_action_model.pt",
+            features="data/model_ready/runtime_features.jsonl",
+            split="test",
+            device="cpu",
+            out_dir=str(tmp_path / "benchmarks"),
+            remote_host="orangepi5",
+            remote_project="/remote",
+            ssh_connect_timeout=10,
+            min_success_accuracy=0.75,
+            max_reward_mae=0.35,
+            min_known_success_rows=5,
+            min_delta=0.01,
+        )
+    )
+
+    assert result["needs_deploy"] is True
+    assert result["decision"]["reason"] == "local_score_better"
+    assert Path(result["report"]).exists()
 
 
 def test_nk_train_runs_local_pipeline_without_deploy(tmp_path, monkeypatch):
