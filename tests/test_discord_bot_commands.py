@@ -8,17 +8,17 @@ import pytest
 from neurokernel_seed.discord_bot.core_client import CoreClient, CoreClientError
 from neurokernel_seed.discord_bot.bot import (
     DiscordBotConfig,
-    _build_work_status_payload,
     _command_line_from_content,
     _discord_chunks,
     _handle_command,
-    _format_work_notification,
     _is_auto_executable_task,
-    _latest_self_patch_result,
     _message_allowed,
     _parse_user_ids,
 )
 from neurokernel_seed.discord_bot.commands import build_benchmark_task, build_preset_task, parse_task_json
+from neurokernel_seed.discord_bot.work_status import build_work_status_payload as _build_work_status_payload
+from neurokernel_seed.discord_bot.work_status import format_work_notification as _format_work_notification
+from neurokernel_seed.discord_bot.work_status import latest_self_patch_result as _latest_self_patch_result
 
 
 TEST_CHANNEL_ID = 123456789012345678

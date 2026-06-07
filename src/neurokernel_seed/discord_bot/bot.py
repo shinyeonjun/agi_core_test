@@ -11,7 +11,6 @@ from .bot_utils import discord_channel_id as _discord_channel_id
 from .bot_utils import discord_chunks as _discord_chunks
 from .bot_utils import discord_user_id as _discord_user_id
 from .bot_utils import format_pref_value as _format_pref_value
-from .bot_utils import interaction_user_id as _interaction_user_id
 from .bot_utils import is_auto_executable_task as _is_auto_executable_task
 from .bot_utils import message_allowed as _message_allowed
 from .bot_utils import parse_int as _parse_int
@@ -23,6 +22,10 @@ from .commands import build_benchmark_task, build_preset_task, format_code_block
 from .core_client import CoreClient
 from .formatters import format_capability_proposal_response as _format_capability_proposal_response
 from .formatters import format_work_item_response as _format_work_item_response
+from .views import build_view_factories
+from .work_status import build_work_status_payload as _build_work_status_payload
+from .work_status import first_promotable_work_id as _first_promotable_work_id
+from .work_status import format_work_notification as _format_work_notification
 
 
 @dataclass(frozen=True)
@@ -167,6 +170,7 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
     intents.message_content = True
     client = discord.Client(intents=intents)
     core = CoreClient(config.core_url)
+    view_factories = build_view_factories(discord=discord, core=core, allowed_user_ids=config.allowed_user_ids, activation_verify_note=_activation_verify_note)
     notify_task: asyncio.Task[Any] | None = None
 
     @client.event
@@ -174,182 +178,7 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
         nonlocal notify_task
         print(f"Discord bot logged in as {client.user} | channel={config.channel_id} | core={config.core_url}", flush=True)
         if config.work_notify_enabled and notify_task is None:
-            notify_task = asyncio.create_task(_work_notification_loop(client, core, config, activation_view_factory, retry_view_factory, promote_view_factory))
-
-    def proposal_view_factory(proposal_id: str):
-        return ProposalReviewView(proposal_id)
-
-    def work_view_factory(work_id: str):
-        return WorkReviewView(work_id)
-
-    def activation_view_factory(work_id: str):
-        return ActivationReviewView(work_id)
-
-    def retry_view_factory(work_id: str):
-        return WorkRetryView(work_id)
-
-    def promote_view_factory(work_id: str):
-        return WorkPromoteView(work_id)
-
-    class ProposalReviewView(discord.ui.View):
-        def __init__(self, proposal_id: str):
-            super().__init__(timeout=60 * 60 * 24)
-            self.proposal_id = proposal_id
-
-        async def _allowed(self, interaction: Any) -> bool:
-            user_id = int(getattr(getattr(interaction, "user", None), "id", 0) or 0)
-            if config.allowed_user_ids and user_id not in config.allowed_user_ids:
-                await interaction.response.send_message("이 버튼은 허용된 사용자만 누를 수 있어.", ephemeral=True)
-                return False
-            return True
-
-        async def _transition(self, interaction: Any, status: str, path: str, label: str) -> None:
-            if not await self._allowed(interaction):
-                return
-            try:
-                payload = await _call(core.post, f"/capability-proposals/{self.proposal_id}/{path}", {"actor": _interaction_user_id(interaction)})
-                proposal = payload.get("proposal", {}) if isinstance(payload, dict) else {}
-                name = proposal.get("capability_name") or "능력 후보"
-                await interaction.response.edit_message(content=f"{label}: {name}\n상태: `{status}`", view=None)
-            except Exception as exc:
-                await interaction.response.send_message(f"처리 실패: `{type(exc).__name__}: {exc}`", ephemeral=True)
-
-        @discord.ui.button(label="개발 후보 승인", style=discord.ButtonStyle.success)
-        async def approve_dev(self, interaction: Any, button: Any) -> None:
-            await self._transition(interaction, "approved_for_dev", "approve-dev", "좋아, 개발 후보로 올려뒀어")
-
-        @discord.ui.button(label="보류", style=discord.ButtonStyle.secondary)
-        async def defer(self, interaction: Any, button: Any) -> None:
-            await self._transition(interaction, "deferred", "defer", "일단 보류해둘게")
-
-        @discord.ui.button(label="거절", style=discord.ButtonStyle.danger)
-        async def reject(self, interaction: Any, button: Any) -> None:
-            await self._transition(interaction, "rejected", "reject", "후보를 거절 처리했어")
-
-    class WorkReviewView(discord.ui.View):
-        def __init__(self, work_id: str):
-            super().__init__(timeout=60 * 60 * 24)
-            self.work_id = work_id
-
-        async def _allowed(self, interaction: Any) -> bool:
-            user_id = int(getattr(getattr(interaction, "user", None), "id", 0) or 0)
-            if config.allowed_user_ids and user_id not in config.allowed_user_ids:
-                await interaction.response.send_message("이 버튼은 허용된 사용자만 누를 수 있어.", ephemeral=True)
-                return False
-            return True
-
-        async def _transition(self, interaction: Any, status: str, label: str) -> None:
-            if not await self._allowed(interaction):
-                return
-            try:
-                payload = await _call(core.post, f"/work-items/{self.work_id}/status", {"status": status, "actor": _interaction_user_id(interaction)})
-                item = payload.get("work_item", {}) if isinstance(payload, dict) else {}
-                title = item.get("title") or "work"
-                await interaction.response.edit_message(content=f"{label}: {title}\n상태: `{status}`", view=None)
-            except Exception as exc:
-                await interaction.response.send_message(f"처리 실패: `{type(exc).__name__}: {exc}`", ephemeral=True)
-
-        @discord.ui.button(label="작업 승인", style=discord.ButtonStyle.success)
-        async def accept_work(self, interaction: Any, button: Any) -> None:
-            await self._transition(interaction, "accepted", "작업을 승인했어")
-
-        @discord.ui.button(label="보류", style=discord.ButtonStyle.secondary)
-        async def defer_work(self, interaction: Any, button: Any) -> None:
-            await self._transition(interaction, "deferred", "작업을 보류했어")
-
-        @discord.ui.button(label="거절", style=discord.ButtonStyle.danger)
-        async def reject_work(self, interaction: Any, button: Any) -> None:
-            await self._transition(interaction, "rejected", "작업을 거절했어")
-
-    class ActivationReviewView(discord.ui.View):
-        def __init__(self, work_id: str):
-            super().__init__(timeout=60 * 60 * 24)
-            self.work_id = work_id
-
-        async def _allowed(self, interaction: Any) -> bool:
-            user_id = int(getattr(getattr(interaction, "user", None), "id", 0) or 0)
-            if config.allowed_user_ids and user_id not in config.allowed_user_ids:
-                await interaction.response.send_message("이 버튼은 허용된 사용자만 누를 수 있어.", ephemeral=True)
-                return False
-            return True
-
-        @discord.ui.button(label="패치 장착 승인", style=discord.ButtonStyle.success)
-        async def activate(self, interaction: Any, button: Any) -> None:
-            if not await self._allowed(interaction):
-                return
-            try:
-                payload = await _call(core.post, f"/work-items/{self.work_id}/activate", {"actor": _interaction_user_id(interaction)})
-                action = (payload.get("action_id") or payload.get("proposal_id") or self.work_id) if isinstance(payload, dict) else self.work_id
-                reload_note = "\n서비스 재시작이 필요해." if isinstance(payload, dict) and payload.get("service_reload_required") else ""
-                verify_note = _activation_verify_note(payload)
-                await interaction.response.edit_message(content=f"장착 완료: `{action}`{verify_note}{reload_note}", view=None)
-            except Exception as exc:
-                await interaction.response.send_message(f"장착 실패: `{type(exc).__name__}: {exc}`", ephemeral=True)
-
-        @discord.ui.button(label="수정 필요", style=discord.ButtonStyle.secondary)
-        async def needs_review(self, interaction: Any, button: Any) -> None:
-            if not await self._allowed(interaction):
-                return
-            try:
-                await _call(core.post, f"/work-items/{self.work_id}/status", {"status": "reviewing", "actor": _interaction_user_id(interaction), "reason": "activation review requested"})
-                await interaction.response.edit_message(content="장착 보류. 수정/리뷰 상태로 돌려둘게.", view=None)
-            except Exception as exc:
-                await interaction.response.send_message(f"처리 실패: `{type(exc).__name__}: {exc}`", ephemeral=True)
-
-    class WorkRetryView(discord.ui.View):
-        def __init__(self, work_id: str):
-            super().__init__(timeout=60 * 60 * 24)
-            self.work_id = work_id
-
-        async def _allowed(self, interaction: Any) -> bool:
-            user_id = int(getattr(getattr(interaction, "user", None), "id", 0) or 0)
-            if config.allowed_user_ids and user_id not in config.allowed_user_ids:
-                await interaction.response.send_message("이 버튼은 허용된 사용자만 누를 수 있어.", ephemeral=True)
-                return False
-            return True
-
-        @discord.ui.button(label="수정 재시도", style=discord.ButtonStyle.primary)
-        async def retry(self, interaction: Any, button: Any) -> None:
-            if not await self._allowed(interaction):
-                return
-            try:
-                payload = await _call(core.post, f"/work-items/{self.work_id}/retry", {"actor": _interaction_user_id(interaction)})
-                job = payload.get("job", {}) if isinstance(payload, dict) else {}
-                if isinstance(payload, dict) and payload.get("queued"):
-                    await interaction.response.edit_message(content=f"수정 재시도를 시작했어.\njob: `{job.get('job_id')}`", view=None)
-                    return
-                reason = payload.get("reason") if isinstance(payload, dict) else "unknown"
-                await interaction.response.send_message(f"재시도 시작 실패: `{reason}`", ephemeral=True)
-            except Exception as exc:
-                await interaction.response.send_message(f"재시도 실패: `{type(exc).__name__}: {exc}`", ephemeral=True)
-
-    class WorkPromoteView(discord.ui.View):
-        def __init__(self, work_id: str):
-            super().__init__(timeout=60 * 60 * 24)
-            self.work_id = work_id
-
-        async def _allowed(self, interaction: Any) -> bool:
-            user_id = int(getattr(getattr(interaction, "user", None), "id", 0) or 0)
-            if config.allowed_user_ids and user_id not in config.allowed_user_ids:
-                await interaction.response.send_message("이 버튼은 허용된 사용자만 누를 수 있어.", ephemeral=True)
-                return False
-            return True
-
-        @discord.ui.button(label="개발 작업으로 전환", style=discord.ButtonStyle.primary)
-        async def promote(self, interaction: Any, button: Any) -> None:
-            if not await self._allowed(interaction):
-                return
-            try:
-                payload = await _call(core.post, f"/work-items/{self.work_id}/promote-self-patch", {"actor": _interaction_user_id(interaction)})
-                child = payload.get("child_work_item", {}) if isinstance(payload, dict) else {}
-                queue = payload.get("queue", {}) if isinstance(payload, dict) else {}
-                if isinstance(payload, dict) and child:
-                    queued = "큐에 들어갔어" if isinstance(queue, dict) and queue.get("queued") else f"큐 대기 실패: {queue.get('reason') if isinstance(queue, dict) else 'unknown'}"
-                    await interaction.response.edit_message(content=f"개발 작업으로 전환했어: {child.get('title') or self.work_id}\nchild: `{child.get('work_id')}`\n{queued}", view=None)
-                    return
-                await interaction.response.send_message(format_code_block(payload), ephemeral=True)
-            except Exception as exc:
-                await interaction.response.send_message(f"전환 실패: `{type(exc).__name__}: {exc}`", ephemeral=True)
+            notify_task = asyncio.create_task(_work_notification_loop(client, core, config, view_factories.activation, view_factories.retry, view_factories.promote))
 
     @client.event
     async def on_message(message: Any) -> None:
@@ -368,7 +197,7 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
         channel_id = _discord_channel_id(message)
         await _record_message(core, message, role="user", content=content)
         try:
-            response = await _handle_command(command_line, core, config, user_id=user_id, channel_id=channel_id, proposal_view_factory=proposal_view_factory, work_view_factory=work_view_factory, activation_view_factory=activation_view_factory, retry_view_factory=retry_view_factory, promote_view_factory=promote_view_factory)
+            response = await _handle_command(command_line, core, config, user_id=user_id, channel_id=channel_id, proposal_view_factory=view_factories.proposal, work_view_factory=view_factories.work, activation_view_factory=view_factories.activation, retry_view_factory=view_factories.retry, promote_view_factory=view_factories.promote)
         except Exception as exc:  # Discord handlers should never crash the bot.
             response = f"실행 실패: `{type(exc).__name__}: {exc}`"
         response_text = response.text if isinstance(response, BotResponse) else str(response)
@@ -460,77 +289,6 @@ async def _resolve_notification_channel(client: Any, item: dict[str, Any], confi
     if hasattr(client, "fetch_channel"):
         return await client.fetch_channel(channel_id)
     return None
-
-
-def _format_work_notification(payload: dict[str, Any]) -> tuple[str, str | None]:
-    item = payload.get("work_item") if isinstance(payload.get("work_item"), dict) else {}
-    children = payload.get("child_work_items") if isinstance(payload.get("child_work_items"), list) else []
-    work_id = str(item.get("work_id") or "")
-    title = str(item.get("title") or work_id or "작업")
-    status = str(item.get("status") or "unknown")
-    result = _latest_self_patch_result(payload.get("events"))
-    result_status = str(result.get("status") or "")
-    changed_files = result.get("changed_files") if isinstance(result.get("changed_files"), list) else []
-    changed_text = ", ".join(str(path) for path in changed_files[:5])
-
-    child_summary = _external_work_child_summary(children)
-    if status == "planned" and str(item.get("type") or "") == "external_work" and child_summary:
-        return child_summary, None
-    if status == "planned" and str(item.get("type") or "") == "external_work":
-        return f"계획이 접수됐어: {title}\n실제 코드 구현으로 넘기려면 개발 작업으로 전환해야 해.", "promote"
-    if status == "waiting_approval" and result_status == "patch_ready":
-        lines = [
-            f"개발 후보가 테스트를 통과했어: {title}",
-            "이제 장착 승인만 남았어.",
-        ]
-        if changed_text:
-            lines.append(f"바뀐 파일: {changed_text}")
-        return "\n".join(lines), "activation"
-    if status == "reviewing" and result_status in {"test_failed", "diff_check_failed", "codex_failed", "codex_failed_no_patch"}:
-        reason_by_status = {
-            "test_failed": "테스트 실패",
-            "diff_check_failed": "패치 형식 검사 실패",
-            "codex_failed": "개발 워커 실행 실패",
-            "codex_failed_no_patch": "개발 워커가 패치 없이 종료 실패",
-        }
-        reason = reason_by_status.get(result_status, "수정 필요")
-        lines = [
-            f"개발 시도는 끝났는데 바로 장착하면 안 돼: {title}",
-            f"이유: {reason}",
-        ]
-        if changed_text:
-            lines.append(f"건드린 파일: {changed_text}")
-        lines.append("패치는 보존했고, 다음엔 실패 로그를 보고 수정해야 해.")
-        return "\n".join(lines), "retry"
-    if status == "blocked":
-        return f"작업이 막혔어: {title}\n패치가 없거나 워커가 더 진행할 수 없는 상태야.", "retry"
-    if status == "failed":
-        return f"작업이 실패했어: {title}\n상태를 확인해서 원인부터 봐야 해.", "retry"
-    if status == "completed":
-        return f"작업이 완료됐어: {title}", None
-    return f"작업 상태가 바뀌었어: {title}\n현재 상태: {status}", None
-
-
-def _latest_self_patch_result(events: Any) -> dict[str, Any]:
-    if not isinstance(events, list):
-        return {}
-    for event in reversed(events):
-        if not isinstance(event, dict) or event.get("event_type") not in {"job_completed", "self_patch_failed"}:
-            continue
-        payload = event.get("payload_json")
-        if isinstance(payload, str):
-            try:
-                import json
-
-                payload = json.loads(payload)
-            except Exception:
-                continue
-        if not isinstance(payload, dict):
-            continue
-        result = payload.get("result")
-        if isinstance(result, dict):
-            return result
-    return {}
 
 
 def _command_line_from_content(content: str, config: DiscordBotConfig) -> str | None:
@@ -980,174 +738,6 @@ async def _handle_work(
             return f"장착 완료: `{payload.get('action_id') or work_id}`{_activation_verify_note(payload)}{reload_note}"
         return format_code_block(payload)
     return "`work list`, `work show <id>`, `work promote <id>`, `work retry <id>`로 볼 수 있어."
-
-
-def _build_work_status_payload(items: list[Any], jobs: list[Any]) -> dict[str, Any]:
-    clean_items = [item for item in items[:10] if isinstance(item, dict)]
-    clean_jobs = [job for job in jobs[:10] if isinstance(job, dict)]
-    jobs_by_work: dict[str, list[dict[str, Any]]] = {}
-    for job in clean_jobs:
-        work_id = str(job.get("work_id") or "")
-        if work_id:
-            jobs_by_work.setdefault(work_id, []).append(job)
-    children_by_parent: dict[str, list[dict[str, Any]]] = {}
-    for item in clean_items:
-        parent_id = str(item.get("parent_work_id") or "").strip()
-        if parent_id:
-            children_by_parent.setdefault(parent_id, []).append(item)
-    return {
-        "kind": "work_status",
-        "lifecycle": {
-            "proposed": "waiting_for_user_decision",
-            "accepted": "queued_or_ready_for_worker",
-            "planned": "recorded_plan_without_active_worker",
-            "running": "worker_is_processing",
-            "reviewing": "worker_finished_but_needs_fix",
-            "waiting_approval": "patch_or_result_ready_for_user_approval",
-            "completed": "finished",
-            "blocked": "cannot_continue_without_review",
-            "failed": "failed",
-            "cancelled": "cancelled",
-        },
-        "work_items": clean_items,
-        "jobs": clean_jobs[:5],
-        "progress": [
-            _work_progress(
-                item,
-                jobs_by_work.get(str(item.get("work_id") or ""), []),
-                child_items=children_by_parent.get(str(item.get("work_id") or ""), []),
-            )
-            for item in clean_items
-        ],
-    }
-
-
-def _work_progress(item: dict[str, Any], jobs: list[dict[str, Any]], *, child_items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    child_items = child_items or []
-    work_type = str(item.get("type") or "")
-    status = str(item.get("status") or "")
-    latest_job = jobs[0] if jobs else {}
-    latest_job_status = str(latest_job.get("status") or "") if latest_job else None
-    active_child = _first_live_self_patch_child(child_items)
-    child_status = str(active_child.get("status") or "") if active_child else None
-    user_action_required = status in {"proposed", "reviewing", "waiting_approval", "blocked", "failed"} or child_status in {"waiting_approval", "reviewing", "blocked", "failed"}
-    if work_type == "self_patch":
-        stage = _self_patch_stage(status, latest_job_status)
-    elif work_type == "external_work":
-        stage = _external_work_stage(status, latest_job_status, child_status=child_status)
-    else:
-        stage = _generic_work_stage(status, latest_job_status)
-    promotion_possible = status == "planned" and work_type == "external_work" and active_child is None
-    return {
-        "work_id": item.get("work_id"),
-        "title": item.get("title"),
-        "type": work_type,
-        "status": status,
-        "priority": item.get("priority"),
-        "risk_level": item.get("risk_level"),
-        "latest_job_id": latest_job.get("job_id") if latest_job else None,
-        "latest_job_status": latest_job_status,
-        "child_work_id": active_child.get("work_id") if active_child else None,
-        "child_status": child_status,
-        "automation_stage": stage,
-        "user_action_required": user_action_required,
-        "worker_action_required": status in {"accepted", "running"} or (status == "planned" and work_type == "external_work" and active_child is None),
-        "activation_possible": status == "waiting_approval" or child_status == "waiting_approval",
-        "promotion_possible": promotion_possible,
-        "retry_possible": status in {"reviewing", "blocked", "failed"} and work_type == "self_patch",
-    }
-
-
-def _first_promotable_work_id(status_payload: dict[str, Any]) -> str | None:
-    progress = status_payload.get("progress") if isinstance(status_payload.get("progress"), list) else []
-    for item in progress:
-        if isinstance(item, dict) and item.get("promotion_possible"):
-            work_id = str(item.get("work_id") or "").strip()
-            if work_id:
-                return work_id
-    return None
-
-
-def _self_patch_stage(status: str, latest_job_status: str | None) -> str:
-    if status == "proposed":
-        return "waiting_for_user_to_accept_development"
-    if status == "accepted":
-        return "accepted_and_waiting_for_development_worker"
-    if status == "running" or latest_job_status == "running":
-        return "development_worker_running"
-    if status == "waiting_approval":
-        return "patch_ready_waiting_for_activation_approval"
-    if status == "reviewing":
-        return "development_attempt_finished_needs_fix"
-    if status in {"blocked", "failed"}:
-        return "development_blocked_or_failed"
-    if status == "completed":
-        return "capability_attached_or_work_completed"
-    return "not_active"
-
-
-def _external_work_stage(status: str, latest_job_status: str | None, *, child_status: str | None = None) -> str:
-    if child_status == "waiting_approval":
-        return "implementation_patch_ready_waiting_for_activation"
-    if child_status == "completed":
-        return "implementation_child_completed"
-    if child_status == "running":
-        return "implementation_worker_running"
-    if child_status in {"reviewing", "blocked", "failed"}:
-        return "implementation_child_needs_review"
-    if status == "proposed":
-        return "waiting_for_user_to_accept_work"
-    if status == "accepted":
-        return "accepted_and_waiting_for_planning_worker"
-    if status == "running" or latest_job_status == "running":
-        return "planning_worker_running"
-    if status == "planned":
-        return "plan_recorded_no_implementation_worker_running"
-    if status == "completed":
-        return "work_completed"
-    if status in {"blocked", "failed"}:
-        return "work_blocked_or_failed"
-    return "not_active"
-
-
-def _first_live_self_patch_child(children: list[dict[str, Any]]) -> dict[str, Any] | None:
-    terminal = {"rejected", "cancelled", "failed", "archived"}
-    for child in children:
-        if str(child.get("type") or "") == "self_patch" and str(child.get("status") or "") not in terminal:
-            return child
-    return None
-
-
-def _external_work_child_summary(children: list[Any]) -> str | None:
-    live_children = [child for child in children if isinstance(child, dict)]
-    child = _first_live_self_patch_child(live_children)
-    if not child:
-        return None
-    title = str(child.get("title") or "작업")
-    status = str(child.get("status") or "")
-    if status == "waiting_approval":
-        return f"개발 후보가 준비됐어: {title}\n이제 새 개발 전환이 아니라 장착 승인 단계야."
-    if status == "completed":
-        return f"작업이 이미 장착됐어: {title}\n새 개발 전환은 필요 없어."
-    if status == "running":
-        return f"개발 작업이 이미 진행 중이야: {title}"
-    if status in {"reviewing", "blocked", "failed"}:
-        return f"개발 작업이 수정 대기 중이야: {title}\n전환을 다시 누르는 게 아니라 수정/재시도 단계야."
-    return f"개발 작업이 이미 만들어져 있어: {title}\n새 개발 전환은 필요 없어."
-
-
-def _generic_work_stage(status: str, latest_job_status: str | None) -> str:
-    if latest_job_status == "running":
-        return "worker_running"
-    if status in {"accepted", "running"}:
-        return "worker_pending_or_running"
-    if status == "waiting_approval":
-        return "waiting_for_user_approval"
-    if status == "completed":
-        return "completed"
-    if status in {"blocked", "failed", "reviewing"}:
-        return "needs_review"
-    return "not_active"
 
 
 def _activation_verify_note(payload: Any) -> str:
