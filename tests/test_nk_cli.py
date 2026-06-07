@@ -44,6 +44,7 @@ def test_nk_top_ranks_training_runs_by_benchmark_quality(tmp_path):
 def test_nk_help_exposes_menu_commands():
     parser = nk_cli._build_parser()
     help_text = parser.format_help()
+    assert "runtime-seed" in help_text
     assert "runtime-auto" in help_text
     assert "runtime-cycle" in help_text
     assert "deploy-use" in help_text
@@ -77,19 +78,21 @@ def test_nk_dashboard_loops_until_exit(monkeypatch, capsys):
     assert "exit" in output
 
 
-def test_nk_menu_shows_three_primary_actions(monkeypatch):
+def test_nk_menu_shows_primary_actions(monkeypatch):
     monkeypatch.delenv("NEUROKERNEL_RUNTIME_REPLAY_OUT", raising=False)
     monkeypatch.delenv("NEUROKERNEL_RUNTIME_FEATURES_OUT", raising=False)
     monkeypatch.delenv("NEUROKERNEL_RUNTIME_ACTION_MODEL_OUT", raising=False)
     base = argparse.Namespace()
 
     assert [(item.key, item.action) for item in nk_menu.DASHBOARD_COMMANDS] == [
-        ("1", "runtime-auto"),
-        ("2", "runtime-cycle"),
-        ("3", "compare"),
-        ("4", "deploy-best"),
+        ("1", "runtime-seed"),
+        ("2", "runtime-auto"),
+        ("3", "runtime-cycle"),
+        ("4", "compare"),
+        ("5", "deploy-best"),
         ("0", "exit"),
     ]
+    seed_args = nk_menu.build_menu_args(base, "runtime-seed")
     auto_args = nk_menu.build_menu_args(base, "runtime-auto")
     data_args = nk_menu.build_menu_args(base, "runtime-data")
     feature_args = nk_menu.build_menu_args(base, "runtime-features")
@@ -97,6 +100,10 @@ def test_nk_menu_shows_three_primary_actions(monkeypatch):
     top_args = nk_menu.build_menu_args(base, "top")
     cycle_args = nk_menu.build_menu_args(base, "runtime-cycle")
 
+    assert seed_args.cycles == 8
+    assert seed_args.include_failures is True
+    assert seed_args.export_dataset is True
+    assert seed_args.min_actions == 4
     assert auto_args.limit is None
     assert data_args.limit is None
     assert data_args.out == "data/model_ready/runtime_replay.jsonl"
@@ -106,6 +113,156 @@ def test_nk_menu_shows_three_primary_actions(monkeypatch):
     assert train_args.out == "artifacts/runtime_action_model.pt"
     assert top_args.limit == 5
     assert cycle_args.deploy_runtime is True
+
+
+def test_nk_runtime_seed_local_creates_real_execution_rows(tmp_path):
+    db = tmp_path / "harness.db"
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="runtime-seed",
+            source="local",
+            db=str(db),
+            remote_db="data/harness.db",
+            cache_db=None,
+            remote_host=None,
+            remote_project=None,
+            ssh_connect_timeout=10,
+            project_root=".",
+            profile="readonly-basic",
+            target="local",
+            cycles=1,
+            include_failures=True,
+            export_dataset=False,
+            replay_out=str(tmp_path / "runtime_replay.jsonl"),
+            features_out=str(tmp_path / "runtime_features.jsonl"),
+            test_ratio=0.2,
+            min_rows=10,
+            min_actions=4,
+        )
+    )
+
+    seed = result["seed"]
+    assert result["status"] == "completed"
+    assert seed["tasks_created"] == 14
+    assert seed["success_rows"] >= 10
+    assert seed["failure_rows"] >= 4
+    assert seed["action_counts"]["list_artifacts"] == 1
+    assert seed["action_counts"]["tail_logs"] == 3
+    assert db.exists()
+    assert result["artifacts"] == {}
+
+
+def test_nk_runtime_seed_local_exports_dataset_after_seed(tmp_path, monkeypatch):
+    calls = []
+    replay = tmp_path / "runtime_replay.jsonl"
+    features = tmp_path / "runtime_features.jsonl"
+
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_seed_local_action",
+        lambda args: {"tasks_created": 14, "success_rows": 10, "failure_rows": 4, "action_counts": {"tail_logs": 3}},
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_data_action",
+        lambda args: calls.append(("data", args.source, args.out, args.min_rows))
+        or {"ready_for_runtime_training": True, "validation": {"rows": 14, "success_rows": 10, "failure_rows": 4}},
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_features_action",
+        lambda args: calls.append(("features", args.replay, args.out, args.min_actions))
+        or {"ready_for_runtime_model_training": True, "validation": {"rows": 28, "input_dim": 32}},
+    )
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="runtime-seed",
+            source="local",
+            db=str(tmp_path / "harness.db"),
+            remote_db="data/harness.db",
+            cache_db=None,
+            remote_host=None,
+            remote_project=None,
+            ssh_connect_timeout=10,
+            project_root=".",
+            profile="readonly-basic",
+            target="local",
+            cycles=1,
+            include_failures=True,
+            export_dataset=True,
+            replay_out=str(replay),
+            features_out=str(features),
+            test_ratio=0.2,
+            min_rows=10,
+            min_actions=4,
+        )
+    )
+
+    assert result["ready_for_runtime_model_training"] is True
+    assert result["artifacts"] == {"replay": str(replay), "features": str(features)}
+    assert calls == [
+        ("data", "local", str(replay), 10),
+        ("features", str(replay), str(features), 4),
+    ]
+
+
+def test_nk_runtime_seed_edge_runs_remote_seed_then_exports(tmp_path, monkeypatch):
+    calls = []
+    replay = tmp_path / "runtime_replay.jsonl"
+    features = tmp_path / "runtime_features.jsonl"
+
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_remote_runtime_seed_command",
+        lambda args: calls.append(("remote-seed", args.remote_host, args.cycles))
+        or {"status": "completed", "seed": {"tasks_created": 28, "success_rows": 20, "failure_rows": 8}},
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_data_action",
+        lambda args: calls.append(("data", args.source, args.remote_project, args.out))
+        or {"ready_for_runtime_training": True, "validation": {"rows": 28}},
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_features_action",
+        lambda args: calls.append(("features", args.replay, args.out, args.min_actions))
+        or {"ready_for_runtime_model_training": True, "validation": {"rows": 56}},
+    )
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="runtime-seed",
+            source="edge",
+            db="data/harness.db",
+            remote_db="data/harness.db",
+            cache_db=None,
+            remote_host="orangepi5",
+            remote_project="/remote",
+            ssh_connect_timeout=10,
+            project_root=".",
+            profile="readonly-basic",
+            target="orangepi5",
+            cycles=2,
+            include_failures=True,
+            export_dataset=True,
+            replay_out=str(replay),
+            features_out=str(features),
+            test_ratio=0.2,
+            min_rows=10,
+            min_actions=4,
+        )
+    )
+
+    assert result["source"] == "edge"
+    assert result["ready_for_runtime_model_training"] is True
+    assert calls == [
+        ("remote-seed", "orangepi5", 2),
+        ("data", "edge", "/remote", str(replay)),
+        ("features", str(replay), str(features), 4),
+    ]
 
 
 def test_nk_compare_reports_current_best_and_deploy_need(tmp_path, monkeypatch):

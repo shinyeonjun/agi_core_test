@@ -67,3 +67,42 @@ nk status
 - runtime feature row는 후보 action별로 생성된다.
 - 실행 결과를 모르는 후보는 target vector를 학습 loss에 반영하지 않는다.
 - runtime model manifest는 `model_slot=runtime_action_model`, `data_origin=runtime_experience_log`를 가진다.
+
+## Runtime seed dataset flow
+
+`runtime_action` initial data must come from real harness executions, not hand-written labels.
+The seed command appends read-only tasks to the harness DB, records real
+`tasks/action_decisions/execution_results/traces/experiences`, then exports the
+same replay and feature files used by the normal runtime training pipeline.
+
+Prepare seed data on OrangePi and copy model-ready files to the laptop:
+
+```powershell
+nk runtime-seed --source edge --cycles 8 --min-rows 10 --min-actions 4
+```
+
+This creates:
+
+- `data/model_ready/runtime_replay.jsonl`
+- `data/model_ready/runtime_replay.jsonl.manifest.json`
+- `data/model_ready/runtime_features.jsonl`
+- `data/model_ready/runtime_features.jsonl.manifest.json`
+
+Train on the RTX 5070 laptop with CUDA:
+
+```powershell
+nk runtime-train --features data/model_ready/runtime_features.jsonl --out artifacts/runtime_action_model.pt --device cuda --epochs 100
+```
+
+Deploy only after the manifest says `model_slot=runtime_action_model` and
+`data_origin=runtime_experience_log`:
+
+```powershell
+nk deploy-runtime --model artifacts/runtime_action_model.pt
+nk current
+```
+
+Later, when real usage data is sufficient, keep the same pipeline but reduce the
+seed share by exporting from the accumulated harness DB and limiting or aging out
+seed rows at the dataset stage. The seed is an initial bootstrap, not the final
+truth source.

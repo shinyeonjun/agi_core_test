@@ -17,6 +17,9 @@ ACTION_ALIASES = {
     "auto": "runtime-auto",
     "learn": "runtime-auto",
     "train-runtime": "runtime-train",
+    "seed": "runtime-seed",
+    "runtime-seed": "runtime-seed",
+    "seed-runtime": "runtime-seed",
     "auto-deploy": "runtime-cycle",
     "learn-deploy": "runtime-cycle",
     "cycle": "runtime-cycle",
@@ -40,16 +43,18 @@ ACTION_ALIASES = {
 
 
 DASHBOARD_COMMANDS = (
-    MenuCommand("1", "runtime-auto", "learn", "runtime data -> features -> train"),
-    MenuCommand("2", "runtime-cycle", "cycle", "runtime data -> train -> deploy slot"),
-    MenuCommand("3", "compare", "compare", "world current vs best"),
-    MenuCommand("4", "deploy-best", "deploy", "activate best world model"),
+    MenuCommand("1", "runtime-seed", "seed", "create runtime seed data only"),
+    MenuCommand("2", "runtime-auto", "learn", "runtime data -> features -> train"),
+    MenuCommand("3", "runtime-cycle", "cycle", "runtime data -> train -> deploy slot"),
+    MenuCommand("4", "compare", "compare", "world current vs best"),
+    MenuCommand("5", "deploy-best", "deploy", "activate best world model"),
     MenuCommand("0", "exit", "exit", "close"),
 )
 
 
 KNOWN_ACTIONS = {
     "data",
+    "runtime-seed",
     "runtime-auto",
     "runtime-cycle",
     "runtime-data",
@@ -125,13 +130,19 @@ def build_menu_args(base: argparse.Namespace, action: str) -> argparse.Namespace
     if menu_args.action == "deploy-runtime":
         menu_args.model = runtime_model
     menu_args.test_ratio = 0.2
+    menu_args.project_root = "."
+    menu_args.profile = "readonly-basic"
+    menu_args.target = "orangepi5"
+    menu_args.cycles = 8
     menu_args.min_rows = 1
-    menu_args.min_actions = 1
+    menu_args.min_actions = 4 if menu_args.action == "runtime-seed" else 1
     menu_args.lr = 1e-3
     menu_args.weight_decay = 1e-4
     menu_args.hidden_dim = 64
     menu_args.hidden_layers = 2
     menu_args.allow_no_execution = False
+    menu_args.include_failures = True
+    menu_args.export_dataset = True
     menu_args.runtime_model_out = runtime_model
     menu_args.deploy_runtime = menu_args.action == "runtime-cycle"
     menu_args.json = False

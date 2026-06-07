@@ -84,7 +84,7 @@ class DashboardController:
         for command in menu.DASHBOARD_COMMANDS:
             print(f"{command.key}  {self._style(command.label, 'bold'):<10} {command.hint}")
         print()
-        print("quick  learn | cycle | compare | deploy | exit")
+        print("quick  seed | learn | cycle | compare | deploy | exit")
 
     def _print_status_snapshot(self, args: argparse.Namespace) -> None:
         current = self._probe(args, "current")
