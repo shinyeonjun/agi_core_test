@@ -194,14 +194,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "train-deploy-model":
         from neurokernel_seed.model.release import TrainDeployModelConfig, train_deploy_model
+        run_name = _resolve_cli_run_name(args.run_name_arg, args.run_name)
         result = train_deploy_model(
             TrainDeployModelConfig(
                 features=args.features,
                 out_dir=args.out_dir,
-                run_name=args.run_name,
+                run_name=run_name,
                 remote_host=args.remote_host,
                 remote_project=args.remote_project,
                 activate=args.activate,
+                dry_run=args.dry_run,
                 epochs=args.epochs,
                 batch_size=args.batch_size,
                 lr=args.lr,
@@ -535,6 +537,12 @@ def _load_json_arg(task_json: str | None, task_file: str | None) -> dict:
     if task_file:
         return json.loads(Path(task_file).read_text(encoding="utf-8-sig"))
     return json.loads(task_json or "{}")
+
+
+def _resolve_cli_run_name(positional: str | None, option: str | None) -> str | None:
+    if positional and option and positional != option:
+        raise ValueError("provide either positional run_name or --run-name, not both")
+    return option or positional
 
 
 if __name__ == "__main__":

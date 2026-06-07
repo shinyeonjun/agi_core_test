@@ -171,13 +171,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--allow-benchmark-failure", action="store_true")
     p.add_argument("--overwrite", action="store_true")
 
-    p = sub.add_parser("train-deploy-model")
-    p.add_argument("--features")
-    p.add_argument("--out-dir")
-    p.add_argument("--run-name")
-    p.add_argument("--remote-host")
-    p.add_argument("--remote-project")
-    p.add_argument("--activate", action="store_true")
+    p = sub.add_parser(
+        "train-deploy-model",
+        description="Train a world model on this machine and deploy it to Orange Pi as a versioned, non-overwriting release.",
+    )
+    p.add_argument("run_name_arg", nargs="?", metavar="RUN_NAME", help="new model release name, e.g. slot_v2_mn_v3_004")
+    p.add_argument("--features", help="feature JSONL path; defaults to NEUROKERNEL_TRAIN_FEATURES")
+    p.add_argument("--out-dir", help="local training run root; defaults to NEUROKERNEL_TRAIN_RUN_DIR")
+    p.add_argument("--run-name", help=argparse.SUPPRESS)
+    p.add_argument("--remote-host", help="SSH host; defaults to NEUROKERNEL_EDGE_HOST or orangepi5")
+    p.add_argument("--remote-project", help="remote project path; defaults to NEUROKERNEL_EDGE_PROJECT")
+    p.add_argument("--activate", action="store_true", help="update current model pointer after release deploy")
+    p.add_argument("--dry-run", action="store_true", help="preflight local paths and remote release name without training")
     p.add_argument("--epochs", type=int, default=50)
     p.add_argument("--batch-size", type=int, default=1024)
     p.add_argument("--lr", type=float, default=1e-3)

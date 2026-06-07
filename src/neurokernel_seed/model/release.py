@@ -31,6 +31,7 @@ class TrainDeployModelConfig:
     remote_host: str | None = None
     remote_project: str | None = None
     activate: bool = False
+    dry_run: bool = False
     epochs: int = 50
     batch_size: int = 1024
     lr: float = 1e-3
@@ -55,20 +56,31 @@ class TrainDeployModelConfig:
     ssh_server_alive_count_max: int = 2
 
 
+@dataclass(frozen=True)
+class ResolvedTrainDeployConfig:
+    features: Path
+    out_dir: Path
+    run_name: str
+    remote_host: str
+    remote_project: str
+
+
 def train_deploy_model(config: TrainDeployModelConfig) -> dict[str, Any]:
-    features = _resolve_required_path(config.features, "NEUROKERNEL_TRAIN_FEATURES", "features")
-    out_dir = Path(_resolve_value(config.out_dir, "NEUROKERNEL_TRAIN_RUN_DIR", "artifacts/training_runs"))
-    remote_host = _resolve_value(config.remote_host, "NEUROKERNEL_EDGE_HOST", "orangepi5")
-    remote_project = _normalize_remote_project(
-        _resolve_value(config.remote_project, "NEUROKERNEL_EDGE_PROJECT", "/home/ubuntu/projects/neurokernel-agi-seed")
-    )
-    run_name = config.run_name or _default_release_name(features)
-    _assert_safe_release_name(run_name)
+    resolved = _resolve_train_deploy_config(config)
+    preflight = _preflight_model_release(resolved, config)
+    if config.dry_run:
+        return {
+            "schema_version": TRAIN_DEPLOY_SCHEMA_VERSION,
+            "status": "dry_run",
+            "created_at": _utc_now(),
+            "run_name": resolved.run_name,
+            "preflight": preflight,
+        }
     training = run_training_pipeline(
         TrainingPipelineConfig(
-            features=features,
-            out_dir=out_dir,
-            run_name=run_name,
+            features=resolved.features,
+            out_dir=resolved.out_dir,
+            run_name=resolved.run_name,
             epochs=config.epochs,
             batch_size=config.batch_size,
             lr=config.lr,
@@ -92,9 +104,9 @@ def train_deploy_model(config: TrainDeployModelConfig) -> dict[str, Any]:
     )
     release = deploy_training_run(
         Path(training["run_dir"]),
-        release_name=run_name,
-        remote_host=remote_host,
-        remote_project=remote_project,
+        release_name=resolved.run_name,
+        remote_host=resolved.remote_host,
+        remote_project=resolved.remote_project,
         activate=config.activate,
         ssh_connect_timeout=config.ssh_connect_timeout,
         ssh_server_alive_interval=config.ssh_server_alive_interval,
@@ -104,10 +116,15 @@ def train_deploy_model(config: TrainDeployModelConfig) -> dict[str, Any]:
         "schema_version": TRAIN_DEPLOY_SCHEMA_VERSION,
         "status": "completed",
         "created_at": _utc_now(),
-        "run_name": run_name,
+        "run_name": resolved.run_name,
+        "preflight": preflight,
         "training": training,
         "release": release,
     }
+
+
+def preflight_model_release(config: TrainDeployModelConfig) -> dict[str, Any]:
+    return _preflight_model_release(_resolve_train_deploy_config(config), config)
 
 
 def deploy_training_run(
@@ -127,12 +144,15 @@ def deploy_training_run(
     remote_project = _normalize_remote_project(remote_project)
     remote_releases_dir = f"{remote_project.rstrip('/')}/artifacts/model_releases"
     remote_release_dir = f"{remote_releases_dir}/{release_name}"
+    remote_incoming_dir = f"{remote_releases_dir}/.incoming"
+    remote_stage_dir = f"{remote_incoming_dir}/{release_name}.{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     release_manifest = _build_release_manifest(
         source_dir,
         release_name=release_name,
         remote_host=remote_host,
         remote_project=remote_project,
         remote_release_dir=remote_release_dir,
+        remote_stage_dir=remote_stage_dir,
         activate=activate,
     )
     release_manifest_path = source_dir / "model_release_manifest.json"
@@ -142,6 +162,8 @@ def deploy_training_run(
         server_alive_interval=ssh_server_alive_interval,
         server_alive_count_max=ssh_server_alive_count_max,
     )
+    _remote_assert_release_absent(remote_host, remote_release_dir, ssh_options)
+    stage_created = False
     _run_native(
         [
             "ssh",
@@ -149,32 +171,21 @@ def deploy_training_run(
             remote_host,
             (
                 "set -eu; "
-                f"mkdir -p {_sh_quote(remote_releases_dir)}; "
-                f"if [ -e {_sh_quote(remote_release_dir)} ]; then "
-                f"echo {_sh_quote('model release already exists: ' + remote_release_dir)} >&2; exit 17; "
+                f"mkdir -p {_sh_quote(remote_incoming_dir)}; "
+                f"if [ -e {_sh_quote(remote_stage_dir)} ]; then "
+                f"echo {_sh_quote('model release stage already exists: ' + remote_stage_dir)} >&2; exit 18; "
                 "fi; "
-                f"mkdir {_sh_quote(remote_release_dir)}"
+                f"mkdir {_sh_quote(remote_stage_dir)}"
             ),
         ]
     )
-    with tempfile.TemporaryDirectory() as temp_dir:
-        package_path = Path(temp_dir) / f"{release_name}.tar.gz"
-        _package_run_dir(source_dir, package_path)
-        remote_package = f"{remote_host}:{remote_release_dir}/payload.tar.gz"
-        _run_native(["scp", *ssh_options, str(package_path), remote_package])
-    _run_native(
-        [
-            "ssh",
-            *ssh_options,
-            remote_host,
-            (
-                "set -eu; "
-                f"tar -xzf {_sh_quote(remote_release_dir + '/payload.tar.gz')} -C {_sh_quote(remote_release_dir)}; "
-                f"rm {_sh_quote(remote_release_dir + '/payload.tar.gz')}"
-            ),
-        ]
-    )
-    if activate:
+    stage_created = True
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            package_path = Path(temp_dir) / f"{release_name}.tar.gz"
+            _package_run_dir(source_dir, package_path)
+            remote_package = f"{remote_host}:{remote_stage_dir}/payload.tar.gz"
+            _run_native(["scp", *ssh_options, str(package_path), remote_package])
         _run_native(
             [
                 "ssh",
@@ -182,15 +193,29 @@ def deploy_training_run(
                 remote_host,
                 (
                     "set -eu; "
-                    f"cp {_sh_quote(remote_release_dir + '/model_release_manifest.json')} {_sh_quote(remote_releases_dir + '/current.json')}; "
-                    f"ln -sfn {_sh_quote(remote_release_dir + '/world_model.onnx')} {_sh_quote(remote_project.rstrip('/') + '/artifacts/current_world_model.onnx')}; "
-                    f"ln -sfn {_sh_quote(remote_release_dir + '/world_model.manifest.json')} {_sh_quote(remote_project.rstrip('/') + '/artifacts/current_world_model.manifest.json')}"
+                    f"tar -xzf {_sh_quote(remote_stage_dir + '/payload.tar.gz')} -C {_sh_quote(remote_stage_dir)}; "
+                    f"rm {_sh_quote(remote_stage_dir + '/payload.tar.gz')}; "
+                    f"test -f {_sh_quote(remote_stage_dir + '/world_model.onnx')}; "
+                    f"test -f {_sh_quote(remote_stage_dir + '/world_model.manifest.json')}; "
+                    f"test -f {_sh_quote(remote_stage_dir + '/model_release_manifest.json')}; "
+                    f"if [ -e {_sh_quote(remote_release_dir)} ]; then "
+                    f"echo {_sh_quote('model release already exists: ' + remote_release_dir)} >&2; exit 17; "
+                    "fi; "
+                    f"mv {_sh_quote(remote_stage_dir)} {_sh_quote(remote_release_dir)}"
                 ),
             ]
         )
+        stage_created = False
+    except Exception:
+        if stage_created:
+            _cleanup_remote_stage(remote_host, remote_stage_dir, ssh_options)
+        raise
     release_manifest["status"] = "deployed"
     release_manifest["deployed_at"] = _utc_now()
     release_manifest_path.write_text(json.dumps(release_manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    _run_native(["scp", *ssh_options, str(release_manifest_path), f"{remote_host}:{remote_release_dir}/model_release_manifest.json"])
+    if activate:
+        _activate_remote_release(remote_host, remote_project, remote_releases_dir, remote_release_dir, ssh_options)
     return release_manifest
 
 
@@ -215,6 +240,7 @@ def _build_release_manifest(
     remote_host: str,
     remote_project: str,
     remote_release_dir: str,
+    remote_stage_dir: str,
     activate: bool,
 ) -> dict[str, Any]:
     files = sorted(str(path.relative_to(run_dir)).replace("\\", "/") for path in run_dir.rglob("*") if path.is_file())
@@ -227,6 +253,7 @@ def _build_release_manifest(
         "remote_host": remote_host,
         "remote_project": remote_project,
         "remote_release_dir": remote_release_dir,
+        "remote_stage_dir": remote_stage_dir,
         "activate_requested": activate,
         "files": files,
         "primary_model": "world_model.onnx",
@@ -243,7 +270,104 @@ def _package_run_dir(run_dir: Path, package_path: Path) -> None:
 
 
 def _run_native(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, check=True, text=True, capture_output=True)
+    try:
+        return subprocess.run(command, check=True, text=True, capture_output=True)
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        message = f"command failed: {command[0]} exited {exc.returncode}"
+        if detail:
+            message = f"{message}: {detail}"
+        raise ModelReleaseError(message) from exc
+
+
+def _resolve_train_deploy_config(config: TrainDeployModelConfig) -> ResolvedTrainDeployConfig:
+    features = _resolve_required_path(config.features, "NEUROKERNEL_TRAIN_FEATURES", "features")
+    out_dir = Path(_resolve_value(config.out_dir, "NEUROKERNEL_TRAIN_RUN_DIR", "artifacts/training_runs"))
+    remote_host = _resolve_value(config.remote_host, "NEUROKERNEL_EDGE_HOST", "orangepi5")
+    remote_project = _normalize_remote_project(
+        _resolve_value(config.remote_project, "NEUROKERNEL_EDGE_PROJECT", "/home/ubuntu/projects/neurokernel-agi-seed")
+    )
+    run_name = config.run_name or _default_release_name(features)
+    _assert_safe_release_name(run_name)
+    return ResolvedTrainDeployConfig(
+        features=features,
+        out_dir=out_dir,
+        run_name=run_name,
+        remote_host=str(remote_host),
+        remote_project=remote_project,
+    )
+
+
+def _preflight_model_release(resolved: ResolvedTrainDeployConfig, config: TrainDeployModelConfig) -> dict[str, Any]:
+    feature_manifest = resolved.features.with_suffix(resolved.features.suffix + ".manifest.json")
+    if not resolved.features.exists():
+        raise ModelReleaseError(f"feature file does not exist: {resolved.features}")
+    if not feature_manifest.exists():
+        raise ModelReleaseError(f"feature manifest does not exist: {feature_manifest}")
+    local_run_dir = resolved.out_dir / resolved.run_name
+    if local_run_dir.exists() and any(local_run_dir.iterdir()) and not config.overwrite_local_run:
+        raise ModelReleaseError(f"local training run already exists: {local_run_dir}")
+    remote_release_dir = f"{resolved.remote_project.rstrip('/')}/artifacts/model_releases/{resolved.run_name}"
+    ssh_options = _ssh_options(
+        connect_timeout=config.ssh_connect_timeout,
+        server_alive_interval=config.ssh_server_alive_interval,
+        server_alive_count_max=config.ssh_server_alive_count_max,
+    )
+    _remote_assert_release_absent(resolved.remote_host, remote_release_dir, ssh_options)
+    return {
+        "passed": True,
+        "features": str(resolved.features),
+        "feature_manifest": str(feature_manifest),
+        "local_run_dir": str(local_run_dir),
+        "remote_host": resolved.remote_host,
+        "remote_release_dir": remote_release_dir,
+        "checked_at": _utc_now(),
+    }
+
+
+def _remote_assert_release_absent(remote_host: str, remote_release_dir: str, ssh_options: list[str]) -> None:
+    _run_native(
+        [
+            "ssh",
+            *ssh_options,
+            remote_host,
+            (
+                "set -eu; "
+                f"if [ -e {_sh_quote(remote_release_dir)} ]; then "
+                f"echo {_sh_quote('model release already exists: ' + remote_release_dir)} >&2; exit 17; "
+                "fi"
+            ),
+        ]
+    )
+
+
+def _cleanup_remote_stage(remote_host: str, remote_stage_dir: str, ssh_options: list[str]) -> None:
+    try:
+        _run_native(["ssh", *ssh_options, remote_host, f"rm -rf {_sh_quote(remote_stage_dir)}"])
+    except ModelReleaseError:
+        pass
+
+
+def _activate_remote_release(
+    remote_host: str,
+    remote_project: str,
+    remote_releases_dir: str,
+    remote_release_dir: str,
+    ssh_options: list[str],
+) -> None:
+    _run_native(
+        [
+            "ssh",
+            *ssh_options,
+            remote_host,
+            (
+                "set -eu; "
+                f"cp {_sh_quote(remote_release_dir + '/model_release_manifest.json')} {_sh_quote(remote_releases_dir + '/current.json')}; "
+                f"ln -sfn {_sh_quote(remote_release_dir + '/world_model.onnx')} {_sh_quote(remote_project.rstrip('/') + '/artifacts/current_world_model.onnx')}; "
+                f"ln -sfn {_sh_quote(remote_release_dir + '/world_model.manifest.json')} {_sh_quote(remote_project.rstrip('/') + '/artifacts/current_world_model.manifest.json')}"
+            ),
+        ]
+    )
 
 
 def _ssh_options(*, connect_timeout: int, server_alive_interval: int, server_alive_count_max: int) -> list[str]:

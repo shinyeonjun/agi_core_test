@@ -19,9 +19,17 @@ def _make_releasable_run(run_dir: Path) -> None:
         (run_dir / name).write_text("{}", encoding="utf-8")
 
 
+def _make_features(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}\n", encoding="utf-8")
+    path.with_suffix(path.suffix + ".manifest.json").write_text("{}", encoding="utf-8")
+    return path
+
+
 def test_train_deploy_model_creates_versioned_remote_release(tmp_path, monkeypatch):
     commands: list[list[str]] = []
     run_dir = tmp_path / "runs" / "release_a"
+    features = _make_features(tmp_path / "features.jsonl")
 
     def fake_training(config):
         _make_releasable_run(run_dir)
@@ -40,7 +48,7 @@ def test_train_deploy_model_creates_versioned_remote_release(tmp_path, monkeypat
 
     result = release.train_deploy_model(
         release.TrainDeployModelConfig(
-            features=tmp_path / "features.jsonl",
+            features=features,
             out_dir=tmp_path / "runs",
             run_name="release_a",
             remote_host="orangepi5",
@@ -56,6 +64,8 @@ def test_train_deploy_model_creates_versioned_remote_release(tmp_path, monkeypat
     joined = "\n".join(" ".join(command) for command in commands)
     assert "model release already exists" in joined
     assert "artifacts/model_releases/release_a" in joined
+    assert ".incoming/release_a." in joined
+    assert "mv" in joined
     assert "artifacts/world_model.onnx" not in joined
 
 
@@ -96,3 +106,25 @@ def test_deploy_training_run_activation_updates_pointer_only(tmp_path, monkeypat
     assert "ln -sfn" in joined
     manifest = json.loads((run_dir / "model_release_manifest.json").read_text(encoding="utf-8"))
     assert manifest["activate_requested"] is True
+
+
+def test_train_deploy_model_dry_run_stops_before_training(tmp_path, monkeypatch):
+    features = _make_features(tmp_path / "features.jsonl")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(release, "_run_native", lambda command: commands.append(command))
+
+    result = release.train_deploy_model(
+        release.TrainDeployModelConfig(
+            features=features,
+            out_dir=tmp_path / "runs",
+            run_name="release_c",
+            remote_host="orangepi5",
+            remote_project="/home/ubuntu/projects/neurokernel-agi-seed",
+            dry_run=True,
+        )
+    )
+
+    assert result["status"] == "dry_run"
+    assert result["preflight"]["passed"] is True
+    assert len(commands) == 1
+    assert "test ! -e" not in " ".join(commands[0])

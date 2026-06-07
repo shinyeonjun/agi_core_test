@@ -36,7 +36,7 @@ set NEUROKERNEL_EDGE_PROJECT=/home/ubuntu/projects/neurokernel-agi-seed
 이후 실사용 명령은 짧다.
 
 ```cmd
-python -m neurokernel_seed.cli train-deploy-model --run-name slot_v2_mn_v3_004
+python -m neurokernel_seed.cli train-deploy-model slot_v2_mn_v3_004
 ```
 
 원격에는 아래처럼 새 폴더가 생긴다.
@@ -45,15 +45,24 @@ python -m neurokernel_seed.cli train-deploy-model --run-name slot_v2_mn_v3_004
 /home/ubuntu/projects/neurokernel-agi-seed/artifacts/model_releases/slot_v2_mn_v3_004/
 ```
 
-같은 `run-name` 폴더가 이미 있으면 실패한다. 기존 모델은 덮어쓰지 않는다.
+같은 `run-name` 폴더가 이미 있으면 학습 전에 실패한다. 기존 모델은 덮어쓰지 않는다.
+
+학습 없이 경로와 원격 release 중복만 확인하려면 dry-run을 쓴다.
+
+```cmd
+python -m neurokernel_seed.cli train-deploy-model slot_v2_mn_v3_004 --dry-run
+```
 
 현재 모델 포인터까지 바꾸고 싶을 때만 명시적으로 `--activate`를 붙인다.
 
 ```cmd
-python -m neurokernel_seed.cli train-deploy-model --run-name slot_v2_mn_v3_004 --activate
+python -m neurokernel_seed.cli train-deploy-model slot_v2_mn_v3_004 --activate
 ```
 
 `--activate`도 모델 파일을 덮어쓰지 않고 `current.json`, `current_world_model.onnx` 심볼릭 링크만 갱신한다.
+
+배포는 원격의 `.incoming` 임시 폴더에서 먼저 압축 해제와 필수 파일 검증을 끝낸 뒤, 마지막에 `model_releases/<run-name>`으로 이동한다.
+따라서 최종 release 폴더에는 완성된 모델만 남는다.
 
 ## 빠른 smoke 실행
 
