@@ -90,8 +90,8 @@ class DashboardController:
         for command in menu.DASHBOARD_COMMANDS:
             print(f"{command.key:<4} {command.label:<10} {command.hint}")
         print()
-        print("빠른 입력  월드학습 | 런타임학습 | 런타임비교 | 월드배포 | 상태 | 종료")
-        print("직접 실행  nk 런타임학습 --device cuda  또는  nk runtime-compare --device cuda")
+        print("빠른 입력  월드학습 | 런타임학습 | 런타임비교 | 통합배포 | 현행벤치 | 상태 | 종료")
+        print("직접 실행  nk 런타임학습 --device cuda  또는  nk 현행벤치 --device cpu")
 
     def _print_status_snapshot(self, args: argparse.Namespace) -> None:
         current = self._probe(args, "current")

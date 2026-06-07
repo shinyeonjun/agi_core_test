@@ -49,6 +49,8 @@ def test_nk_help_exposes_menu_commands():
     assert "runtime-cycle" in help_text
     assert "runtime-bench" in help_text
     assert "runtime-compare" in help_text
+    assert "current-bench-all" in help_text
+    assert "deploy-all-best" in help_text
     assert "deploy-use" in help_text
     assert "top" in help_text
 
@@ -91,9 +93,10 @@ def test_nk_menu_shows_primary_actions(monkeypatch):
         ("1", "train"),
         ("2", "runtime-pipeline"),
         ("3", "runtime-compare"),
-        ("4", "deploy-best"),
+        ("4", "deploy-all-best"),
         ("5", "status"),
         ("6", "compare"),
+        ("9", "current-bench-all"),
         ("0", "exit"),
     ]
     assert nk_menu.dashboard_action("월드학습") == "train"
@@ -101,7 +104,8 @@ def test_nk_menu_shows_primary_actions(monkeypatch):
     assert nk_menu.dashboard_action("학습만") == "runtime-train"
     assert nk_menu.dashboard_action("2") == "runtime-pipeline"
     assert nk_menu.dashboard_action("런타임비교") == "runtime-compare"
-    assert nk_menu.dashboard_action("월드배포") == "deploy-best"
+    assert nk_menu.dashboard_action("통합배포") == "deploy-all-best"
+    assert nk_menu.dashboard_action("현행벤치") == "current-bench-all"
     assert nk_menu.dashboard_action("상태") == "status"
     assert nk_menu.dashboard_action("종료") == "exit"
     pipeline_args = nk_menu.build_menu_args(base, "runtime-pipeline")
@@ -113,6 +117,8 @@ def test_nk_menu_shows_primary_actions(monkeypatch):
     top_args = nk_menu.build_menu_args(base, "top")
     cycle_args = nk_menu.build_menu_args(base, "runtime-cycle")
     compare_runtime_args = nk_menu.build_menu_args(base, "runtime-compare")
+    deploy_all_args = nk_menu.build_menu_args(base, "deploy-all-best")
+    current_bench_args = nk_menu.build_menu_args(base, "current-bench-all")
 
     assert pipeline_args.deploy_runtime is True
     assert pipeline_args.device == "cuda"
@@ -138,6 +144,9 @@ def test_nk_menu_shows_primary_actions(monkeypatch):
     assert compare_runtime_args.features == "data/model_ready/runtime_features.jsonl"
     assert compare_runtime_args.split == "test"
     assert compare_runtime_args.min_delta == 0.01
+    assert deploy_all_args.model == "artifacts/runtime_action_model.pt"
+    assert deploy_all_args.refresh_current_bench is True
+    assert current_bench_args.features == "data/model_ready/runtime_features.jsonl"
 
 
 def test_nk_parser_accepts_korean_runtime_shortcuts():
@@ -833,6 +842,105 @@ def test_nk_runtime_compare_requires_local_benchmark_to_win(tmp_path, monkeypatc
 
     assert result["needs_deploy"] is True
     assert result["decision"]["reason"] == "local_score_better"
+    assert Path(result["report"]).exists()
+
+
+def test_nk_current_bench_all_caches_world_and_runtime_current(tmp_path, monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_benchmark_current_action",
+        lambda args: calls.append(("world", args.out_dir))
+        or {"status": "completed", "release_name": "world_a", "run_dir": args.out_dir, "benchmark": {"aggregate": {"macro_success_rate": {"hybrid_veto": 1.0}}}},
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_benchmark_current_action",
+        lambda args: calls.append(("runtime", args.features))
+        or {"status": "not_comparable", "candidate_kind": "edge_current", "error": "runtime feature input dimension mismatch"},
+    )
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="current-bench-all",
+            remote_host="orangepi5",
+            remote_project="/remote",
+            ssh_connect_timeout=10,
+            features="data/model_ready/runtime_features.jsonl",
+            split="test",
+            device="cpu",
+            out_dir=str(tmp_path / "benchmarks"),
+            episodes=1,
+            trace_episodes=1,
+            max_failures_per_env=1,
+            strict=True,
+            min_success_accuracy=0.75,
+            max_reward_mae=0.35,
+            min_known_success_rows=5,
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert result["steps"]["world"]["status"] == "completed"
+    assert result["steps"]["runtime_action"]["status"] == "not_comparable"
+    assert calls[0][0] == "world"
+    assert calls[1] == ("runtime", "data/model_ready/runtime_features.jsonl")
+    assert Path(result["report"]).exists()
+
+
+def test_nk_deploy_all_best_deploys_only_winning_slots(tmp_path, monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_compare",
+        lambda args: calls.append(("world-compare", args.refresh_current_bench))
+        or {"status": "ok", "current_name": "best", "best": {"run_name": "best"}, "needs_deploy": False},
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_compare_action",
+        lambda args: calls.append(("runtime-compare", args.model))
+        or {"status": "completed", "needs_deploy": True, "decision": {"local_wins": True, "local_score": 0.9, "current_score": 0.7}},
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_deploy_runtime_action",
+        lambda args: calls.append(("runtime-deploy", args.model)) or {"status": "deployed_and_activated", "remote_model": "/remote/runtime.pt"},
+    )
+    monkeypatch.setattr(nk_cli, "_deploy_world_best_from_comparison", lambda args, comparison: calls.append(("world-deploy", None)) or {})
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="deploy-all-best",
+            remote_host="orangepi5",
+            remote_project="/remote",
+            ssh_connect_timeout=10,
+            run_dir=str(tmp_path),
+            limit=5,
+            model="artifacts/runtime_action_model.pt",
+            features="data/model_ready/runtime_features.jsonl",
+            split="test",
+            device="cpu",
+            out_dir=str(tmp_path / "benchmarks"),
+            episodes=1,
+            trace_episodes=1,
+            max_failures_per_env=1,
+            strict=True,
+            refresh_current_bench=True,
+            runtime_min_delta=0.01,
+            world_min_delta=0.005,
+            min_success_accuracy=0.75,
+            max_reward_mae=0.35,
+            min_known_success_rows=5,
+        )
+    )
+
+    assert result["status"] == "deployed"
+    assert result["deployed_slots"] == ["runtime_action"]
+    assert ("world-deploy", None) not in calls
+    assert ("runtime-deploy", "artifacts/runtime_action_model.pt") in calls
     assert Path(result["report"]).exists()
 
 

@@ -68,6 +68,10 @@ ACTION_ALIASES = {
     "deploy": "deploy-best",
     "배포": "deploy-best",
     "월드배포": "deploy-best",
+    "통합배포": "deploy-all-best",
+    "전체배포": "deploy-all-best",
+    "현행벤치": "current-bench-all",
+    "현재모델벤치": "current-bench-all",
     "상태": "status",
     "switch": "use",
     "q": "exit",
@@ -82,9 +86,10 @@ DASHBOARD_COMMANDS = (
     MenuCommand("1", "train", "월드학습", "데이터 확인, world 학습, gate 벤치까지 실행"),
     MenuCommand("2", "runtime-pipeline", "런타임학습", "OrangePi 수집, 전처리, CUDA 학습, 벤치 비교 후 승리 시 배포"),
     MenuCommand("3", "runtime-compare", "런타임비교", "현행 OrangePi runtime과 로컬 후보를 같은 데이터로 벤치 비교"),
-    MenuCommand("4", "deploy-best", "월드배포", "벤치 최고 world 후보가 현행보다 좋을 때 배포"),
+    MenuCommand("4", "deploy-all-best", "통합배포", "world/runtime 각각 비교해서 이긴 슬롯만 OrangePi에 배포"),
     MenuCommand("5", "status", "상태", "world/runtime 슬롯과 후보 모델 확인"),
     MenuCommand("6", "compare", "월드비교", "현재 world 모델과 최고 후보 벤치 비교"),
+    MenuCommand("9", "current-bench-all", "현행벤치", "OrangePi 현행 world/runtime 모델을 캐시하고 벤치 결과 저장"),
     MenuCommand("0", "exit", "종료", "콘솔 닫기"),
 )
 
@@ -107,8 +112,10 @@ KNOWN_ACTIONS = {
     "deploy",
     "deploy-use",
     "deploy-best",
+    "deploy-all-best",
     "bench",
     "bench-current",
+    "current-bench-all",
     "compare",
     "top",
     "list",
@@ -143,7 +150,7 @@ def build_menu_args(base: argparse.Namespace, action: str) -> argparse.Namespace
     menu_args.model = None
     menu_args.out_dir = None
     menu_args.run_dir = None
-    menu_args.limit = 5 if menu_args.action in {"status", "top", "compare", "deploy-best"} else None
+    menu_args.limit = 5 if menu_args.action in {"status", "top", "compare", "deploy-best", "deploy-all-best"} else None
     menu_args.episodes = 50
     menu_args.trace_episodes = 10
     menu_args.max_failures_per_env = 10
@@ -168,7 +175,7 @@ def build_menu_args(base: argparse.Namespace, action: str) -> argparse.Namespace
         menu_args.out = runtime_model
     else:
         menu_args.out = None
-    if menu_args.action in {"deploy-runtime", "runtime-bench", "runtime-compare"}:
+    if menu_args.action in {"deploy-runtime", "runtime-bench", "runtime-compare", "deploy-all-best"}:
         menu_args.model = runtime_model
     menu_args.test_ratio = 0.2
     menu_args.project_root = "."
@@ -188,7 +195,9 @@ def build_menu_args(base: argparse.Namespace, action: str) -> argparse.Namespace
     menu_args.split = "test"
     menu_args.benchmark_split = "test"
     menu_args.min_delta = 0.01 if menu_args.action in {"runtime-pipeline", "runtime-compare"} else 0.005
-    menu_args.refresh_current_bench = menu_args.action == "compare"
+    menu_args.runtime_min_delta = 0.01
+    menu_args.world_min_delta = 0.005
+    menu_args.refresh_current_bench = menu_args.action in {"compare", "deploy-all-best"}
     menu_args.force_deploy = False
     menu_args.lr = 1e-3
     menu_args.weight_decay = 1e-4

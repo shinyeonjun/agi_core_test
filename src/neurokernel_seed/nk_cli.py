@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 import subprocess
 import sys
 from collections import Counter
@@ -62,7 +63,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "  nk 런타임배포 --model artifacts/runtime_action_model.pt\n"
             "  nk current                       world/runtime 슬롯 상태 확인\n"
             "\n"
-            "영문 명령도 계속 지원합니다: runtime-seed, runtime-auto, runtime-cycle, runtime-bench, runtime-compare, deploy-runtime, deploy-use, bench-current, top"
+            "영문 명령도 계속 지원합니다: runtime-seed, runtime-auto, runtime-cycle, runtime-bench, runtime-compare, current-bench-all, deploy-runtime, deploy-all-best, deploy-use, bench-current, top"
         ),
     )
     sub = parser.add_subparsers(dest="action", metavar="명령")
@@ -152,6 +153,10 @@ def _build_parser() -> argparse.ArgumentParser:
         item.add_argument("--limit", type=int, default=5)
         item.add_argument("--json", action="store_true")
 
+    for name in ("deploy-all-best", "integrated-deploy", "통합배포", "전체배포"):
+        item = sub.add_parser(name)
+        _add_integrated_deploy_options(item)
+
     for name in ("bench", "벤치"):
         item = sub.add_parser(name)
         item.add_argument("run_name", nargs="?")
@@ -174,6 +179,10 @@ def _build_parser() -> argparse.ArgumentParser:
         item.add_argument("--no-strict", dest="strict", action="store_false")
         item.set_defaults(strict=True)
         item.add_argument("--json", action="store_true")
+
+    for name in ("current-bench-all", "bench-current-all", "현행벤치", "현재모델벤치"):
+        item = sub.add_parser(name)
+        _add_current_benchmark_all_options(item)
 
     for name in ("compare", "비교", "벤치비교"):
         item = sub.add_parser(name)
@@ -337,6 +346,46 @@ def _add_runtime_compare_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true")
 
 
+def _add_current_benchmark_all_options(parser: argparse.ArgumentParser) -> None:
+    _add_remote_options(parser)
+    parser.add_argument("--features", default=os.getenv("NEUROKERNEL_RUNTIME_FEATURES_OUT", "data/model_ready/runtime_features.jsonl"))
+    parser.add_argument("--split", choices=["train", "test"], default=os.getenv("NEUROKERNEL_RUNTIME_BENCH_SPLIT", "test"))
+    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    parser.add_argument("--out-dir", default=os.getenv("NEUROKERNEL_MODEL_BENCHMARK_DIR", "artifacts/model_benchmarks"))
+    parser.add_argument("--episodes", type=int, default=50)
+    parser.add_argument("--trace-episodes", type=int, default=10)
+    parser.add_argument("--max-failures-per-env", type=int, default=10)
+    parser.add_argument("--no-strict", dest="strict", action="store_false")
+    parser.set_defaults(strict=True)
+    parser.add_argument("--min-success-accuracy", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MIN_SUCCESS_ACCURACY", "0.75")))
+    parser.add_argument("--max-reward-mae", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MAX_REWARD_MAE", "0.35")))
+    parser.add_argument("--min-known-success-rows", type=int, default=int(os.getenv("NEUROKERNEL_RUNTIME_MIN_KNOWN_SUCCESS_ROWS", "5")))
+    parser.add_argument("--json", action="store_true")
+
+
+def _add_integrated_deploy_options(parser: argparse.ArgumentParser) -> None:
+    _add_remote_options(parser)
+    parser.add_argument("--run-dir")
+    parser.add_argument("--limit", type=int, default=5)
+    parser.add_argument("--model", default=os.getenv("NEUROKERNEL_RUNTIME_ACTION_MODEL_OUT", "artifacts/runtime_action_model.pt"))
+    parser.add_argument("--features", default=os.getenv("NEUROKERNEL_RUNTIME_FEATURES_OUT", "data/model_ready/runtime_features.jsonl"))
+    parser.add_argument("--split", choices=["train", "test"], default=os.getenv("NEUROKERNEL_RUNTIME_BENCH_SPLIT", "test"))
+    parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    parser.add_argument("--out-dir", default=os.getenv("NEUROKERNEL_MODEL_BENCHMARK_DIR", "artifacts/model_benchmarks"))
+    parser.add_argument("--episodes", type=int, default=50)
+    parser.add_argument("--trace-episodes", type=int, default=10)
+    parser.add_argument("--max-failures-per-env", type=int, default=10)
+    parser.add_argument("--no-strict", dest="strict", action="store_false")
+    parser.set_defaults(strict=True, refresh_current_bench=True)
+    parser.add_argument("--skip-refresh-current-bench", dest="refresh_current_bench", action="store_false")
+    parser.add_argument("--runtime-min-delta", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_BENCH_MIN_DELTA", "0.01")))
+    parser.add_argument("--world-min-delta", type=float, default=float(os.getenv("NEUROKERNEL_WORLD_BENCH_MIN_DELTA", "0.005")))
+    parser.add_argument("--min-success-accuracy", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MIN_SUCCESS_ACCURACY", "0.75")))
+    parser.add_argument("--max-reward-mae", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MAX_REWARD_MAE", "0.35")))
+    parser.add_argument("--min-known-success-rows", type=int, default=int(os.getenv("NEUROKERNEL_RUNTIME_MIN_KNOWN_SUCCESS_ROWS", "5")))
+    parser.add_argument("--json", action="store_true")
+
+
 def _add_runtime_deploy_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", default=os.getenv("NEUROKERNEL_RUNTIME_ACTION_MODEL_OUT", "artifacts/runtime_action_model.pt"))
     _add_remote_options(parser)
@@ -435,10 +484,14 @@ def _run_action(args: argparse.Namespace) -> dict[str, Any]:
         return _run_deploy_action(args, activate=args.action == "deploy-use")
     if args.action == "deploy-best":
         return _run_deploy_best_action(args)
+    if args.action == "deploy-all-best":
+        return _run_deploy_all_best_action(args)
     if args.action == "bench":
         return _run_benchmark_action(args)
     if args.action == "bench-current":
         return _run_benchmark_current_action(args)
+    if args.action == "current-bench-all":
+        return _run_current_benchmark_all_action(args)
     if args.action == "top":
         return _run_top_models(args)
     if args.action == "compare":
@@ -1242,6 +1295,7 @@ def _build_runtime_benchmark_record(
         "feature_fingerprint": feature_fingerprint,
         "split": split,
         "remote": remote or {},
+        "environment": _benchmark_environment(),
     }
     try:
         metrics = eval_runtime_action_checkpoint(model, features, split=split, device=str(getattr(args, "device", "auto")))
@@ -1413,6 +1467,7 @@ def _write_world_benchmark_record(
         "model": str(model_path),
         "source_dir": str(source_dir),
         "remote": remote or {},
+        "environment": _benchmark_environment(),
         "score": score,
         "score_components": {
             "hybrid_veto_success": score,
@@ -1526,6 +1581,10 @@ def _run_deploy_action(args: argparse.Namespace, *, activate: bool) -> dict[str,
 
 def _run_deploy_best_action(args: argparse.Namespace) -> dict[str, Any]:
     comparison = _run_compare(args)
+    return _deploy_world_best_from_comparison(args, comparison)
+
+
+def _deploy_world_best_from_comparison(args: argparse.Namespace, comparison: dict[str, Any]) -> dict[str, Any]:
     best = comparison.get("best")
     if not best:
         raise ModelReleaseError("배포할 최고 모델 없음")
@@ -1562,6 +1621,135 @@ def _run_deploy_best_action(args: argparse.Namespace) -> dict[str, Any]:
         "comparison": comparison,
         "release": release,
     }
+
+
+def _run_current_benchmark_all_action(args: argparse.Namespace) -> dict[str, Any]:
+    stamp = _utc_stamp()
+    out_root = Path(getattr(args, "out_dir", None) or os.getenv("NEUROKERNEL_MODEL_BENCHMARK_DIR", "artifacts/model_benchmarks"))
+    report_root = out_root / "current_models"
+    report_root.mkdir(parents=True, exist_ok=True)
+    world = _run_guarded_slot(
+        "world",
+        lambda: _run_benchmark_current_action(
+            argparse.Namespace(
+                action="bench-current",
+                remote_host=getattr(args, "remote_host", None),
+                remote_project=getattr(args, "remote_project", None),
+                ssh_connect_timeout=getattr(args, "ssh_connect_timeout", 10),
+                out_dir=str(report_root / f"world_current_{stamp}"),
+                episodes=getattr(args, "episodes", 50),
+                trace_episodes=getattr(args, "trace_episodes", 10),
+                max_failures_per_env=getattr(args, "max_failures_per_env", 10),
+                strict=getattr(args, "strict", True),
+            )
+        ),
+    )
+    runtime = _run_guarded_slot(
+        "runtime_action",
+        lambda: _run_runtime_benchmark_current_action(
+            argparse.Namespace(
+                action="runtime-bench-current",
+                remote_host=getattr(args, "remote_host", None),
+                remote_project=getattr(args, "remote_project", None),
+                ssh_connect_timeout=getattr(args, "ssh_connect_timeout", 10),
+                features=getattr(args, "features", None),
+                split=getattr(args, "split", "test"),
+                device=getattr(args, "device", "auto"),
+                out_dir=str(out_root),
+                min_success_accuracy=getattr(args, "min_success_accuracy", 0.75),
+                max_reward_mae=getattr(args, "max_reward_mae", 0.35),
+                min_known_success_rows=getattr(args, "min_known_success_rows", 5),
+            )
+        ),
+    )
+    report = {
+        "schema_version": MODEL_BENCHMARK_SCHEMA_VERSION,
+        "action": "current_bench_all",
+        "status": "completed" if world.get("status") == "completed" and runtime.get("status") in {"completed", "not_comparable"} else "partial",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "environment": _benchmark_environment(),
+        "benchmark_policy": {
+            "world": "OrangePi current_world_model.onnx를 로컬로 복사한 뒤 gate ablation을 실행한다.",
+            "runtime_action": "OrangePi current_runtime_action_model.pt를 로컬로 복사한 뒤 현재 runtime_features split으로 평가한다.",
+        },
+        "steps": {"world": world, "runtime_action": runtime},
+    }
+    report_path = report_root / f"current_model_benchmarks_{stamp}.json"
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    (report_root / "latest_current_model_benchmarks.json").write_text(
+        json.dumps({**report, "report": str(report_path)}, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return {**report, "report": str(report_path)}
+
+
+def _run_deploy_all_best_action(args: argparse.Namespace) -> dict[str, Any]:
+    out_root = Path(getattr(args, "out_dir", None) or os.getenv("NEUROKERNEL_MODEL_BENCHMARK_DIR", "artifacts/model_benchmarks"))
+    world_current_out = out_root / "current_models" / f"world_current_deploy_{_utc_stamp()}"
+    world_compare = _run_guarded_slot(
+        "world_compare",
+        lambda: _run_compare(
+            argparse.Namespace(
+                **{
+                    **vars(args),
+                    "action": "compare",
+                    "out_dir": str(world_current_out),
+                    "min_delta": getattr(args, "world_min_delta", 0.005),
+                    "refresh_current_bench": getattr(args, "refresh_current_bench", True),
+                }
+            )
+        ),
+    )
+    runtime_compare = _run_guarded_slot(
+        "runtime_compare",
+        lambda: _run_runtime_compare_action(
+            argparse.Namespace(
+                **{
+                    **vars(args),
+                    "action": "runtime-compare",
+                    "min_delta": getattr(args, "runtime_min_delta", 0.01),
+                }
+            )
+        ),
+    )
+    world_deploy = None
+    runtime_deploy = None
+    if world_compare.get("status") == "ok" and world_compare.get("needs_deploy"):
+        world_deploy = _run_guarded_slot("world_deploy", lambda: _deploy_world_best_from_comparison(args, world_compare))
+    if runtime_compare.get("status") == "completed" and runtime_compare.get("needs_deploy"):
+        runtime_deploy = _run_guarded_slot(
+            "runtime_deploy",
+            lambda: _run_deploy_runtime_action(
+                argparse.Namespace(
+                    action="deploy-runtime",
+                    model=getattr(args, "model", None),
+                    remote_host=getattr(args, "remote_host", None),
+                    remote_project=getattr(args, "remote_project", None),
+                    ssh_connect_timeout=getattr(args, "ssh_connect_timeout", 10),
+                )
+            ),
+        )
+    deployed_slots = []
+    if isinstance(world_deploy, dict) and world_deploy.get("status") == "deployed_and_activated":
+        deployed_slots.append("world")
+    if isinstance(runtime_deploy, dict) and runtime_deploy.get("status") == "deployed_and_activated":
+        deployed_slots.append("runtime_action")
+    report = {
+        "schema_version": MODEL_BENCHMARK_SCHEMA_VERSION,
+        "action": "deploy_all_best",
+        "status": "deployed" if deployed_slots else "nothing_deployed",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "environment": _benchmark_environment(),
+        "deployed_slots": deployed_slots,
+        "steps": {
+            "world_compare": world_compare,
+            "runtime_compare": runtime_compare,
+            "world_deploy": world_deploy,
+            "runtime_deploy": runtime_deploy,
+        },
+    }
+    report_path = _write_integrated_deploy_report(report, out_root)
+    return {**report, "report": str(report_path)}
 
 
 def _run_benchmark_action(args: argparse.Namespace) -> dict[str, Any]:
@@ -1815,6 +2003,54 @@ def _safe_token(value: str) -> str:
     return token.strip("._-") or "unknown"
 
 
+def _run_guarded_slot(slot: str, action) -> dict[str, Any]:
+    try:
+        result = action()
+    except Exception as exc:  # noqa: BLE001 - slot reports must preserve the exact failure.
+        return {"slot": slot, "status": "failed", "error_type": type(exc).__name__, "error": str(exc)}
+    if isinstance(result, dict):
+        return {"slot": slot, **result}
+    return {"slot": slot, "status": "completed", "result": result}
+
+
+def _benchmark_environment() -> dict[str, Any]:
+    return {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+        "cwd": str(Path.cwd()),
+        "git_commit": _git_rev_parse("HEAD"),
+        "git_branch": _git_rev_parse("--abbrev-ref", "HEAD"),
+    }
+
+
+def _git_rev_parse(*args: str) -> str | None:
+    result = subprocess.run(
+        ["git", "rev-parse", *args],
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _write_integrated_deploy_report(report: dict[str, Any], root: Path) -> Path:
+    report_root = root / "deploy"
+    report_root.mkdir(parents=True, exist_ok=True)
+    stamp = _utc_stamp()
+    report_path = report_root / f"deploy_all_best_{stamp}.json"
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    (report_root / "latest_deploy_all_best.json").write_text(
+        json.dumps({**report, "report": str(report_path)}, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return report_path
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -2009,10 +2245,14 @@ def _print_result(action: str, result: dict[str, Any], *, json_mode: bool) -> No
         _print_deploy(action, result)
     elif action == "deploy-best":
         _print_deploy_best(result)
+    elif action == "deploy-all-best":
+        _print_deploy_all_best(result)
     elif action == "bench":
         _print_bench(result)
     elif action == "bench-current":
         _print_bench_current(result)
+    elif action == "current-bench-all":
+        _print_current_bench_all(result)
     elif action == "top":
         _print_top(result)
     elif action == "compare":
@@ -2243,6 +2483,23 @@ def _print_deploy_best(result: dict[str, Any]) -> None:
     print(_kv("엣지", (result.get("release") or {}).get("remote_release_dir")))
 
 
+def _print_deploy_all_best(result: dict[str, Any]) -> None:
+    slots = result.get("deployed_slots") or []
+    print(_ok("통합배포", ", ".join(slots) if slots else "배포 없음"))
+    steps = result.get("steps") or {}
+    world_compare = steps.get("world_compare") or {}
+    runtime_compare = steps.get("runtime_compare") or {}
+    print(_kv("world", "배포 필요" if world_compare.get("needs_deploy") else "보류"))
+    print(_kv("runtime", "배포 필요" if runtime_compare.get("needs_deploy") else "보류"))
+    world_deploy = steps.get("world_deploy") or {}
+    runtime_deploy = steps.get("runtime_deploy") or {}
+    if world_deploy:
+        print(_kv("world배포", world_deploy.get("status")))
+    if runtime_deploy:
+        print(_kv("runtime배포", runtime_deploy.get("status")))
+    print(_kv("리포트", result.get("report")))
+
+
 def _print_bench(result: dict[str, Any]) -> None:
     interpretation = result.get("interpretation", {})
     print(_ok("벤치", interpretation.get("verdict") or "완료"))
@@ -2255,6 +2512,18 @@ def _print_bench_current(result: dict[str, Any]) -> None:
     print(_ok("현재벤치", result["release_name"]))
     _print_score_line(result.get("benchmark", {}))
     print(_kv("실행", result["run_dir"]))
+
+
+def _print_current_bench_all(result: dict[str, Any]) -> None:
+    print(_ok("현행벤치", result.get("status", "completed")))
+    steps = result.get("steps") or {}
+    world = steps.get("world") or {}
+    runtime = steps.get("runtime_action") or {}
+    print(_kv("world", world.get("status")))
+    print(_kv("runtime", runtime.get("status")))
+    if runtime.get("error"):
+        print(_kv("runtime이유", runtime.get("error")))
+    print(_kv("리포트", result.get("report")))
 
 
 def _print_top(result: dict[str, Any]) -> None:
