@@ -129,6 +129,14 @@ def test_default_catalog_includes_code_structure_inspection():
     assert action.requires_approval is False
 
 
+def test_default_catalog_includes_work_pipeline_inspection():
+    action = default_action_catalog()["inspect_work_pipeline"]
+    assert action.executor == "readonly_system"
+    assert action.risk_level == "low"
+    assert action.side_effect is False
+    assert action.requires_approval is False
+
+
 def test_readonly_executor_inspects_code_structure(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
@@ -143,6 +151,16 @@ def test_readonly_executor_inspects_code_structure(tmp_path):
     assert result.success
     assert result.result["candidate_count"] == 1
     assert result.result["candidates"][0]["path"] == "src/module.py"
+
+
+def test_readonly_executor_inspects_work_pipeline(tmp_path):
+    executor = ReadOnlyExecutor(project_root=tmp_path, memory_path=tmp_path / "harness.db")
+
+    result = executor.execute("inspect_work_pipeline", {"limit": 5, "stale_after_seconds": 60})
+
+    assert result.success
+    assert result.result["schema_version"] == "neurokernel-work-pipeline-status-v1"
+    assert "summary" in result.result
 
 
 def test_harness_service_runs_readonly_task_and_records_result(tmp_path):

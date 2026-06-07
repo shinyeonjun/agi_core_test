@@ -68,7 +68,34 @@ def test_dispatcher_moves_accepted_work_to_planned_and_acks_job(tmp_path):
     item = service.work_item(work_id)
     assert item["work_item"]["status"] == "planned"
     assert item["jobs"][0]["status"] == "completed"
+    assert item["jobs"][0]["heartbeat_at"] is not None
     assert item["notes"]
+
+
+def test_pipeline_status_reports_stale_running_jobs(tmp_path):
+    queue = InMemoryWorkQueue()
+    service = HarnessService(db_path=tmp_path / "harness.db", project_root=tmp_path, work_queue=queue)
+    created = service.create_work_item_from_route(
+        user_text="long work",
+        user_id="discord:1",
+        channel_id="chan",
+        route_decision=_external_work_route(),
+    )
+    work_id = created["work_item"]["work_id"]
+    service.transition_work_item(work_id, "accepted", actor="discord:1")
+    job = service.work_jobs(work_id=work_id)["jobs"][0]
+    from neurokernel_seed.harness.memory import HarnessMemory
+
+    with HarnessMemory(tmp_path / "harness.db") as memory:
+        memory.mark_work_job_running(job["job_id"], worker_id="test-worker")
+        memory.conn.execute("UPDATE work_jobs SET heartbeat_at=datetime('now', '-10 minutes'), updated_at=datetime('now', '-10 minutes') WHERE job_id=?", (job["job_id"],))
+        memory.conn.commit()
+
+    status = service.work_pipeline_status(stale_after_seconds=60)
+
+    assert status["summary"]["stale_running_job_count"] == 1
+    assert status["stale_running_jobs"][0]["job_id"] == job["job_id"]
+    assert "stale_running_jobs" in status["summary"]["attention"]
 
 
 def test_promoting_external_work_creates_child_self_patch_and_enqueues(tmp_path):

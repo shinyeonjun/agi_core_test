@@ -54,6 +54,10 @@ def create_app(*, db_path: str | Path = "data/harness.db", project_root: str | P
     def work_jobs(limit: int = 20, work_id: str | None = None, status: str | None = None, queue_name: str | None = None):
         return service.work_jobs(limit=limit, work_id=work_id, status=status, queue_name=queue_name)
 
+    @app.get("/work-pipeline/status")
+    def work_pipeline_status(limit: int = 20, stale_after_seconds: int = 300):
+        return service.work_pipeline_status(limit=limit, stale_after_seconds=stale_after_seconds)
+
     @app.get("/queue/health")
     def queue_health():
         return service.queue_health()

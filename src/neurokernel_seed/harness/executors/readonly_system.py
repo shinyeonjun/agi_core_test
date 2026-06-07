@@ -46,6 +46,8 @@ class ReadOnlyExecutor:
                 return timer.finish(action_id, success=True, result=self._diagnose_system_symptoms(params))
             if action_id == "inspect_code_structure":
                 return timer.finish(action_id, success=True, result=self._inspect_code_structure(params))
+            if action_id == "inspect_work_pipeline":
+                return timer.finish(action_id, success=True, result=self._inspect_work_pipeline(params))
             return timer.finish(action_id, success=False, result={}, error_type="unsupported_action")
         except Exception as exc:
             return timer.finish(action_id, success=False, result={"error": str(exc)}, stderr=redact_text(str(exc)), error_type=exc.__class__.__name__)
@@ -263,6 +265,15 @@ class ReadOnlyExecutor:
             max_files=int(params.get("max_files") or 250),
             max_results=int(params.get("max_results") or 20),
             thresholds=thresholds,
+        )
+
+    def _inspect_work_pipeline(self, params: dict[str, Any]) -> dict[str, Any]:
+        from neurokernel_seed.harness.work_service import WorkItemService
+
+        service = WorkItemService(db_path=self.memory_path)
+        return service.pipeline_status(
+            limit=int(params.get("limit") or 20),
+            stale_after_seconds=int(params.get("stale_after_seconds") or 300),
         )
 
     def _resolve_project_path(self, path: str) -> Path:

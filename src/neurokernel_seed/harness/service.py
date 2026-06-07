@@ -102,6 +102,9 @@ class HarnessService:
     def work_jobs(self, *, limit: int = 20, work_id: str | None = None, status: str | None = None, queue_name: str | None = None) -> dict[str, Any]:
         return self.work_items_service.list_jobs(limit=limit, work_id=work_id, status=status, queue_name=queue_name)
 
+    def work_pipeline_status(self, *, limit: int = 20, stale_after_seconds: int = 300) -> dict[str, Any]:
+        return self.work_items_service.pipeline_status(limit=limit, stale_after_seconds=stale_after_seconds)
+
     def add_work_note(self, work_id: str, *, actor: str = "api", note: str) -> dict[str, Any]:
         return self.work_items_service.add_note(work_id, actor=actor, note=note)
 

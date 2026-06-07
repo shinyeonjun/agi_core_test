@@ -48,6 +48,22 @@ class WorkItemService:
             jobs = memory.list_work_jobs(limit=limit, work_id=work_id, status=status, queue_name=queue_name)
         return {"jobs": jobs}
 
+    def pipeline_status(self, *, limit: int = 20, stale_after_seconds: int = 300) -> dict[str, Any]:
+        with HarnessMemory(self.db_path) as memory:
+            work_items = memory.list_work_items(limit=limit)
+            jobs = memory.list_work_jobs(limit=limit)
+            stale_jobs = memory.stale_running_work_jobs(stale_after_seconds=stale_after_seconds, limit=limit)
+            events = memory.recent_agent_events(limit=limit)
+        return {
+            "schema_version": "neurokernel-work-pipeline-status-v1",
+            "queue": self.queue_health(),
+            "work_items": work_items,
+            "jobs": jobs,
+            "stale_running_jobs": stale_jobs,
+            "recent_events": events,
+            "summary": _pipeline_summary(work_items, jobs, stale_jobs),
+        }
+
     def add_note(self, work_id: str, *, actor: str = "api", note: str) -> dict[str, Any]:
         with HarnessMemory(self.db_path) as memory:
             note_row = memory.add_work_note(work_id, actor=actor, note=note)
@@ -266,6 +282,33 @@ def _work_job_payload(*, job_id: str, work_id: str, work: dict[str, Any], work_t
     if extra:
         payload.update(extra)
     return payload
+
+
+def _pipeline_summary(work_items: list[dict[str, Any]], jobs: list[dict[str, Any]], stale_jobs: list[dict[str, Any]]) -> dict[str, Any]:
+    work_by_status: dict[str, int] = {}
+    jobs_by_status: dict[str, int] = {}
+    for item in work_items:
+        status = str(item.get("status") or "unknown")
+        work_by_status[status] = work_by_status.get(status, 0) + 1
+    for job in jobs:
+        status = str(job.get("status") or "unknown")
+        jobs_by_status[status] = jobs_by_status.get(status, 0) + 1
+    attention: list[str] = []
+    if stale_jobs:
+        attention.append("stale_running_jobs")
+    if jobs_by_status.get("dead_letter"):
+        attention.append("dead_letter_jobs")
+    if jobs_by_status.get("enqueue_failed"):
+        attention.append("enqueue_failed_jobs")
+    if work_by_status.get("waiting_approval"):
+        attention.append("waiting_activation_or_user_approval")
+    return {
+        "work_by_status": work_by_status,
+        "jobs_by_status": jobs_by_status,
+        "attention": attention,
+        "active_work_count": sum(work_by_status.get(status, 0) for status in ("accepted", "planned", "running", "reviewing", "waiting_approval", "blocked")),
+        "stale_running_job_count": len(stale_jobs),
+    }
 
 
 def _latest_self_patch_result(events: list[dict[str, Any]]) -> dict[str, Any]:

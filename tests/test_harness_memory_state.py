@@ -54,3 +54,25 @@ def test_task_references_are_recent_first(tmp_path):
         memory.add_task_reference(user_id="discord:1", task_id="task_b", short_label="모델 확인", status="completed")
         refs = memory.recent_task_references("discord:1")
     assert [ref["task_id"] for ref in refs] == ["task_b", "task_a"]
+
+
+def test_agent_event_log_is_append_only_and_idempotent(tmp_path):
+    db = tmp_path / "harness.db"
+    with HarnessMemory(db) as memory:
+        first = memory.append_agent_event(
+            event_type="supervisor.observed",
+            source="test",
+            payload={"ok": True},
+            idempotency_key="same-observation",
+        )
+        second = memory.append_agent_event(
+            event_type="supervisor.observed",
+            source="test",
+            payload={"ok": False},
+            idempotency_key="same-observation",
+        )
+        events = memory.recent_agent_events()
+
+    assert first["event_id"] == second["event_id"]
+    assert len(events) == 1
+    assert events[0]["payload_json"] == {"ok": True}

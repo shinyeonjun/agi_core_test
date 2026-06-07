@@ -8,6 +8,7 @@ from .memory_rows import required_text as _required_text
 from .memory_rows import row_to_dict as _row
 from .memory_rows import to_json as _json
 from .memory_schema import init_schema
+from .ids import new_id
 from .state_machine import assert_transition
 from .task_spec import TaskSpec
 from .trace import redact_text
@@ -76,6 +77,12 @@ class HarnessMemory:
 
     def add_event(self, task_id: str, event_type: str, payload: dict[str, Any]) -> None:
         self.conn.execute("INSERT INTO task_events(task_id, event_type, payload_json) VALUES (?, ?, ?)", (task_id, event_type, _json(payload)))
+        self._insert_agent_event(
+            event_type=f"task.{event_type}",
+            source="task_lifecycle",
+            payload=payload,
+            task_id=task_id,
+        )
 
     def add_action_decision(self, task_id: str, step: int, candidate_actions: list[dict[str, Any]], chosen_action: dict[str, Any] | None, safety_decision: dict[str, Any], model_score: dict[str, Any] | None = None, gate_trace: dict[str, Any] | None = None) -> None:
         self.conn.execute(
@@ -155,6 +162,116 @@ class HarnessMemory:
     def events_for_task(self, task_id: str) -> list[dict[str, Any]]:
         rows = self.conn.execute("SELECT * FROM task_events WHERE task_id=? ORDER BY event_id", (task_id,)).fetchall()
         return [_row(row) for row in rows]
+
+    def append_agent_event(
+        self,
+        *,
+        event_type: str,
+        source: str,
+        payload: dict[str, Any] | None = None,
+        actor_id: str | None = None,
+        work_id: str | None = None,
+        job_id: str | None = None,
+        task_id: str | None = None,
+        proposal_id: str | None = None,
+        correlation_id: str | None = None,
+        causation_id: str | None = None,
+        idempotency_key: str | None = None,
+        status: str = "recorded",
+    ) -> dict[str, Any]:
+        event_id = self._insert_agent_event(
+            event_type=event_type,
+            source=source,
+            payload=payload or {},
+            actor_id=actor_id,
+            work_id=work_id,
+            job_id=job_id,
+            task_id=task_id,
+            proposal_id=proposal_id,
+            correlation_id=correlation_id,
+            causation_id=causation_id,
+            idempotency_key=idempotency_key,
+            status=status,
+        )
+        self.conn.commit()
+        return self.get_agent_event(event_id)
+
+    def get_agent_event(self, event_id: str) -> dict[str, Any]:
+        row = self.conn.execute("SELECT * FROM agent_events WHERE event_id=?", (_required_text(event_id, "event_id"),)).fetchone()
+        if row is None:
+            raise KeyError(f"unknown agent event: {event_id}")
+        return _row(row)
+
+    def recent_agent_events(
+        self,
+        *,
+        limit: int = 50,
+        work_id: str | None = None,
+        job_id: str | None = None,
+        event_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit), 300))
+        clauses = []
+        params: list[Any] = []
+        if work_id:
+            clauses.append("work_id=?")
+            params.append(work_id)
+        if job_id:
+            clauses.append("job_id=?")
+            params.append(job_id)
+        if event_type:
+            clauses.append("event_type=?")
+            params.append(event_type)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        rows = self.conn.execute(f"SELECT * FROM agent_events{where} ORDER BY created_at DESC, event_id DESC LIMIT ?", (*params, limit)).fetchall()
+        return [_row(row) for row in rows]
+
+    def _insert_agent_event(
+        self,
+        *,
+        event_type: str,
+        source: str,
+        payload: dict[str, Any],
+        actor_id: str | None = None,
+        work_id: str | None = None,
+        job_id: str | None = None,
+        task_id: str | None = None,
+        proposal_id: str | None = None,
+        correlation_id: str | None = None,
+        causation_id: str | None = None,
+        idempotency_key: str | None = None,
+        status: str = "recorded",
+    ) -> str:
+        event_id = new_id("evt", event_type)
+        if idempotency_key:
+            existing = self.conn.execute("SELECT event_id FROM agent_events WHERE idempotency_key=?", (idempotency_key,)).fetchone()
+            if existing is not None:
+                return str(existing["event_id"])
+        self.conn.execute(
+            """
+            INSERT INTO agent_events(
+              event_id, idempotency_key, event_type, source, actor_id, work_id, job_id,
+              task_id, proposal_id, correlation_id, causation_id, payload_json, status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                idempotency_key,
+                _required_text(event_type, "event_type"),
+                _required_text(source, "source"),
+                actor_id,
+                work_id,
+                job_id,
+                task_id,
+                proposal_id,
+                correlation_id,
+                causation_id,
+                _json(payload),
+                _required_text(status, "status"),
+            ),
+        )
+        return event_id
 
     def set_preference(
         self,
@@ -353,6 +470,14 @@ class HarnessMemory:
             "INSERT INTO work_events(work_id, event_type, actor, payload_json) VALUES (?, ?, ?, ?)",
             (_required_text(work_id, "work_id"), _required_text(event_type, "event_type"), _required_text(actor, "actor"), _json(payload)),
         )
+        self._insert_agent_event(
+            event_type=f"work.{event_type}",
+            source="work_ledger",
+            actor_id=actor,
+            work_id=work_id,
+            job_id=str(payload.get("job_id")) if payload.get("job_id") else None,
+            payload=payload,
+        )
 
     def add_work_note(self, work_id: str, *, actor: str, note: str) -> dict[str, Any]:
         cur = self.conn.execute(
@@ -520,12 +645,31 @@ class HarnessMemory:
         self.conn.execute(
             """
             UPDATE work_jobs
-            SET status='running', worker_id=?, attempts=attempts + 1, started_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+            SET status='running', worker_id=?, attempts=attempts + 1, started_at=CURRENT_TIMESTAMP, heartbeat_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
             WHERE job_id=?
             """,
             (_required_text(worker_id, "worker_id"), job_id),
         )
         self.add_work_event(str(job["work_id"]), "job_running", actor=actor, payload={"job_id": job_id, "worker_id": worker_id})
+        self.conn.commit()
+        return self.get_work_job(job_id)
+
+    def mark_work_job_heartbeat(self, job_id: str, *, worker_id: str, message: str = "", actor: str = "worker") -> dict[str, Any]:
+        job = self.get_work_job(job_id)
+        self.conn.execute(
+            """
+            UPDATE work_jobs
+            SET heartbeat_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP, worker_id=COALESCE(worker_id, ?)
+            WHERE job_id=?
+            """,
+            (_required_text(worker_id, "worker_id"), job_id),
+        )
+        self.add_work_event(
+            str(job["work_id"]),
+            "job_heartbeat",
+            actor=actor,
+            payload={"job_id": job_id, "worker_id": worker_id, "message": redact_text(message, max_chars=300)},
+        )
         self.conn.commit()
         return self.get_work_job(job_id)
 
@@ -559,6 +703,23 @@ class HarnessMemory:
         self.add_work_event(str(job["work_id"]), "job_failed", actor=actor, payload={"job_id": job_id, "status": next_status, "error": redact_text(error, max_chars=1_000)})
         self.conn.commit()
         return self.get_work_job(job_id)
+
+    def stale_running_work_jobs(self, *, stale_after_seconds: int = 300, limit: int = 50) -> list[dict[str, Any]]:
+        stale_after_seconds = max(1, int(stale_after_seconds))
+        limit = max(1, min(int(limit), 200))
+        rows = self.conn.execute(
+            """
+            SELECT *,
+              CAST(strftime('%s','now') - strftime('%s', COALESCE(heartbeat_at, updated_at, started_at, created_at)) AS INTEGER) AS stale_for_seconds
+            FROM work_jobs
+            WHERE status='running'
+              AND (strftime('%s','now') - strftime('%s', COALESCE(heartbeat_at, updated_at, started_at, created_at))) >= ?
+            ORDER BY stale_for_seconds DESC
+            LIMIT ?
+            """,
+            (stale_after_seconds, limit),
+        ).fetchall()
+        return [_row(row) for row in rows]
 
     def create_capability_gap(
         self,
@@ -641,6 +802,14 @@ class HarnessMemory:
         self.conn.execute(
             "INSERT INTO proposal_events(proposal_id, event_type, actor, payload_json) VALUES (?, ?, ?, ?)",
             (_required_text(proposal_id, "proposal_id"), _required_text(event_type, "event_type"), _required_text(actor, "actor"), _json(payload)),
+        )
+        self._insert_agent_event(
+            event_type=f"proposal.{event_type}",
+            source="proposal_ledger",
+            actor_id=actor,
+            proposal_id=proposal_id,
+            work_id=str(payload.get("work_id")) if payload.get("work_id") else None,
+            payload=payload,
         )
 
     def get_capability_gap(self, gap_id: str) -> dict[str, Any]:

@@ -67,7 +67,11 @@ class WorkDispatcher:
                 work = memory.get_work_item(work_id)
                 runnable = _mark_runnable_work_started(memory, work, job_id=job_id, queue_name=queue_name, actor=self.config.worker_id)
             if runnable:
+                with HarnessMemory(self.config.db_path) as memory:
+                    memory.mark_work_job_heartbeat(job_id, worker_id=self.config.worker_id, actor=self.config.worker_id, message="runner_started")
                 result = self._run_work(job_id=job_id, queue_name=queue_name, work=work, payload=payload)
+                with HarnessMemory(self.config.db_path) as memory:
+                    memory.mark_work_job_heartbeat(job_id, worker_id=self.config.worker_id, actor=self.config.worker_id, message="runner_finished")
             else:
                 result = {"status": "ignored", "reason": "work item is not in a runnable state", "job_status_before": job.get("status")}
             with HarnessMemory(self.config.db_path) as memory:

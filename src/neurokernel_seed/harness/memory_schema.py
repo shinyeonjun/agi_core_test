@@ -23,6 +23,27 @@ CREATE TABLE IF NOT EXISTS task_events (
   event_type TEXT NOT NULL,
   payload_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS agent_events (
+  event_id TEXT PRIMARY KEY,
+  idempotency_key TEXT UNIQUE,
+  event_type TEXT NOT NULL,
+  source TEXT NOT NULL,
+  actor_id TEXT,
+  work_id TEXT,
+  job_id TEXT,
+  task_id TEXT,
+  proposal_id TEXT,
+  correlation_id TEXT,
+  causation_id TEXT,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'recorded',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  processed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_agent_events_created_at ON agent_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_events_work_id ON agent_events(work_id);
+CREATE INDEX IF NOT EXISTS idx_agent_events_job_id ON agent_events(job_id);
+CREATE INDEX IF NOT EXISTS idx_agent_events_type ON agent_events(event_type);
 CREATE TABLE IF NOT EXISTS action_decisions (
   decision_id INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
@@ -154,6 +175,7 @@ CREATE TABLE IF NOT EXISTS work_jobs (
   max_attempts INTEGER NOT NULL DEFAULT 3,
   worker_id TEXT,
   redis_message_id TEXT,
+  heartbeat_at TEXT,
   last_error TEXT,
   payload_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -221,6 +243,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
 def migrate_schema(conn: sqlite3.Connection) -> None:
     ensure_column(conn, "capability_proposals", "work_id", "TEXT")
     ensure_column(conn, "work_items", "queued_at", "TEXT")
+    ensure_column(conn, "work_jobs", "heartbeat_at", "TEXT")
 
 
 def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
