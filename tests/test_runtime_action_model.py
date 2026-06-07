@@ -216,6 +216,7 @@ def _write_runtime_ranking_features(tmp_path):
     features = tmp_path / "runtime_ranking_features.jsonl"
     actions = ["inspect", "repair"]
     manifest = _runtime_manifest(actions)
+    manifest["rows"] = 4
     rows = []
     for group_index in range(2):
         for action in actions:
