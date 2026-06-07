@@ -1989,9 +1989,9 @@ def _run_advanced(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _default_current_bench_dir(release_name: str) -> Path:
-    run_root = Path(os.getenv("NEUROKERNEL_TRAIN_RUN_DIR", "artifacts/training_runs"))
+    run_root = Path(os.getenv("NEUROKERNEL_MODEL_BENCHMARK_DIR", "artifacts/model_benchmarks")) / "current_models"
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return run_root / f"current_core_{release_name}_{stamp}"
+    return run_root / f"world_current_{_safe_token(release_name)}_{stamp}"
 
 
 def _utc_stamp() -> str:
@@ -2141,6 +2141,8 @@ def _resolve_benchmark_model(args: argparse.Namespace) -> Path:
 
 
 def _summarize_training_run(path: Path) -> dict[str, Any] | None:
+    if _is_current_world_benchmark_dir(path.parent):
+        return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -2161,6 +2163,14 @@ def _summarize_training_run(path: Path) -> dict[str, Any] | None:
         "hybrid_gain_over_prior": _as_float(aggregate.get("hybrid_gain_over_prior")),
         "groups_with_model_needed_signal": aggregate.get("groups_with_model_needed_signal") or [],
     }
+
+
+def _is_current_world_benchmark_dir(run_dir: Path) -> bool:
+    manifest_path = run_dir / "current_core_benchmark_manifest.json"
+    if not manifest_path.exists():
+        return False
+    manifest = _read_json(manifest_path)
+    return manifest is None or manifest.get("source") == "orangepi_current_model"
 
 
 def _top_sort_key(item: dict[str, Any]) -> tuple[float, int, float]:

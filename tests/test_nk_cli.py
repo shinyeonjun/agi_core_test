@@ -41,6 +41,29 @@ def test_nk_top_ranks_training_runs_by_benchmark_quality(tmp_path):
     assert result["top"][0]["hybrid_veto_gain_over_prior"] == 0.4
 
 
+def test_nk_top_ignores_current_world_benchmark_cache(tmp_path):
+    _write_ablation(tmp_path / "candidate", hybrid_veto=0.9, prior=0.6, signal_count=1)
+    _write_ablation(tmp_path / "current_core_current_a_20260607T000000Z", hybrid_veto=1.0, prior=0.5, signal_count=5)
+    (tmp_path / "current_core_current_a_20260607T000000Z" / "current_core_benchmark_manifest.json").write_text(
+        json.dumps({"source": "orangepi_current_model", "release_name": "current_a"}),
+        encoding="utf-8",
+    )
+
+    result = nk_cli._run_top_models(argparse.Namespace(run_dir=str(tmp_path), limit=5))
+
+    assert [item["run_name"] for item in result["top"]] == ["candidate"]
+
+
+def test_nk_current_benchmark_default_dir_stays_out_of_training_runs(tmp_path, monkeypatch):
+    monkeypatch.setenv("NEUROKERNEL_MODEL_BENCHMARK_DIR", str(tmp_path / "benchmarks"))
+    monkeypatch.setenv("NEUROKERNEL_TRAIN_RUN_DIR", str(tmp_path / "runs"))
+
+    result = nk_cli._default_current_bench_dir("current/a")
+
+    assert result.parent == tmp_path / "benchmarks" / "current_models"
+    assert result.name.startswith("world_current_current_a_")
+
+
 def test_nk_help_exposes_menu_commands():
     parser = nk_cli._build_parser()
     help_text = parser.format_help()
