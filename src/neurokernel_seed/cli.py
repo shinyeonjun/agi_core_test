@@ -162,6 +162,36 @@ def main(argv: list[str] | None = None) -> int:
         result = export_onnx(args.checkpoint, args.out, verify=not args.no_verify, dynamic_batch=not args.static_batch)
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
+    if args.cmd == "run-training-pipeline":
+        from neurokernel_seed.model.pipeline import TrainingPipelineConfig, run_training_pipeline
+        result = run_training_pipeline(
+            TrainingPipelineConfig(
+                features=args.features,
+                out_dir=args.out_dir,
+                run_name=args.run_name,
+                epochs=args.epochs,
+                batch_size=args.batch_size,
+                lr=args.lr,
+                weight_decay=args.weight_decay,
+                hidden_dim=args.hidden_dim,
+                hidden_layers=args.hidden_layers,
+                device=args.device,
+                patience=args.patience,
+                split=args.split,
+                verify_onnx=not args.no_onnx_verify,
+                dynamic_batch=not args.static_batch,
+                run_gate_ablation=not args.skip_gate_ablation,
+                gate_ablation_episodes=args.gate_ablation_episodes,
+                trace_episodes=args.trace_episodes,
+                max_failures_per_env=args.max_failures_per_env,
+                strict=args.strict,
+                allow_gate_failure=args.allow_gate_failure,
+                allow_benchmark_failure=args.allow_benchmark_failure,
+                overwrite=args.overwrite,
+            )
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
     if args.cmd == "eval-learned-gate":
         result = _eval_learned_gate(args.model, args.split, args.episodes, args.db, args.gate_mode)
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
