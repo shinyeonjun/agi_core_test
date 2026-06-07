@@ -18,6 +18,11 @@ if not defined NEUROKERNEL_TRAIN_RUN_DIR set "NEUROKERNEL_TRAIN_RUN_DIR=%WORKSPA
 if not defined NEUROKERNEL_EDGE_HOST set "NEUROKERNEL_EDGE_HOST=orangepi5"
 if not defined NEUROKERNEL_EDGE_PROJECT set "NEUROKERNEL_EDGE_PROJECT=/home/ubuntu/projects/neurokernel-agi-seed"
 
+set "PYTHON_EXE=python"
+if exist "%WORKSPACE_DIR%\neurokernel-agi-seed\venv\Scripts\python.exe" set "PYTHON_EXE=%WORKSPACE_DIR%\neurokernel-agi-seed\venv\Scripts\python.exe"
+if exist "%WORKSPACE_DIR%\venv\Scripts\python.exe" set "PYTHON_EXE=%WORKSPACE_DIR%\venv\Scripts\python.exe"
+if exist "%PROJECT_DIR%\venv\Scripts\python.exe" set "PYTHON_EXE=%PROJECT_DIR%\venv\Scripts\python.exe"
+
 set "PYTHONPATH=%PROJECT_DIR%\src;%PYTHONPATH%"
-python -m neurokernel_seed.nk_cli %*
+"%PYTHON_EXE%" -m neurokernel_seed.nk_cli %*
 exit /b %ERRORLEVEL%

@@ -3,18 +3,21 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from neurokernel_seed.eval.gate_ablation import GateAblationConfig, run_gate_ablation
+from neurokernel_seed.model.pipeline import TrainingPipelineConfig, run_training_pipeline
 from neurokernel_seed.model.release import (
     ModelReleaseError,
     ModelReleaseRemoteConfig,
     TrainDeployModelConfig,
     activate_model_release,
     current_model_release,
+    deploy_training_run,
     list_model_releases,
     train_deploy_model,
 )
@@ -40,14 +43,33 @@ def _build_parser() -> argparse.ArgumentParser:
         description="NeuroKernel 모델 학습/배포 리모컨. 그냥 nk만 실행하면 메뉴가 뜬다.",
     )
     sub = parser.add_subparsers(dest="action")
-    for name in ("check", "train", "train-use"):
+    for name in ("check", "train"):
         p = sub.add_parser(name)
         p.add_argument("run_name", nargs="?", help="비우면 자동 이름 사용")
         _add_train_options(p)
+    p = sub.add_parser("deploy")
+    p.add_argument("run_name", help="배포할 로컬 training run 이름")
+    _add_remote_options(p)
+    p.add_argument("--run-dir", help="training run 루트. 기본값은 NEUROKERNEL_TRAIN_RUN_DIR")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("deploy-use")
+    p.add_argument("run_name", help="배포 후 현재 모델로 활성화할 로컬 training run 이름")
+    _add_remote_options(p)
+    p.add_argument("--run-dir", help="training run 루트. 기본값은 NEUROKERNEL_TRAIN_RUN_DIR")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("bench")
     p.add_argument("run_name", nargs="?", help="학습 run 이름. --model을 쓰면 생략 가능")
     p.add_argument("--model", help="직접 검증할 ONNX 모델 경로")
     p.add_argument("--out-dir", help="벤치 결과 저장 위치")
+    p.add_argument("--episodes", type=int, default=50)
+    p.add_argument("--trace-episodes", type=int, default=10)
+    p.add_argument("--max-failures-per-env", type=int, default=10)
+    p.add_argument("--no-strict", dest="strict", action="store_false")
+    p.set_defaults(strict=True)
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("bench-current")
+    _add_remote_options(p)
+    p.add_argument("--out-dir", help="현재 모델 벤치 저장 위치")
     p.add_argument("--episodes", type=int, default=50)
     p.add_argument("--trace-episodes", type=int, default=10)
     p.add_argument("--max-failures-per-env", type=int, default=10)
@@ -95,24 +117,28 @@ def _run_menu(args: argparse.Namespace) -> int:
     print()
     print("NeuroKernel 모델 리모컨")
     print("1. 학습 전 확인")
-    print("2. 학습 + 오렌지파이 배포")
-    print("3. 학습 + 배포 + 현재 모델로 활성화")
+    print("2. 학습 + 냉정 벤치 저장")
+    print("3. 벤치 상위 모델 비교")
     print("4. 냉정 벤치만 다시 실행")
-    print("5. 벤치 상위 모델 비교")
-    print("6. 오렌지파이 모델 목록")
-    print("7. 현재 활성 모델 확인")
-    print("8. 기존 모델 활성화")
+    print("5. 현재 코어 모델 벤치 저장")
+    print("6. 선택 모델 오렌지파이 배포")
+    print("7. 선택 모델 배포 후 현재 모델로 활성화")
+    print("8. 오렌지파이 모델 목록")
+    print("9. 현재 활성 모델 확인")
+    print("10. 기존 배포 모델 활성화")
     print("0. 종료")
     choice = input("> 번호 선택: ").strip()
     action_by_choice = {
         "1": "check",
         "2": "train",
-        "3": "train-use",
+        "3": "top",
         "4": "bench",
-        "5": "top",
-        "6": "list",
-        "7": "current",
-        "8": "use",
+        "5": "bench-current",
+        "6": "deploy",
+        "7": "deploy-use",
+        "8": "list",
+        "9": "current",
+        "10": "use",
         "0": "exit",
     }
     action = action_by_choice.get(choice)
@@ -123,9 +149,14 @@ def _run_menu(args: argparse.Namespace) -> int:
         print("종료.")
         return 0
     run_name = None
-    if action in {"check", "train", "train-use"}:
+    if action in {"check", "train"}:
         raw = input("> 모델 이름(비우면 자동 생성): ").strip()
         run_name = raw or None
+    elif action in {"deploy", "deploy-use"}:
+        run_name = input("> 배포할 로컬 training run 이름: ").strip()
+        if not run_name:
+            print("모델 이름이 필요해.")
+            return 2
     elif action == "bench":
         raw = input("> 검증할 학습 run 이름 또는 ONNX 경로: ").strip()
         if raw.lower().endswith(".onnx"):
@@ -174,7 +205,7 @@ def _run_menu(args: argparse.Namespace) -> int:
 
 
 def _run_action(args: argparse.Namespace) -> dict[str, Any]:
-    if args.action in {"check", "train", "train-use"}:
+    if args.action == "check":
         return train_deploy_model(
             TrainDeployModelConfig(
                 features=getattr(args, "features", None),
@@ -182,8 +213,8 @@ def _run_action(args: argparse.Namespace) -> dict[str, Any]:
                 run_name=getattr(args, "run_name", None),
                 remote_host=getattr(args, "remote_host", None),
                 remote_project=getattr(args, "remote_project", None),
-                dry_run=args.action == "check",
-                activate=args.action == "train-use",
+                dry_run=True,
+                activate=False,
                 epochs=getattr(args, "epochs", 50),
                 batch_size=getattr(args, "batch_size", 1024),
                 device=getattr(args, "device", "cuda"),
@@ -192,8 +223,14 @@ def _run_action(args: argparse.Namespace) -> dict[str, Any]:
                 overwrite_local_run=getattr(args, "overwrite_local_run", False),
             )
         )
+    if args.action == "train":
+        return _run_local_training_action(args)
+    if args.action in {"deploy", "deploy-use"}:
+        return _run_deploy_action(args, activate=args.action == "deploy-use")
     if args.action == "bench":
         return _run_benchmark_action(args)
+    if args.action == "bench-current":
+        return _run_benchmark_current_action(args)
     if args.action == "top":
         return _run_top_models(args)
     remote_config = ModelReleaseRemoteConfig(
@@ -210,14 +247,63 @@ def _run_action(args: argparse.Namespace) -> dict[str, Any]:
     raise ModelReleaseError(f"unknown nk action: {args.action}")
 
 
+def _run_local_training_action(args: argparse.Namespace) -> dict[str, Any]:
+    features = getattr(args, "features", None) or os.getenv("NEUROKERNEL_TRAIN_FEATURES")
+    if not features:
+        raise ModelReleaseError("train에는 --features 또는 NEUROKERNEL_TRAIN_FEATURES가 필요해")
+    out_dir = getattr(args, "out_dir", None) or os.getenv("NEUROKERNEL_TRAIN_RUN_DIR", "artifacts/training_runs")
+    return run_training_pipeline(
+        TrainingPipelineConfig(
+            features=features,
+            out_dir=out_dir,
+            run_name=getattr(args, "run_name", None),
+            epochs=getattr(args, "epochs", 50),
+            batch_size=getattr(args, "batch_size", 1024),
+            device=getattr(args, "device", "cuda"),
+            patience=getattr(args, "patience", 10),
+            run_gate_ablation=not getattr(args, "skip_gate_ablation", False),
+            overwrite=getattr(args, "overwrite_local_run", False),
+            strict=True,
+        )
+    )
+
+
+def _run_deploy_action(args: argparse.Namespace, *, activate: bool) -> dict[str, Any]:
+    run_root = Path(getattr(args, "run_dir", None) or os.getenv("NEUROKERNEL_TRAIN_RUN_DIR", "artifacts/training_runs"))
+    run_name = getattr(args, "run_name", None)
+    if not run_name:
+        raise ModelReleaseError("deploy에는 run 이름이 필요해")
+    run_dir = run_root / run_name
+    if not run_dir.exists():
+        raise ModelReleaseError(f"training run not found: {run_dir}")
+    remote_host = getattr(args, "remote_host", None) or os.getenv("NEUROKERNEL_EDGE_HOST", "orangepi5")
+    remote_project = getattr(args, "remote_project", None) or os.getenv("NEUROKERNEL_EDGE_PROJECT", "/home/ubuntu/projects/neurokernel-agi-seed")
+    release = deploy_training_run(
+        run_dir,
+        release_name=run_name,
+        remote_host=remote_host,
+        remote_project=remote_project,
+        activate=activate,
+        ssh_connect_timeout=getattr(args, "ssh_connect_timeout", 10),
+    )
+    return {
+        "status": "deployed_and_activated" if activate else "deployed",
+        "run_name": run_name,
+        "run_dir": str(run_dir),
+        "release": release,
+    }
+
+
 def _run_benchmark_action(args: argparse.Namespace) -> dict[str, Any]:
     model_path = _resolve_benchmark_model(args)
     out_dir = getattr(args, "out_dir", None)
     if out_dir:
-        benchmark_dir = Path(out_dir)
+        run_dir = Path(out_dir)
+        benchmark_dir = run_dir / "gate_ablation"
     else:
-        benchmark_dir = model_path.parent / f"gate_ablation_nk_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
-    return run_gate_ablation(
+        run_dir = model_path.parent
+        benchmark_dir = run_dir / f"gate_ablation_nk_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    result = run_gate_ablation(
         model_path,
         out_dir=benchmark_dir,
         config=GateAblationConfig(
@@ -227,6 +313,67 @@ def _run_benchmark_action(args: argparse.Namespace) -> dict[str, Any]:
             strict=getattr(args, "strict", True),
         ),
     )
+    (run_dir / "gate_ablation_result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return result
+
+
+def _run_benchmark_current_action(args: argparse.Namespace) -> dict[str, Any]:
+    remote_config = ModelReleaseRemoteConfig(
+        remote_host=getattr(args, "remote_host", None),
+        remote_project=getattr(args, "remote_project", None),
+        ssh_connect_timeout=getattr(args, "ssh_connect_timeout", 10),
+    )
+    current = current_model_release(remote_config)
+    current_payload = current.get("current") or {}
+    release_name = current_payload.get("release_name") or current_payload.get("run_name") or "current_core"
+    safe_release_name = "".join(char if char.isalnum() or char in "._-" else "_" for char in str(release_name))
+    benchmark_dir = Path(getattr(args, "out_dir", None) or _default_current_bench_dir(safe_release_name))
+    benchmark_dir.mkdir(parents=True, exist_ok=True)
+    remote_host = current["remote_host"]
+    remote_project = current["remote_project"].rstrip("/")
+    _copy_remote_file(remote_host, f"{remote_project}/artifacts/current_world_model.onnx", benchmark_dir / "world_model.onnx")
+    _copy_remote_file(
+        remote_host,
+        f"{remote_project}/artifacts/current_world_model.manifest.json",
+        benchmark_dir / "world_model.manifest.json",
+    )
+    result = run_gate_ablation(
+        benchmark_dir / "world_model.onnx",
+        out_dir=benchmark_dir / "gate_ablation",
+        config=GateAblationConfig(
+            episodes=getattr(args, "episodes", 50),
+            trace_episodes=getattr(args, "trace_episodes", 10),
+            max_failures_per_env=getattr(args, "max_failures_per_env", 10),
+            strict=getattr(args, "strict", True),
+        ),
+    )
+    result_path = benchmark_dir / "gate_ablation_result.json"
+    result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    manifest = {
+        "status": "completed",
+        "source": "orangepi_current_model",
+        "release_name": release_name,
+        "remote_host": remote_host,
+        "remote_project": remote_project,
+        "run_dir": str(benchmark_dir),
+        "gate_ablation_result": str(result_path),
+    }
+    (benchmark_dir / "current_core_benchmark_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return manifest | {"benchmark": result}
+
+
+def _default_current_bench_dir(release_name: str) -> Path:
+    run_root = Path(os.getenv("NEUROKERNEL_TRAIN_RUN_DIR", "artifacts/training_runs"))
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return run_root / f"current_core_{release_name}_{stamp}"
+
+
+def _copy_remote_file(remote_host: str, remote_path: str, local_path: Path) -> None:
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(["scp", f"{remote_host}:{remote_path}", str(local_path)], check=False, text=True, capture_output=True)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise ModelReleaseError(f"scp failed for {remote_path}: {detail}")
 
 
 def _resolve_benchmark_model(args: argparse.Namespace) -> Path:
@@ -314,12 +461,19 @@ def _print_result(action: str, result: dict[str, Any], *, json_mode: bool) -> No
         print(f"- 오렌지파이 위치: {preflight['remote_release_dir']}")
         return
     if action == "train":
-        print("학습, 냉정 벤치, 배포가 끝났어. 아직 현재 모델로 활성화하진 않았어.")
+        print("학습과 냉정 벤치가 끝났어. 아직 오렌지파이에 배포하진 않았어.")
+        print(f"- 모델 이름: {result['run_name']}")
+        print(f"- 로컬 결과 위치: {result['run_dir']}")
+        if result.get("artifacts", {}).get("gate_ablation"):
+            print(f"- 벤치 결과: {result['artifacts']['gate_ablation']}")
+        return
+    if action == "deploy":
+        print("선택한 모델을 오렌지파이에 배포했어. 아직 현재 모델로 활성화하진 않았어.")
         print(f"- 모델 이름: {result['run_name']}")
         print(f"- 오렌지파이 위치: {result['release']['remote_release_dir']}")
         return
-    if action == "train-use":
-        print("학습, 배포, 현재 모델 활성화까지 끝났어.")
+    if action == "deploy-use":
+        print("선택한 모델을 배포하고 현재 모델로 활성화했어.")
         print(f"- 현재 모델: {result['run_name']}")
         return
     if action == "bench":
@@ -331,6 +485,15 @@ def _print_result(action: str, result: dict[str, Any], *, json_mode: bool) -> No
             print(f"- 요약: {interpretation['summary']}")
         if result.get("out"):
             print(f"- 결과 파일: {result['out']}")
+        return
+    if action == "bench-current":
+        benchmark = result.get("benchmark", {})
+        interpretation = benchmark.get("interpretation", {})
+        print("현재 코어 모델 벤치 결과를 저장했어.")
+        print(f"- 모델 이름: {result['release_name']}")
+        print(f"- 저장 위치: {result['run_dir']}")
+        if interpretation.get("verdict"):
+            print(f"- 판정: {interpretation['verdict']}")
         return
     if action == "top":
         top = result.get("top") or []

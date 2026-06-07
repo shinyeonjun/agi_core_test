@@ -15,13 +15,15 @@ nk
 
 ```text
 1. 학습 전 확인
-2. 학습 + 오렌지파이 배포
-3. 학습 + 배포 + 현재 모델로 활성화
+2. 학습 + 냉정 벤치 저장
+3. 벤치 상위 모델 비교
 4. 냉정 벤치만 다시 실행
-5. 벤치 상위 모델 비교
-6. 오렌지파이 모델 목록
-7. 현재 활성 모델 확인
-8. 기존 모델 활성화
+5. 현재 코어 모델 벤치 저장
+6. 선택 모델 오렌지파이 배포
+7. 선택 모델 배포 후 현재 모델로 활성화
+8. 오렌지파이 모델 목록
+9. 현재 활성 모델 확인
+10. 기존 배포 모델 활성화
 ```
 
 바로 실행하고 싶으면 아래처럼 쓴다.
@@ -29,9 +31,11 @@ nk
 ```cmd
 nk check
 nk train
-nk train-use
 nk bench <run_name>
+nk bench-current
 nk top
+nk deploy <run_name>
+nk deploy-use <run_name>
 nk list
 nk current
 nk use <run_name>
@@ -76,9 +80,11 @@ NEUROKERNEL_EDGE_PROJECT=/home/ubuntu/projects/neurokernel-agi-seed
 5. action ranking 평가
 6. ONNX export와 검증
 7. gate ablation 냉정 벤치
-8. 오렌지파이에 원자적 배포
 
-벤치가 통과하지 못하면 기본적으로 배포를 실패 처리한다.
+`nk train`은 여기서 멈춘다. 바로 오렌지파이에 배포하지 않는다.
+이유는 새 모델이 기존 모델보다 나은지 비교하기 전에는 운영 모델을 건드리지 않기 위해서다.
+
+벤치가 통과하지 못하면 기본적으로 학습 run을 실패 처리한다.
 실험용으로만 실패 결과까지 보고 싶을 때는 내부 CLI의 `--allow-benchmark-failure`를 명시적으로 써야 한다.
 
 ## 모델 비교
@@ -97,7 +103,33 @@ nk top
 
 즉 단순히 “성공률 1.0”만 보는 게 아니라, prior만으로 풀린 건지 모델이 실제로 보탰는지도 같이 본다.
 
-## 현재 모델 확인과 활성화
+현재 오렌지파이에 물려 있는 core 모델도 같은 방식으로 벤치 기록을 남길 수 있다.
+
+```cmd
+nk bench-current
+```
+
+이 명령은 오렌지파이의 `current_world_model.onnx`를 노트북으로 가져와서 냉정 벤치를 돌리고, `training_runs/current_core_<release>_<time>` 폴더에 `gate_ablation_result.json`을 저장한다.
+따라서 `nk top`에서 새 모델들과 같은 기준으로 비교할 수 있다.
+
+## 배포와 활성화
+
+학습과 비교가 끝난 뒤 선택한 모델을 오렌지파이에 배포한다.
+
+```cmd
+nk deploy <run_name>
+```
+
+배포까지 하고 바로 현재 모델로 바꾸려면:
+
+```cmd
+nk deploy-use <run_name>
+```
+
+`deploy`와 `deploy-use`는 로컬 `training_runs/<run_name>` 폴더를 기준으로 배포한다.
+같은 이름의 릴리즈가 오렌지파이에 이미 있으면 실패한다.
+
+## 현재 모델 확인과 기존 릴리즈 활성화
 
 오렌지파이에 저장된 모델 목록:
 

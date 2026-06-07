@@ -78,7 +78,8 @@ def test_model_cli_commands_are_registered():
     result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "train-deploy-model", "--help"], check=True, text=True, capture_output=True, env=env)
     assert "--activate" in result.stdout
     result = subprocess.run([sys.executable, "-m", "neurokernel_seed.nk_cli", "--help"], check=True, text=True, capture_output=True, env=env)
-    assert "train-use" in result.stdout
+    assert "deploy-use" in result.stdout
+    assert "bench-current" in result.stdout
     assert "current" in result.stdout
     result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "benchmark-runtime", "--help"], check=True, text=True, capture_output=True, env=env)
     assert "--backend" in result.stdout
