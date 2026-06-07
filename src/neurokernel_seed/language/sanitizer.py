@@ -35,15 +35,19 @@ INTERNAL_TERMS = {
     "run_safe_benchmark",
 }
 
+_TOKEN_BOUNDARY_RE = r"(?<![A-Za-z0-9_]){term}(?![A-Za-z0-9_])"
+
 
 def contains_internal_language(text: str) -> bool:
     if "```" in text or "{" in text or "}" in text:
         return True
-    lowered = text.lower()
     for term in INTERNAL_TERMS:
-        if term.lower() in lowered:
+        pattern = _TOKEN_BOUNDARY_RE.format(term=re.escape(term))
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            if term.lower() == "json" and match.start() > 0 and text[match.start() - 1] == ".":
+                continue
             return True
-    return bool(re.search(r"\b[a-z]+_[a-z0-9_]+\b", text))
+    return False
 
 
 def clean_human_reply(text: str) -> str:
