@@ -202,6 +202,7 @@ def _runtime_row(
     success = bool(execution_payload.get("success")) if execution_payload else False
     row_id = _row_id(task, decision, execution)
     experience_payload = _experience_payload(experience)
+    decision_status = _decision_time_status(task, experience_payload)
     candidate_outcomes = _candidate_outcomes(experience, candidates_by_experience or {})
     return {
         "row_id": row_id,
@@ -219,7 +220,8 @@ def _runtime_row(
             "created_at": task.get("created_at"),
             "source": task.get("source"),
             "target": task.get("target"),
-            "status": task.get("status"),
+            "status": decision_status,
+            "final_status": task.get("status"),
             "risk_level": task.get("risk_level"),
             "requires_approval": bool(task.get("requires_approval")),
             "goal_redacted": redact_text(str(task.get("goal") or ""), max_chars=500),
@@ -305,6 +307,12 @@ def _experience_payload(experience: dict[str, Any] | None) -> dict[str, Any]:
         "after_state": _bounded_json(experience.get("after_state_json")),
         "learning_masks": _bounded_json(experience.get("learning_masks_json")),
     }
+
+
+def _decision_time_status(task: dict[str, Any], experience_payload: dict[str, Any]) -> str:
+    before = experience_payload.get("before_state") if isinstance(experience_payload.get("before_state"), dict) else {}
+    status = before.get("task_status") or before.get("phase") or experience_payload.get("phase")
+    return str(status or "deciding")
 
 
 def _candidate_outcomes(experience: dict[str, Any] | None, grouped: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:

@@ -10,6 +10,28 @@ from neurokernel_seed.harness.memory import HarnessMemory
 from neurokernel_seed.harness.service import HarnessService
 
 
+class FakeRuntimePolicy:
+    def __init__(self, ranked_actions=None):
+        self.ranked_actions = ranked_actions or []
+
+    def rank(self, *, task, decisions):
+        scores = {}
+        for index, item in enumerate(decisions):
+            action_id = item["action_id"]
+            scores[action_id] = {
+                "model_used": True,
+                "reason": "test_runtime_policy",
+                "score": 10.0 - self.ranked_actions.index(action_id) if action_id in self.ranked_actions else float(index),
+            }
+        return {
+            "model_used": True,
+            "reason": "ranked_by_runtime_action_model",
+            "ranked_actions": list(self.ranked_actions),
+            "scores": scores,
+            "top_action": self.ranked_actions[0] if self.ranked_actions else None,
+        }
+
+
 def test_readonly_executor_blocks_path_escape(tmp_path):
     executor = ReadOnlyExecutor(project_root=tmp_path)
     result = executor.execute("tail_logs", {"path": "../outside.log"})
@@ -204,7 +226,7 @@ def test_harness_service_runs_readonly_task_and_records_result(tmp_path):
     assert experience["status"] == "completed"
     assert experience["decision_policy"] == "deterministic_safety_first"
     assert experience["model_used"] is False
-    assert experience["model_unavailable_reason"] == "no_current_runtime_action_model"
+    assert experience["model_unavailable_reason"] == "model_unavailable"
     assert len(experience["candidates"]) == 1
     candidate = experience["candidates"][0]
     assert candidate["action_id"] == "list_artifacts"
@@ -217,6 +239,52 @@ def test_harness_service_runs_readonly_task_and_records_result(tmp_path):
         "duration_seconds": True,
         "failure_present": True,
     }
+
+
+def test_harness_service_uses_runtime_model_to_rank_safe_candidates(tmp_path):
+    db = tmp_path / "harness.db"
+    service = HarnessService(db_path=db, project_root=tmp_path, runtime_policy=FakeRuntimePolicy(["get_memory_usage", "list_artifacts"]))
+    created = service.create_task(
+        {
+            "goal": "choose the better readonly action",
+            "target": "orangepi5",
+            "allowed_actions": ["list_artifacts", "get_memory_usage"],
+            "context": {"params": {"path": "."}},
+            "risk_level": "low",
+            "requires_approval": False,
+            "mode": "readonly",
+        }
+    )
+
+    result = service.run(created["task"]["task_id"])
+
+    assert result["status"] == "completed"
+    assert result["action"] == "get_memory_usage"
+    with HarnessMemory(db) as memory:
+        experience = memory.get_experience(memory.recent_experiences(task_id=created["task"]["task_id"])[0]["experience_id"])
+    assert experience["decision_policy"] == "runtime_model_ranked_safety_gated"
+    assert experience["model_used"] is True
+    selected = [item for item in experience["candidates"] if item["selected"]]
+    assert selected[0]["action_id"] == "get_memory_usage"
+    assert selected[0]["model_score_json"]["model_used"] is True
+
+
+def test_harness_service_runtime_model_does_not_bypass_approval(tmp_path):
+    service = HarnessService(db_path=tmp_path / "harness.db", project_root=tmp_path, runtime_policy=FakeRuntimePolicy(["write_file"]))
+    created = service.create_task(
+        {
+            "goal": "write something",
+            "target": "orangepi5",
+            "allowed_actions": ["write_file"],
+            "risk_level": "low",
+            "requires_approval": False,
+        }
+    )
+
+    result = service.run(created["task"]["task_id"])
+
+    assert result["status"] == "waiting_approval"
+    assert result["safety"]["decision"] == "requires_approval"
 
 
 def test_harness_service_rejects_unknown_preference_key(tmp_path):

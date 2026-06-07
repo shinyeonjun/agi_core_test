@@ -23,7 +23,7 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "waiting_approval": {"ready", "failed", "cancelled"},
     "ready": {"running", "failed", "cancelled"},
     "running": {"deciding", "executing", "failed", "cancelled"},
-    "deciding": {"executing", "failed", "cancelled"},
+    "deciding": {"waiting_approval", "executing", "failed", "cancelled"},
     "executing": {"evaluating", "failed", "cancelled"},
     "evaluating": {"completed", "failed", "deciding", "cancelled"},
     "completed": set(),
@@ -41,4 +41,3 @@ def assert_transition(current: str, next_state: str) -> None:
         raise StateTransitionError(f"unknown current state: {current}")
     if next_state not in ALLOWED_TRANSITIONS[current]:
         raise StateTransitionError(f"invalid state transition: {current} -> {next_state}")
-

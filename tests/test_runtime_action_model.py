@@ -7,6 +7,9 @@ from neurokernel_seed.model.runtime_action import (
     eval_runtime_action_checkpoint,
     train_runtime_action_model,
 )
+from neurokernel_seed.harness.runtime_policy import RuntimeActionPolicy, RuntimePolicyConfig
+from neurokernel_seed.harness.task_spec import TaskSpec
+from neurokernel_seed.model.mlp import WorldModelConfig, build_model
 from neurokernel_seed.replay.runtime_features import (
     NUMERIC_FEATURE_NAMES,
     RUNTIME_FEATURE_SCHEMA_VERSION,
@@ -55,6 +58,52 @@ def test_runtime_action_model_refuses_dataset_without_test_split(tmp_path):
 
     assert gates["ready_for_runtime_model_training"] is False
     assert gates["gates"]["train_and_test_splits"]["passed"] is False
+
+
+def test_runtime_action_policy_ranks_live_safe_candidates(tmp_path):
+    import torch
+
+    model_path = tmp_path / "current_runtime_action_model.pt"
+    manifest = _runtime_manifest(["inspect", "repair"])
+    config = WorldModelConfig(input_dim=manifest["input_dim"], target_dim=manifest["target_dim"], hidden_dim=8, hidden_layers=0)
+    model = build_model(config)
+    with torch.no_grad():
+        model[0].weight.zero_()
+        model[0].bias.zero_()
+        model[0].weight[0, 0] = -5.0
+        model[0].weight[0, 1] = 5.0
+        model[0].weight[1, 0] = -1.0
+        model[0].weight[1, 1] = 1.0
+        model[0].weight[3, 0] = 5.0
+        model[0].weight[3, 1] = -5.0
+    torch.save(
+        {
+            "schema_version": RUNTIME_ACTION_MODEL_SCHEMA_VERSION,
+            "model_state_dict": model.state_dict(),
+            "config": config.as_dict(),
+            "manifest": manifest,
+        },
+        model_path,
+    )
+    task = TaskSpec(
+        task_id="task_1",
+        goal="repair after inspect",
+        target="orangepi5",
+        allowed_actions=("inspect", "repair"),
+        risk_level="low",
+        requires_approval=False,
+        mode="readonly",
+    )
+    decisions = [
+        {"action_id": "inspect", "safety": {"decision": "allow"}},
+        {"action_id": "repair", "safety": {"decision": "allow"}},
+    ]
+
+    result = RuntimeActionPolicy(RuntimePolicyConfig(model_path=model_path)).rank(task=task, decisions=decisions)
+
+    assert result["model_used"] is True
+    assert result["ranked_actions"][0] == "repair"
+    assert result["scores"]["repair"]["success_probability"] > result["scores"]["inspect"]["success_probability"]
 
 
 def _write_runtime_features(tmp_path, *, split_mode: str):
@@ -124,6 +173,34 @@ def _write_runtime_features(tmp_path, *, split_mode: str):
     features.write_text("\n".join(json.dumps(row, ensure_ascii=False, sort_keys=True) for row in rows) + "\n", encoding="utf-8")
     features.with_suffix(features.suffix + ".manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     return features
+
+
+def _runtime_manifest(actions):
+    sources = ["unknown"]
+    targets = ["orangepi5"]
+    statuses = ["deciding"]
+    risks = ["low"]
+    safety = ["allow"]
+    input_dim = len(actions) + len(sources) + len(targets) + len(statuses) + len(risks) + len(safety) + len(NUMERIC_FEATURE_NAMES)
+    return {
+        "schema_version": RUNTIME_FEATURE_SCHEMA_VERSION,
+        "replay_schema_version": "neurokernel-runtime-action-v1",
+        "rows": 2,
+        "splits": ["train", "test"],
+        "action_vocab": actions,
+        "source_vocab": sources,
+        "target_vocab": targets,
+        "status_vocab": statuses,
+        "risk_vocab": risks,
+        "safety_vocab": safety,
+        "numeric_feature_names": list(NUMERIC_FEATURE_NAMES),
+        "target_names": list(TARGET_NAMES),
+        "input_dim": input_dim,
+        "target_dim": len(TARGET_NAMES),
+        "input_layout": {},
+        "target_layout": {name: index for index, name in enumerate(TARGET_NAMES)},
+        "split_policy": {"type": "test_fixture", "test_ratio": 0.5},
+    }
 
 
 def _onehot(value, vocab):

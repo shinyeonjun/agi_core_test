@@ -41,6 +41,8 @@ def test_runtime_replay_exports_harness_decisions_and_results(tmp_path):
     assert rows[0]["decision"]["candidate_actions"] == [{"action_id": "list_artifacts"}]
     assert rows[0]["execution"]["action_id"] == "list_artifacts"
     assert rows[0]["outcome"]["success"] is True
+    assert rows[0]["task"]["status"] == "executing"
+    assert rows[0]["task"]["final_status"] == "completed"
     assert rows[0]["row_id"].startswith("runtime_")
     assert rows[0]["lineage"]["decision_id"] == 1
     assert rows[0]["lineage"]["experience_id"].startswith("exp_run_")
@@ -52,7 +54,8 @@ def test_runtime_replay_exports_harness_decisions_and_results(tmp_path):
     assert candidate["action_id"] == "list_artifacts"
     assert candidate["params"] == {"path": "."}
     assert candidate["safety_decision"]["decision"] == "allow"
-    assert candidate["model_score"] == {"model_used": False, "reason": "no_current_runtime_action_model"}
+    assert candidate["model_score"]["model_used"] is False
+    assert candidate["model_score"]["reason"] == "model_unavailable"
     assert candidate["selected"] is True
     assert candidate["executed"] is True
     assert candidate["execution_result_known"] is True

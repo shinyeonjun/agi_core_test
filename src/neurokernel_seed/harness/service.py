@@ -13,6 +13,7 @@ from .executors.readonly_command import ReadOnlyCommandExecutor
 from .executors.readonly_system import ReadOnlyExecutor
 from .memory import HarnessMemory
 from .preferences import preference_map
+from .runtime_policy import RuntimeActionPolicy
 from .safety_gate import check_action_safety
 from .task_spec import TaskSpec, task_spec_from_dict
 from .trace import failure_trace, redact_text
@@ -35,10 +36,12 @@ class HarnessService:
         project_root: str | Path = ".",
         catalog: dict[str, ActionDefinition] | None = None,
         work_queue: WorkQueue | None = None,
+        runtime_policy: RuntimeActionPolicy | None = None,
     ):
         self.db_path = Path(db_path)
         self.project_root = Path(project_root)
         self.catalog = catalog or build_action_catalog()
+        self.runtime_policy = runtime_policy or RuntimeActionPolicy.from_env(self.project_root)
         self.readonly_executor = ReadOnlyExecutor(project_root=self.project_root, memory_path=self.db_path)
         self.readonly_command_executor = ReadOnlyCommandExecutor(project_root=self.project_root)
         self.benchmark_executor = BenchmarkExecutor(project_root=self.project_root)
@@ -159,7 +162,7 @@ class HarnessService:
     def dry_run(self, task_id: str) -> dict[str, Any]:
         task = self._load_task_spec(task_id)
         candidates = self._candidate_actions(task)
-        decisions, chosen = self._evaluate_candidates(task, candidates)
+        decisions, chosen, policy = self._evaluate_candidates(task, candidates)
         with HarnessMemory(self.db_path) as memory:
             memory.add_action_decision(
                 task_id,
@@ -167,14 +170,16 @@ class HarnessService:
                 [{"action_id": item["action_id"]} for item in decisions],
                 {"action_id": chosen["action_id"]} if chosen else None,
                 chosen["safety"] if chosen else {"decision": "deny", "reason": "no candidate"},
+                model_score=_policy_decision_summary(policy),
+                gate_trace={"runtime_policy": policy},
             )
             memory.record_experience(
                 task_id=task_id,
                 phase="dry_run",
                 status="completed",
-                decision_policy="deterministic_safety_first",
-                model_used=False,
-                model_unavailable_reason="no_current_runtime_action_model",
+                decision_policy=_decision_policy_name(policy),
+                model_used=bool(policy.get("model_used")),
+                model_unavailable_reason=None if policy.get("model_used") else str(policy.get("reason") or "runtime_policy_unavailable"),
                 before_state=self._experience_before_state(task, candidates, "dry_run"),
                 after_state={"task_status": memory.get_task(task_id)["status"], "dry_run": True},
                 outcome={"chosen_action": chosen["action_id"] if chosen else None, "executed": False},
@@ -199,7 +204,7 @@ class HarnessService:
             memory.transition_task(task_id, "running", {})
             memory.transition_task(task_id, "deciding", {})
 
-        decisions, chosen = self._evaluate_candidates(task, candidates)
+        decisions, chosen, policy = self._evaluate_candidates(task, candidates)
         chosen_action = chosen["action_id"] if chosen else None
         safety_payload = chosen["safety"] if chosen else None
         with HarnessMemory(self.db_path) as memory:
@@ -209,6 +214,8 @@ class HarnessService:
                 [{"action_id": action_id} for action_id in candidates],
                 {"action_id": chosen_action} if chosen_action else None,
                 safety_payload if safety_payload else {"decision": "deny"},
+                model_score=_policy_decision_summary(policy),
+                gate_trace={"runtime_policy": policy},
             )
         if chosen_action is None or safety_payload is None:
             with HarnessMemory(self.db_path) as memory:
@@ -216,9 +223,9 @@ class HarnessService:
                     task_id=task_id,
                     phase="run",
                     status="failed",
-                    decision_policy="deterministic_safety_first",
-                    model_used=False,
-                    model_unavailable_reason="no_current_runtime_action_model",
+                    decision_policy=_decision_policy_name(policy),
+                    model_used=bool(policy.get("model_used")),
+                    model_unavailable_reason=None if policy.get("model_used") else str(policy.get("reason") or "runtime_policy_unavailable"),
                     before_state=self._experience_before_state(task, candidates, "deciding"),
                     after_state={"task_status": "failed"},
                     outcome={"failure_bucket": "safety_denied_all_actions"},
@@ -233,9 +240,9 @@ class HarnessService:
                     task_id=task_id,
                     phase="run",
                     status="waiting_approval",
-                    decision_policy="deterministic_safety_first",
-                    model_used=False,
-                    model_unavailable_reason="no_current_runtime_action_model",
+                    decision_policy=_decision_policy_name(policy),
+                    model_used=bool(policy.get("model_used")),
+                    model_unavailable_reason=None if policy.get("model_used") else str(policy.get("reason") or "runtime_policy_unavailable"),
                     before_state=self._experience_before_state(task, candidates, "deciding"),
                     after_state={"task_status": "waiting_approval"},
                     outcome={"chosen_action": chosen_action, "approval_required": True},
@@ -250,9 +257,9 @@ class HarnessService:
                     task_id=task_id,
                     phase="run",
                     status="completed",
-                    decision_policy="deterministic_safety_first",
-                    model_used=False,
-                    model_unavailable_reason="no_current_runtime_action_model",
+                    decision_policy=_decision_policy_name(policy),
+                    model_used=bool(policy.get("model_used")),
+                    model_unavailable_reason=None if policy.get("model_used") else str(policy.get("reason") or "runtime_policy_unavailable"),
                     before_state=self._experience_before_state(task, candidates, "deciding"),
                     after_state={"task_status": "completed", "dry_run_only": True},
                     outcome={"chosen_action": chosen_action, "dry_run_only": True},
@@ -271,9 +278,9 @@ class HarnessService:
                 task_id=task_id,
                 phase="run",
                 status=final_status,
-                decision_policy="deterministic_safety_first",
-                model_used=False,
-                model_unavailable_reason="no_current_runtime_action_model",
+                decision_policy=_decision_policy_name(policy),
+                model_used=bool(policy.get("model_used")),
+                model_unavailable_reason=None if policy.get("model_used") else str(policy.get("reason") or "runtime_policy_unavailable"),
                 before_state=self._experience_before_state(task, candidates, "executing"),
                 after_state={"task_status": final_status, "action_id": chosen_action, "success": bool(result["success"])},
                 outcome=self._experience_outcome(result),
@@ -397,19 +404,30 @@ class HarnessService:
     def _candidate_actions(self, task: TaskSpec) -> list[str]:
         return [action_id for action_id in task.allowed_actions if action_id not in task.blocked_actions]
 
-    def _evaluate_candidates(self, task: TaskSpec, candidates: list[str]) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    def _evaluate_candidates(self, task: TaskSpec, candidates: list[str]) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict[str, Any]]:
         decisions = []
         chosen_requires_approval = None
-        chosen = None
+        deterministic_chosen = None
         for action_id in candidates:
             safety = check_action_safety(task, action_id, catalog=self.catalog)
             item = {"action_id": action_id, "safety": safety.as_dict()}
             decisions.append(item)
-            if chosen is None and safety.decision in {"allow", "dry_run_only"}:
-                chosen = item
+            if deterministic_chosen is None and safety.decision in {"allow", "dry_run_only"}:
+                deterministic_chosen = item
             if safety.decision == "requires_approval" and chosen_requires_approval is None:
                 chosen_requires_approval = item
-        return decisions, chosen or chosen_requires_approval
+        policy = self.runtime_policy.rank(task=task, decisions=decisions)
+        for item in decisions:
+            action_id = str(item["action_id"])
+            item["model_score"] = (policy.get("scores") or {}).get(action_id, {"model_used": False, "reason": policy.get("reason")})
+        if policy.get("model_used"):
+            by_action = {str(item["action_id"]): item for item in decisions}
+            for action_id in policy.get("ranked_actions") or []:
+                item = by_action.get(str(action_id))
+                safety = item.get("safety") if item else {}
+                if isinstance(safety, dict) and safety.get("decision") in {"allow", "dry_run_only"}:
+                    return decisions, item, policy
+        return decisions, deterministic_chosen or chosen_requires_approval, policy
 
     def _choose_first_allowed(self, task: TaskSpec, candidates: list[str]):
         chosen_requires_approval = None
@@ -455,6 +473,7 @@ class HarnessService:
         params = task.context.get("params", {}) if isinstance(task.context.get("params", {}), dict) else {}
         return {
             "phase": phase,
+            "task_status": phase,
             "task_id": task.task_id,
             "target": task.target,
             "mode": task.mode,
@@ -487,7 +506,7 @@ class HarnessService:
                     "action_id": action_id,
                     "params": params if action_id == chosen_action else {},
                     "safety_decision": decision.get("safety") or {},
-                    "model_score": {"model_used": False, "reason": "no_current_runtime_action_model"},
+                    "model_score": decision.get("model_score") or {"model_used": False, "reason": "runtime_policy_not_evaluated"},
                     "selected": action_id == chosen_action,
                     "executed": executed,
                     "execution_result_known": known,
@@ -523,6 +542,17 @@ def _resolve_work_queue(work_queue: WorkQueue | None) -> tuple[WorkQueue | None,
         return build_work_queue_from_env(), None
     except WorkQueueError as exc:
         return None, str(exc)
+
+
+def _decision_policy_name(policy: dict[str, Any]) -> str:
+    if policy.get("model_used"):
+        return "runtime_model_ranked_safety_gated"
+    return "deterministic_safety_first"
+
+
+def _policy_decision_summary(policy: dict[str, Any]) -> dict[str, Any]:
+    keys = ("model_used", "reason", "detail", "model_path", "schema_version", "top_action", "ranked_actions")
+    return {key: policy.get(key) for key in keys if key in policy}
 
 
 def _duration_seconds(started_at: Any, ended_at: Any) -> float:
