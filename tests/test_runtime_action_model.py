@@ -106,6 +106,43 @@ def test_runtime_action_policy_ranks_live_safe_candidates(tmp_path):
     assert result["scores"]["repair"]["success_probability"] > result["scores"]["inspect"]["success_probability"]
 
 
+def test_runtime_action_benchmark_reports_candidate_ranking_metrics(tmp_path):
+    import torch
+
+    features = _write_runtime_ranking_features(tmp_path)
+    manifest = _runtime_manifest(["inspect", "repair"])
+    model_path = tmp_path / "runtime_action_model.pt"
+    config = WorldModelConfig(input_dim=manifest["input_dim"], target_dim=manifest["target_dim"], hidden_dim=8, hidden_layers=0)
+    model = build_model(config)
+    with torch.no_grad():
+        model[0].weight.zero_()
+        model[0].bias.zero_()
+        model[0].weight[0, 0] = -5.0
+        model[0].weight[0, 1] = 5.0
+        model[0].weight[1, 0] = -1.0
+        model[0].weight[1, 1] = 1.0
+        model[0].weight[3, 0] = 5.0
+        model[0].weight[3, 1] = -5.0
+    torch.save(
+        {
+            "schema_version": RUNTIME_ACTION_MODEL_SCHEMA_VERSION,
+            "model_state_dict": model.state_dict(),
+            "config": config.as_dict(),
+            "manifest": manifest,
+        },
+        model_path,
+    )
+
+    result = eval_runtime_action_checkpoint(model_path, features, split="test", device="cpu")
+
+    assert result["ranking_candidate_groups"] == 2.0
+    assert result["ranking_evaluable_groups"] == 2.0
+    assert result["ranking_skipped_groups"] == 0.0
+    assert result["top1_action_accuracy"] == 1.0
+    assert result["mean_pairwise_ranking_accuracy"] == 1.0
+    assert result["mean_best_action_regret"] == 0.0
+
+
 def _write_runtime_features(tmp_path, *, split_mode: str):
     features = tmp_path / "runtime_features.jsonl"
     actions = ["inspect", "repair"]
@@ -170,6 +207,50 @@ def _write_runtime_features(tmp_path, *, split_mode: str):
                 "source": {"runtime_row_id": f"row_{index}", "lineage": {"decision_id": index}},
             }
         )
+    features.write_text("\n".join(json.dumps(row, ensure_ascii=False, sort_keys=True) for row in rows) + "\n", encoding="utf-8")
+    features.with_suffix(features.suffix + ".manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return features
+
+
+def _write_runtime_ranking_features(tmp_path):
+    features = tmp_path / "runtime_ranking_features.jsonl"
+    actions = ["inspect", "repair"]
+    manifest = _runtime_manifest(actions)
+    rows = []
+    for group_index in range(2):
+        for action in actions:
+            success = 1.0 if action == "repair" else 0.0
+            input_vector = _onehot(action, actions)
+            input_vector += [1.0, 1.0, 1.0, 1.0, 1.0]
+            input_vector += [
+                0.0,
+                2.0,
+                2.0,
+                1.0,
+                float(group_index),
+                4.0,
+                2.0,
+                0.0,
+                0.5,
+                0.0,
+                1.0,
+            ]
+            rows.append(
+                {
+                    "schema_version": RUNTIME_FEATURE_SCHEMA_VERSION,
+                    "row_index": len(rows),
+                    "row_id": f"ranking_{group_index}_{action}",
+                    "split": "test",
+                    "env_name": "runtime.orangepi5",
+                    "action_key": action,
+                    "candidate_set_id": f"ranking_group_{group_index}",
+                    "input_vector": input_vector,
+                    "target_vector": [success, 1.0 if success else -1.0, 0.0, 0.0 if success else 1.0],
+                    "target_mask": [1.0, 1.0, 1.0, 1.0],
+                    "actual_action_score": 1.0 if success else -1.0,
+                    "source": {"runtime_row_id": f"ranking_{group_index}_{action}", "lineage": {"decision_id": group_index}},
+                }
+            )
     features.write_text("\n".join(json.dumps(row, ensure_ascii=False, sort_keys=True) for row in rows) + "\n", encoding="utf-8")
     features.with_suffix(features.suffix + ".manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     return features

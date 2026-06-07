@@ -263,6 +263,11 @@ def _add_runtime_auto_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true")
 
 
+def _add_runtime_ranking_quality_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--min-ranking-groups", type=int, default=int(os.getenv("NEUROKERNEL_RUNTIME_MIN_RANKING_GROUPS", "0")))
+    parser.add_argument("--min-top1-action-accuracy", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MIN_TOP1_ACTION_ACCURACY", "0.0")))
+
+
 def _add_runtime_pipeline_options(parser: argparse.ArgumentParser) -> None:
     _add_runtime_auto_options(parser)
     parser.set_defaults(deploy_runtime=True, device="cuda", epochs=100)
@@ -273,6 +278,7 @@ def _add_runtime_pipeline_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-reward-mae", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MAX_REWARD_MAE", "0.35")))
     parser.set_defaults(min_actions=4)
     parser.add_argument("--min-known-success-rows", type=int, default=int(os.getenv("NEUROKERNEL_RUNTIME_MIN_KNOWN_SUCCESS_ROWS", "5")))
+    _add_runtime_ranking_quality_options(parser)
     parser.add_argument("--benchmark-split", choices=["train", "test"], default=os.getenv("NEUROKERNEL_RUNTIME_BENCH_SPLIT", "test"))
     parser.add_argument("--min-delta", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_BENCH_MIN_DELTA", "0.01")))
     parser.add_argument("--force-deploy", action="store_true")
@@ -329,6 +335,7 @@ def _add_runtime_benchmark_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--min-success-accuracy", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MIN_SUCCESS_ACCURACY", "0.75")))
     parser.add_argument("--max-reward-mae", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MAX_REWARD_MAE", "0.35")))
     parser.add_argument("--min-known-success-rows", type=int, default=int(os.getenv("NEUROKERNEL_RUNTIME_MIN_KNOWN_SUCCESS_ROWS", "5")))
+    _add_runtime_ranking_quality_options(parser)
     parser.add_argument("--json", action="store_true")
 
 
@@ -341,6 +348,7 @@ def _add_runtime_compare_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--min-success-accuracy", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MIN_SUCCESS_ACCURACY", "0.75")))
     parser.add_argument("--max-reward-mae", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MAX_REWARD_MAE", "0.35")))
     parser.add_argument("--min-known-success-rows", type=int, default=int(os.getenv("NEUROKERNEL_RUNTIME_MIN_KNOWN_SUCCESS_ROWS", "5")))
+    _add_runtime_ranking_quality_options(parser)
     parser.add_argument("--min-delta", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_BENCH_MIN_DELTA", "0.01")))
     _add_remote_options(parser)
     parser.add_argument("--json", action="store_true")
@@ -360,6 +368,7 @@ def _add_current_benchmark_all_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--min-success-accuracy", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MIN_SUCCESS_ACCURACY", "0.75")))
     parser.add_argument("--max-reward-mae", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MAX_REWARD_MAE", "0.35")))
     parser.add_argument("--min-known-success-rows", type=int, default=int(os.getenv("NEUROKERNEL_RUNTIME_MIN_KNOWN_SUCCESS_ROWS", "5")))
+    _add_runtime_ranking_quality_options(parser)
     parser.add_argument("--json", action="store_true")
 
 
@@ -383,6 +392,7 @@ def _add_integrated_deploy_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--min-success-accuracy", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MIN_SUCCESS_ACCURACY", "0.75")))
     parser.add_argument("--max-reward-mae", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MAX_REWARD_MAE", "0.35")))
     parser.add_argument("--min-known-success-rows", type=int, default=int(os.getenv("NEUROKERNEL_RUNTIME_MIN_KNOWN_SUCCESS_ROWS", "5")))
+    _add_runtime_ranking_quality_options(parser)
     parser.add_argument("--json", action="store_true")
 
 
@@ -746,6 +756,8 @@ def _run_runtime_pipeline_action(args: argparse.Namespace) -> dict[str, Any]:
                 min_success_accuracy=getattr(args, "min_success_accuracy", 0.75),
                 max_reward_mae=getattr(args, "max_reward_mae", 0.35),
                 min_known_success_rows=getattr(args, "min_known_success_rows", 5),
+                min_ranking_groups=getattr(args, "min_ranking_groups", 0),
+                min_top1_action_accuracy=getattr(args, "min_top1_action_accuracy", 0.0),
                 min_delta=getattr(args, "min_delta", 0.01),
             )
         )
@@ -763,6 +775,8 @@ def _run_runtime_pipeline_action(args: argparse.Namespace) -> dict[str, Any]:
                 min_success_accuracy=getattr(args, "min_success_accuracy", 0.75),
                 max_reward_mae=getattr(args, "max_reward_mae", 0.35),
                 min_known_success_rows=getattr(args, "min_known_success_rows", 5),
+                min_ranking_groups=getattr(args, "min_ranking_groups", 0),
+                min_top1_action_accuracy=getattr(args, "min_top1_action_accuracy", 0.0),
             )
         )
     deploy_allowed = bool(((compare_result or {}).get("decision") or {}).get("local_wins")) or bool(getattr(args, "force_deploy", False))
@@ -820,13 +834,19 @@ def _runtime_quality_gate(train_result: dict[str, Any], args: argparse.Namespace
     success_accuracy = _as_float(test.get("success_accuracy"))
     reward_mae = _as_float(test.get("reward_mae"))
     known_success_rows = _as_float(test.get("known_success_rows"))
+    ranking_evaluable_groups = _as_float(test.get("ranking_evaluable_groups"))
+    top1_action_accuracy = _as_float(test.get("top1_action_accuracy", test.get("ranking_top1_accuracy")))
     min_success = float(getattr(args, "min_success_accuracy", 0.75))
     max_reward = float(getattr(args, "max_reward_mae", 0.35))
     min_known = int(getattr(args, "min_known_success_rows", 5))
+    min_ranking_groups = int(getattr(args, "min_ranking_groups", 0))
+    min_top1 = float(getattr(args, "min_top1_action_accuracy", 0.0))
     checks = {
         "success_accuracy": {"passed": success_accuracy >= min_success, "actual": success_accuracy, "threshold": min_success},
         "reward_mae": {"passed": reward_mae <= max_reward, "actual": reward_mae, "threshold": max_reward},
         "known_success_rows": {"passed": known_success_rows >= min_known, "actual": known_success_rows, "threshold": min_known},
+        "ranking_evaluable_groups": {"passed": ranking_evaluable_groups >= min_ranking_groups, "actual": ranking_evaluable_groups, "threshold": min_ranking_groups},
+        "top1_action_accuracy": {"passed": top1_action_accuracy >= min_top1, "actual": top1_action_accuracy, "threshold": min_top1},
     }
     passed = all(item["passed"] for item in checks.values())
     return {
@@ -1327,13 +1347,26 @@ def _runtime_benchmark_score(metrics: dict[str, Any]) -> dict[str, float]:
     failure = _as_float(metrics.get("failure_present_accuracy"))
     reward_quality = 1.0 / (1.0 + max(0.0, _as_float(metrics.get("reward_mae"))))
     duration_quality = 1.0 / (1.0 + max(0.0, _as_float(metrics.get("duration_log1p_mae"))))
-    score = (0.45 * success) + (0.20 * failure) + (0.25 * reward_quality) + (0.10 * duration_quality)
+    ranking_groups = _as_float(metrics.get("ranking_evaluable_groups"))
+    ranking_top1 = _as_float(metrics.get("top1_action_accuracy", metrics.get("ranking_top1_accuracy")))
+    ranking_pairwise = _as_float(metrics.get("mean_pairwise_ranking_accuracy", metrics.get("ranking_pairwise_accuracy")))
+    ranking_regret_quality = 1.0 / (1.0 + max(0.0, _as_float(metrics.get("mean_best_action_regret", metrics.get("ranking_mean_regret")))))
+    ranking_quality = (0.50 * ranking_top1) + (0.30 * ranking_pairwise) + (0.20 * ranking_regret_quality) if ranking_groups > 0.0 else 0.0
+    if ranking_groups > 0.0:
+        score = (0.35 * success) + (0.20 * failure) + (0.20 * reward_quality) + (0.10 * duration_quality) + (0.15 * ranking_quality)
+    else:
+        score = (0.45 * success) + (0.20 * failure) + (0.25 * reward_quality) + (0.10 * duration_quality)
     return {
         "score": round(score, 6),
         "success_accuracy": success,
         "failure_present_accuracy": failure,
         "reward_quality": reward_quality,
         "duration_quality": duration_quality,
+        "ranking_quality": ranking_quality,
+        "ranking_evaluable_groups": ranking_groups,
+        "top1_action_accuracy": ranking_top1,
+        "mean_pairwise_ranking_accuracy": ranking_pairwise,
+        "mean_best_action_regret_quality": ranking_regret_quality,
     }
 
 
@@ -1341,13 +1374,19 @@ def _runtime_benchmark_quality(metrics: dict[str, Any], args: argparse.Namespace
     success_accuracy = _as_float(metrics.get("success_accuracy"))
     reward_mae = _as_float(metrics.get("reward_mae"))
     known_success_rows = _as_float(metrics.get("known_success_rows"))
+    ranking_evaluable_groups = _as_float(metrics.get("ranking_evaluable_groups"))
+    top1_action_accuracy = _as_float(metrics.get("top1_action_accuracy", metrics.get("ranking_top1_accuracy")))
     min_success = float(getattr(args, "min_success_accuracy", 0.75))
     max_reward = float(getattr(args, "max_reward_mae", 0.35))
     min_known = int(getattr(args, "min_known_success_rows", 5))
+    min_ranking_groups = int(getattr(args, "min_ranking_groups", 0))
+    min_top1 = float(getattr(args, "min_top1_action_accuracy", 0.0))
     checks = {
         "success_accuracy": {"passed": success_accuracy >= min_success, "actual": success_accuracy, "threshold": min_success},
         "reward_mae": {"passed": reward_mae <= max_reward, "actual": reward_mae, "threshold": max_reward},
         "known_success_rows": {"passed": known_success_rows >= min_known, "actual": known_success_rows, "threshold": min_known},
+        "ranking_evaluable_groups": {"passed": ranking_evaluable_groups >= min_ranking_groups, "actual": ranking_evaluable_groups, "threshold": min_ranking_groups},
+        "top1_action_accuracy": {"passed": top1_action_accuracy >= min_top1, "actual": top1_action_accuracy, "threshold": min_top1},
     }
     passed = all(item["passed"] for item in checks.values())
     return {"passed": passed, "summary": "벤치 통과" if passed else "벤치 미통과", "checks": checks}

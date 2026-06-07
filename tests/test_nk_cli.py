@@ -818,6 +818,12 @@ def test_nk_runtime_bench_writes_model_benchmark_record(tmp_path, monkeypatch):
             "failure_present_accuracy": 0.75,
             "reward_mae": 0.1,
             "duration_log1p_mae": 0.2,
+            "ranking_candidate_groups": 2.0,
+            "ranking_evaluable_groups": 2.0,
+            "ranking_skipped_groups": 0.0,
+            "top1_action_accuracy": 1.0,
+            "mean_pairwise_ranking_accuracy": 1.0,
+            "mean_best_action_regret": 0.0,
         },
     )
 
@@ -833,12 +839,17 @@ def test_nk_runtime_bench_writes_model_benchmark_record(tmp_path, monkeypatch):
             min_success_accuracy=0.75,
             max_reward_mae=0.35,
             min_known_success_rows=4,
+            min_ranking_groups=1,
+            min_top1_action_accuracy=0.9,
         )
     )
 
     assert result["status"] == "completed"
     assert result["quality"]["passed"] is True
     assert result["score"] > 0.0
+    assert result["score_components"]["ranking_quality"] > 0.0
+    assert result["quality"]["checks"]["ranking_evaluable_groups"]["passed"] is True
+    assert result["quality"]["checks"]["top1_action_accuracy"]["passed"] is True
     assert Path(result["benchmark_path"]).exists()
     assert (tmp_path / "benchmarks" / "runtime_action" / "latest_runtime_action_local_candidate.json").exists()
 
@@ -864,6 +875,8 @@ def test_nk_runtime_compare_requires_local_benchmark_to_win(tmp_path, monkeypatc
             min_success_accuracy=0.75,
             max_reward_mae=0.35,
             min_known_success_rows=5,
+            min_ranking_groups=0,
+            min_top1_action_accuracy=0.0,
             min_delta=0.01,
         )
     )

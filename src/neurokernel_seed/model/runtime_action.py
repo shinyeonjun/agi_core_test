@@ -234,7 +234,9 @@ def evaluate_runtime_action_model(model, dataset: TorchFeatureDataset, manifest:
         prediction = model(inputs)
         losses = compute_runtime_action_losses(prediction, targets, masks, manifest)
         metrics = compute_runtime_action_metrics(prediction, targets, masks, manifest)
+        ranking = compute_runtime_action_ranking_metrics(prediction, targets, masks, dataset, manifest)
         result: dict[str, Any] = {"loss": float(losses["total"].item()), **metrics, "rows": float(len(dataset))}
+        result.update(ranking)
         if detailed:
             result["by_action"] = _runtime_group_metrics(prediction, targets, dataset, manifest, "action_key")
             result["by_env"] = _runtime_group_metrics(prediction, targets, dataset, manifest, "env_name")
@@ -268,6 +270,71 @@ def compute_runtime_action_metrics(prediction, target, target_mask, manifest: di
         "duration_log1p_mse": _masked_mean(duration_error**2, duration_mask, torch),
         "mean_success_probability": float(success_prob.mean().item()),
         "mean_failure_probability": float(failure_prob.mean().item()),
+    }
+
+
+def compute_runtime_action_ranking_metrics(prediction, target, target_mask, dataset: TorchFeatureDataset, manifest: dict[str, Any]) -> dict[str, float]:
+    torch = require_torch()
+    layout = manifest["target_layout"]
+    success_index = int(layout["success"])
+    reward_index = int(layout["reward"])
+    duration_index = int(layout["duration_seconds_log1p"])
+    failure_index = int(layout["failure_present"])
+    success_prob = torch.sigmoid(prediction[:, success_index])
+    failure_prob = torch.sigmoid(prediction[:, failure_index])
+    predicted_score = success_prob + 0.5 * prediction[:, reward_index] - 0.2 * torch.clamp(prediction[:, duration_index], min=0.0) - 0.8 * failure_prob
+    actual_score = target[:, success_index] + 0.5 * target[:, reward_index] - 0.2 * target[:, duration_index] - 0.8 * target[:, failure_index]
+    known_mask = (
+        (target_mask[:, success_index] > 0.0)
+        & (target_mask[:, reward_index] > 0.0)
+        & (target_mask[:, duration_index] > 0.0)
+        & (target_mask[:, failure_index] > 0.0)
+    )
+    groups: dict[str, list[int]] = {}
+    for index, sample in enumerate(dataset.meta):
+        group_id = sample.candidate_set_id or f"row_{index}"
+        groups.setdefault(str(group_id), []).append(index)
+    candidate_groups = sum(1 for indices in groups.values() if len(indices) >= 2)
+    evaluated = 0
+    top1_correct = 0
+    regret_values: list[float] = []
+    pairwise_total = 0
+    pairwise_correct = 0
+    for indices in groups.values():
+        known_indices = [index for index in indices if bool(known_mask[index].item())]
+        if len(known_indices) < 2:
+            continue
+        evaluated += 1
+        pred_values = predicted_score[known_indices]
+        actual_values = actual_score[known_indices]
+        predicted_best_offset = int(torch.argmax(pred_values).item())
+        actual_best_offset = int(torch.argmax(actual_values).item())
+        if predicted_best_offset == actual_best_offset:
+            top1_correct += 1
+        regret_values.append(float((actual_values[actual_best_offset] - actual_values[predicted_best_offset]).item()))
+        for left in range(len(known_indices)):
+            for right in range(left + 1, len(known_indices)):
+                actual_delta = float((actual_values[left] - actual_values[right]).item())
+                if actual_delta == 0.0:
+                    continue
+                predicted_delta = float((pred_values[left] - pred_values[right]).item())
+                pairwise_total += 1
+                if (actual_delta > 0.0 and predicted_delta > 0.0) or (actual_delta < 0.0 and predicted_delta < 0.0):
+                    pairwise_correct += 1
+    top1_accuracy = float(top1_correct / evaluated) if evaluated else 0.0
+    mean_regret = float(sum(regret_values) / len(regret_values)) if regret_values else 0.0
+    pairwise_accuracy = float(pairwise_correct / pairwise_total) if pairwise_total else 0.0
+    return {
+        "ranking_candidate_groups": float(candidate_groups),
+        "ranking_evaluable_groups": float(evaluated),
+        "ranking_skipped_groups": float(max(0, candidate_groups - evaluated)),
+        "ranking_top1_accuracy": top1_accuracy,
+        "top1_action_accuracy": top1_accuracy,
+        "ranking_mean_regret": mean_regret,
+        "mean_best_action_regret": mean_regret,
+        "ranking_pairwise_accuracy": pairwise_accuracy,
+        "mean_pairwise_ranking_accuracy": pairwise_accuracy,
+        "ranking_pairwise_pairs": float(pairwise_total),
     }
 
 
