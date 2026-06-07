@@ -289,6 +289,79 @@ class HarnessService:
             )
         return {"task_id": task_id, "status": final_status, "action": chosen_action, "safety": safety_payload, "execution_result": result}
 
+    def probe_counterfactual_candidates(self, task_id: str, *, max_candidates: int = 4) -> dict[str, Any]:
+        task = self._load_task_spec(task_id)
+        candidates = self._candidate_actions(task)
+        if not candidates:
+            return self._fail_task(task_id, "no_candidate_actions", {"reason": "allowed_actions is empty"})
+
+        decisions, chosen, policy = self._evaluate_candidates(task, candidates)
+        probe_results: dict[str, dict[str, Any]] = {}
+        skipped: list[dict[str, Any]] = []
+        limit = max(1, int(max_candidates))
+        for decision in decisions:
+            if len(probe_results) >= limit:
+                break
+            action_id = str(decision.get("action_id") or "")
+            safety = decision.get("safety") if isinstance(decision.get("safety"), dict) else {}
+            action = self.catalog.get(action_id)
+            if safety.get("decision") not in {"allow", "dry_run_only"}:
+                skipped.append({"action_id": action_id, "reason": "safety_not_probeable", "safety_decision": safety.get("decision")})
+                continue
+            if action is None or action.side_effect or action.requires_approval or action.executor not in {"readonly_system", "readonly_command"}:
+                skipped.append({"action_id": action_id, "reason": "not_readonly_probeable"})
+                continue
+            result = self._execute(action_id, task)
+            probe_results[action_id] = result
+            with HarnessMemory(self.db_path) as memory:
+                memory.add_execution_result(task_id, result)
+
+        chosen_action = str(chosen.get("action_id")) if chosen else None
+        if chosen_action not in probe_results and probe_results:
+            chosen_action = next(iter(probe_results))
+        status = "completed" if probe_results else "failed"
+        with HarnessMemory(self.db_path) as memory:
+            memory.add_action_decision(
+                task_id,
+                0,
+                [{"action_id": action_id} for action_id in candidates],
+                {"action_id": chosen_action} if chosen_action else None,
+                chosen.get("safety") if chosen else {"decision": "deny", "reason": "no probeable candidate"},
+                model_score=_policy_decision_summary(policy),
+                gate_trace={"runtime_policy": policy, "counterfactual_probe": {"max_candidates": limit}},
+            )
+            memory.record_experience(
+                task_id=task_id,
+                phase="counterfactual_probe",
+                status=status,
+                decision_policy="counterfactual_probe_safety_gated",
+                model_used=bool(policy.get("model_used")),
+                model_unavailable_reason=None if policy.get("model_used") else str(policy.get("reason") or "runtime_policy_unavailable"),
+                before_state=self._experience_before_state(task, candidates, "counterfactual_probe"),
+                after_state={"task_status": status, "probed_actions": list(probe_results)},
+                outcome={
+                    "chosen_action": chosen_action,
+                    "probed_actions": list(probe_results),
+                    "known_candidate_count": len(probe_results),
+                    "skipped": skipped,
+                },
+                learning_masks={"candidate_outcomes_known": bool(probe_results), "safety_known": True, "selection_known": True},
+                candidates=self._experience_counterfactual_candidates(task, decisions, chosen_action, probe_results),
+            )
+            if status == "completed":
+                memory.set_task_completed(task_id, {"counterfactual_probe": True, "probed_actions": list(probe_results)})
+            else:
+                memory.set_task_failed(task_id, {"counterfactual_probe": True, "skipped": skipped})
+
+        return {
+            "task_id": task_id,
+            "status": status,
+            "chosen_action": chosen_action,
+            "probed_actions": list(probe_results),
+            "known_candidate_count": len(probe_results),
+            "skipped": skipped,
+        }
+
     def approve(self, task_id: str, *, approved_by: str = "user", reason: str | None = None) -> dict[str, Any]:
         with HarnessMemory(self.db_path) as memory:
             memory.add_approval(task_id, requested_by=None, approved_by=approved_by, decision="approved", scope="single_action", reason=reason)
@@ -511,6 +584,40 @@ class HarnessService:
                     "executed": executed,
                     "execution_result_known": known,
                     "outcome": self._experience_outcome(result) if known and result else {},
+                    "target_mask": {
+                        "success": known,
+                        "reward": known,
+                        "duration_seconds": known,
+                        "failure_present": known,
+                    },
+                }
+            )
+        return items
+
+    def _experience_counterfactual_candidates(
+        self,
+        task: TaskSpec,
+        decisions: list[dict[str, Any]],
+        chosen_action: str | None,
+        results_by_action: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        params = task.context.get("params", {}) if isinstance(task.context.get("params", {}), dict) else {}
+        items = []
+        for index, decision in enumerate(decisions):
+            action_id = str(decision["action_id"])
+            result = results_by_action.get(action_id)
+            known = result is not None
+            items.append(
+                {
+                    "candidate_index": index,
+                    "action_id": action_id,
+                    "params": params if known or action_id == chosen_action else {},
+                    "safety_decision": decision.get("safety") or {},
+                    "model_score": decision.get("model_score") or {"model_used": False, "reason": "runtime_policy_not_evaluated"},
+                    "selected": action_id == chosen_action,
+                    "executed": known,
+                    "execution_result_known": known,
+                    "outcome": self._experience_outcome(result) if known else {},
                     "target_mask": {
                         "success": known,
                         "reward": known,

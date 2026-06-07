@@ -64,7 +64,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "  nk 런타임배포 --model artifacts/runtime_action_model.pt\n"
             "  nk current                       world/runtime 슬롯 상태 확인\n"
             "\n"
-            "영문 명령도 계속 지원합니다: runtime-seed, runtime-auto, runtime-cycle, runtime-bench, runtime-compare, current-bench-all, deploy-runtime, deploy-all-best, deploy-use, bench-current, top"
+            "영문 명령도 계속 지원합니다: runtime-seed, runtime-probe, runtime-auto, runtime-cycle, runtime-bench, runtime-compare, current-bench-all, deploy-runtime, deploy-all-best, deploy-use, bench-current, top"
         ),
     )
     sub = parser.add_subparsers(dest="action", metavar="명령")
@@ -86,6 +86,10 @@ def _build_parser() -> argparse.ArgumentParser:
     for name in ("runtime-seed", "seed-runtime", "시드", "초기데이터"):
         item = sub.add_parser(name)
         _add_runtime_seed_options(item)
+
+    for name in ("runtime-probe", "probe-runtime", "런타임프로브", "후보프로브"):
+        item = sub.add_parser(name)
+        _add_runtime_probe_options(item)
 
     for name in ("data", "dataset", "features", "데이터"):
         item = sub.add_parser(name)
@@ -310,6 +314,11 @@ def _add_runtime_seed_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true")
 
 
+def _add_runtime_probe_options(parser: argparse.ArgumentParser) -> None:
+    _add_runtime_seed_options(parser)
+    parser.add_argument("--max-candidates", type=int, default=int(os.getenv("NEUROKERNEL_RUNTIME_PROBE_MAX_CANDIDATES", "4")))
+
+
 def _add_runtime_train_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--features", default=os.getenv("NEUROKERNEL_RUNTIME_FEATURES_OUT", "data/model_ready/runtime_features.jsonl"))
     parser.add_argument("--out", default=os.getenv("NEUROKERNEL_RUNTIME_ACTION_MODEL_OUT", "artifacts/runtime_action_model.pt"))
@@ -455,6 +464,8 @@ def _run_action(args: argparse.Namespace) -> dict[str, Any]:
         return _run_runtime_auto_action(args)
     if args.action == "runtime-seed":
         return _run_runtime_seed_action(args)
+    if args.action == "runtime-probe":
+        return _run_runtime_probe_action(args)
     if args.action == "data":
         return _run_data_action(args)
     if args.action == "runtime-data":
@@ -961,6 +972,97 @@ def _run_runtime_seed_edge_action(args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
+def _run_runtime_probe_action(args: argparse.Namespace) -> dict[str, Any]:
+    source = str(getattr(args, "source", "edge"))
+    if source == "edge":
+        return _run_runtime_probe_edge_action(args)
+    if source != "local":
+        raise ModelReleaseError(f"unknown runtime probe source: {source}")
+    probe = _run_runtime_probe_local_action(args)
+    result: dict[str, Any] = {
+        "status": "completed",
+        "source": "local",
+        "probe": probe,
+        "artifacts": {},
+    }
+    if bool(getattr(args, "export_dataset", True)):
+        replay_out = Path(getattr(args, "replay_out", "data/model_ready/runtime_replay.jsonl"))
+        features_out = Path(getattr(args, "features_out", "data/model_ready/runtime_features.jsonl"))
+        data_result = _run_runtime_data_action(
+            argparse.Namespace(
+                action="runtime-data",
+                source="local",
+                db=getattr(args, "db", "data/harness.db"),
+                remote_host=getattr(args, "remote_host", None),
+                remote_project=getattr(args, "remote_project", None),
+                remote_db=getattr(args, "remote_db", "data/harness.db"),
+                cache_db=getattr(args, "cache_db", None),
+                out=str(replay_out),
+                limit=None,
+                min_rows=getattr(args, "min_rows", 10),
+                allow_no_execution=False,
+            )
+        )
+        feature_result = _run_runtime_features_action(
+            argparse.Namespace(
+                action="runtime-features",
+                replay=str(replay_out),
+                out=str(features_out),
+                test_ratio=getattr(args, "test_ratio", 0.2),
+                min_rows=getattr(args, "min_rows", 10),
+                min_actions=getattr(args, "min_actions", 4),
+            )
+        )
+        result["runtime_data"] = data_result
+        result["runtime_features"] = feature_result
+        result["artifacts"] = {"replay": str(replay_out), "features": str(features_out)}
+        result["ready_for_runtime_model_training"] = bool(feature_result.get("ready_for_runtime_model_training"))
+    return result
+
+
+def _run_runtime_probe_edge_action(args: argparse.Namespace) -> dict[str, Any]:
+    remote_probe = _run_remote_runtime_probe_command(args)
+    result: dict[str, Any] = {
+        "status": "completed",
+        "source": "edge",
+        "remote_probe": remote_probe,
+        "artifacts": {},
+    }
+    if bool(getattr(args, "export_dataset", True)):
+        replay_out = Path(getattr(args, "replay_out", "data/model_ready/runtime_replay.jsonl"))
+        features_out = Path(getattr(args, "features_out", "data/model_ready/runtime_features.jsonl"))
+        data_result = _run_runtime_data_action(
+            argparse.Namespace(
+                action="runtime-data",
+                source="edge",
+                db=getattr(args, "db", "data/harness.db"),
+                remote_host=getattr(args, "remote_host", None),
+                remote_project=getattr(args, "remote_project", None),
+                remote_db=getattr(args, "remote_db", "data/harness.db"),
+                cache_db=getattr(args, "cache_db", None),
+                out=str(replay_out),
+                limit=None,
+                min_rows=getattr(args, "min_rows", 10),
+                allow_no_execution=False,
+            )
+        )
+        feature_result = _run_runtime_features_action(
+            argparse.Namespace(
+                action="runtime-features",
+                replay=str(replay_out),
+                out=str(features_out),
+                test_ratio=getattr(args, "test_ratio", 0.2),
+                min_rows=getattr(args, "min_rows", 10),
+                min_actions=getattr(args, "min_actions", 4),
+            )
+        )
+        result["runtime_data"] = data_result
+        result["runtime_features"] = feature_result
+        result["artifacts"] = {"replay": str(replay_out), "features": str(features_out)}
+        result["ready_for_runtime_model_training"] = bool(feature_result.get("ready_for_runtime_model_training"))
+    return result
+
+
 def _run_runtime_seed_local_action(args: argparse.Namespace) -> dict[str, Any]:
     cycles = int(getattr(args, "cycles", 8))
     if cycles < 1:
@@ -1030,6 +1132,79 @@ def _run_runtime_seed_local_action(args: argparse.Namespace) -> dict[str, Any]:
         "tasks_created": len(results),
         "success_rows": success_rows,
         "failure_rows": failure_rows,
+        "status_counts": dict(sorted(status_counts.items())),
+        "action_counts": dict(sorted(action_counts.items())),
+        "sample_results": results[:20],
+    }
+
+
+def _run_runtime_probe_local_action(args: argparse.Namespace) -> dict[str, Any]:
+    cycles = int(getattr(args, "cycles", 8))
+    if cycles < 1:
+        raise ModelReleaseError("runtime probe cycles must be >= 1")
+    service = HarnessService(
+        db_path=getattr(args, "db", "data/harness.db"),
+        project_root=getattr(args, "project_root", "."),
+    )
+    specs = _runtime_seed_task_specs(
+        profile=str(getattr(args, "profile", "readonly-basic")),
+        target=str(getattr(args, "target", "orangepi5")),
+        include_failures=bool(getattr(args, "include_failures", True)),
+    )
+    if not specs:
+        raise ModelReleaseError("runtime probe profile produced no tasks")
+
+    results = []
+    action_counts: Counter[str] = Counter()
+    status_counts: Counter[str] = Counter()
+    known_candidate_rows = 0
+    candidate_groups = 0
+    max_candidates = int(getattr(args, "max_candidates", 4))
+    for cycle in range(cycles):
+        for template_index, spec in enumerate(specs):
+            task_spec = {
+                **spec,
+                "context": {
+                    **(spec.get("context") or {}),
+                    "runtime_probe": {
+                        "profile": getattr(args, "profile", "readonly-basic"),
+                        "cycle": cycle,
+                        "template_index": template_index,
+                        "version": "runtime-counterfactual-probe-v1",
+                    },
+                },
+            }
+            created = service.create_task(task_spec, created_by="runtime_probe", source="runtime_probe")
+            task_id = created["task"]["task_id"]
+            probe_result = service.probe_counterfactual_candidates(task_id, max_candidates=max_candidates)
+            status = str(probe_result.get("status") or "unknown")
+            status_counts[status] += 1
+            known_count = int(probe_result.get("known_candidate_count") or 0)
+            known_candidate_rows += known_count
+            if known_count >= 2:
+                candidate_groups += 1
+            for action in probe_result.get("probed_actions") or []:
+                action_counts[str(action)] += 1
+            results.append(
+                {
+                    "task_id": task_id,
+                    "status": status,
+                    "chosen_action": probe_result.get("chosen_action"),
+                    "probed_actions": probe_result.get("probed_actions") or [],
+                    "known_candidate_count": known_count,
+                }
+            )
+
+    return {
+        "profile": getattr(args, "profile", "readonly-basic"),
+        "db": str(getattr(args, "db", "data/harness.db")),
+        "project_root": str(getattr(args, "project_root", ".")),
+        "target": str(getattr(args, "target", "orangepi5")),
+        "cycles": cycles,
+        "templates": len(specs),
+        "tasks_created": len(results),
+        "candidate_groups": candidate_groups,
+        "known_candidate_rows": known_candidate_rows,
         "status_counts": dict(sorted(status_counts.items())),
         "action_counts": dict(sorted(action_counts.items())),
         "sample_results": results[:20],
@@ -1139,6 +1314,60 @@ def _run_remote_runtime_seed_command(args: argparse.Namespace) -> dict[str, Any]
         return json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise ModelReleaseError(f"runtime seed edge command returned invalid json: {(result.stdout or '').strip()[:500]}") from exc
+
+
+def _run_remote_runtime_probe_command(args: argparse.Namespace) -> dict[str, Any]:
+    remote_host = getattr(args, "remote_host", None) or os.getenv("NEUROKERNEL_EDGE_HOST", "orangepi5")
+    remote_project = (getattr(args, "remote_project", None) or os.getenv("NEUROKERNEL_EDGE_PROJECT", "/home/ubuntu/projects/neurokernel-agi-seed")).rstrip("/")
+    timeout = int(getattr(args, "ssh_connect_timeout", 10))
+    remote_db = getattr(args, "remote_db", None) or os.getenv("NEUROKERNEL_EDGE_HARNESS_DB", "data/harness.db")
+    remote_python = getattr(args, "remote_python", None) or os.getenv("NEUROKERNEL_EDGE_PYTHON")
+    python_cmd = _sh_quote(str(remote_python)) if remote_python else "$(test -x venv/bin/python && printf %s venv/bin/python || printf %s python3)"
+    command_parts = [
+        "cd",
+        _sh_quote(remote_project),
+        "&&",
+        "PYTHONPATH=src",
+        python_cmd,
+        "-m",
+        "neurokernel_seed.nk_cli",
+        "runtime-probe",
+        "--source",
+        "local",
+        "--db",
+        _sh_quote(str(remote_db)),
+        "--project-root",
+        ".",
+        "--profile",
+        _sh_quote(str(getattr(args, "profile", "readonly-basic"))),
+        "--target",
+        "orangepi5",
+        "--cycles",
+        str(int(getattr(args, "cycles", 8))),
+        "--max-candidates",
+        str(int(getattr(args, "max_candidates", 4))),
+        "--no-export",
+        "--json",
+    ]
+    if not bool(getattr(args, "include_failures", True)):
+        command_parts.insert(-2, "--no-failures")
+    remote_command = " ".join(command_parts)
+    ssh_options = ["-o", "BatchMode=yes", "-o", f"ConnectTimeout={timeout}"]
+    result = subprocess.run(
+        ["ssh", *ssh_options, str(remote_host), remote_command],
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise ModelReleaseError(f"runtime probe edge command failed: {detail}")
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise ModelReleaseError(f"runtime probe edge command returned invalid json: {(result.stdout or '').strip()[:500]}") from exc
 
 
 def _run_runtime_data_action(args: argparse.Namespace) -> dict[str, Any]:
@@ -2272,6 +2501,8 @@ def _print_result(action: str, result: dict[str, Any], *, json_mode: bool) -> No
         _print_runtime_auto(result)
     elif action == "runtime-seed":
         _print_runtime_seed(result)
+    elif action == "runtime-probe":
+        _print_runtime_probe(result)
     elif action == "data":
         _print_data(result)
     elif action == "runtime-data":
@@ -2423,6 +2654,29 @@ def _print_runtime_seed(result: dict[str, Any]) -> None:
     if artifacts:
         print(_kv("replay", artifacts.get("replay")))
         print(_kv("특징", artifacts.get("features")))
+
+
+def _print_runtime_probe(result: dict[str, Any]) -> None:
+    print(_ok("런타임프로브", result.get("status", "completed")))
+    probe = result.get("probe") or result.get("remote_probe", {}).get("probe") or {}
+    print(_kv("출처", result.get("source")))
+    print(_kv("작업", probe.get("tasks_created")))
+    print(_kv("후보그룹", probe.get("candidate_groups")))
+    print(_kv("known후보", probe.get("known_candidate_rows")))
+    action_counts = probe.get("action_counts") or {}
+    if action_counts:
+        print(_kv("액션", ", ".join(f"{key}:{value}" for key, value in action_counts.items())))
+    data = result.get("runtime_data") or {}
+    features = result.get("runtime_features") or {}
+    if data:
+        print(_kv("replay행", (data.get("validation") or {}).get("rows")))
+    if features:
+        print(_kv("feature행", (features.get("validation") or {}).get("rows")))
+        print(_kv("학습준비", result.get("ready_for_runtime_model_training")))
+    artifacts = result.get("artifacts") or {}
+    if artifacts:
+        print(_kv("replay", artifacts.get("replay")))
+        print(_kv("features", artifacts.get("features")))
 
 
 def _print_runtime_data(result: dict[str, Any]) -> None:

@@ -280,7 +280,7 @@ def _pick_experience(rows: list[dict[str, Any]], execution: dict[str, Any] | Non
         return None
     if execution is not None:
         for row in reversed(rows):
-            if str(row.get("phase")) == "run" and str(row.get("status")) in {"completed", "failed"}:
+            if str(row.get("phase")) in {"run", "counterfactual_probe"} and str(row.get("status")) in {"completed", "failed"}:
                 return row
     for row in reversed(rows):
         if str(row.get("phase")) == "run":

@@ -40,6 +40,11 @@ ACTION_ALIASES = {
     "초기데이터": "runtime-seed",
     "runtime-seed": "runtime-seed",
     "seed-runtime": "runtime-seed",
+    "runtime-probe": "runtime-probe",
+    "probe-runtime": "runtime-probe",
+    "probe": "runtime-probe",
+    "런타임프로브": "runtime-probe",
+    "후보프로브": "runtime-probe",
     "auto-deploy": "runtime-cycle",
     "learn-deploy": "runtime-cycle",
     "cycle": "runtime-cycle",
@@ -143,6 +148,7 @@ KNOWN_ACTIONS = {
     "data",
     "runtime-pipeline",
     "runtime-seed",
+    "runtime-probe",
     "runtime-auto",
     "runtime-cycle",
     "runtime-data",
@@ -232,13 +238,14 @@ def build_menu_args(base: argparse.Namespace, action: str) -> argparse.Namespace
     menu_args.profile = "readonly-basic"
     menu_args.target = "orangepi5"
     menu_args.cycles = 8
+    menu_args.max_candidates = 4
     menu_args.seed_cycles = 0
     menu_args.epochs = 100 if menu_args.action in {"runtime-pipeline", "runtime-train"} else 50
     menu_args.batch_size = 128
     menu_args.device = "cuda" if menu_args.action in {"runtime-pipeline", "runtime-train"} else "auto"
     menu_args.patience = 20
     menu_args.min_rows = 1
-    menu_args.min_actions = 4 if menu_args.action in {"runtime-seed", "runtime-pipeline"} else 1
+    menu_args.min_actions = 4 if menu_args.action in {"runtime-seed", "runtime-probe", "runtime-pipeline"} else 1
     menu_args.min_success_accuracy = 0.75
     menu_args.max_reward_mae = 0.35
     menu_args.min_known_success_rows = 5

@@ -269,6 +269,35 @@ def test_harness_service_uses_runtime_model_to_rank_safe_candidates(tmp_path):
     assert selected[0]["model_score_json"]["model_used"] is True
 
 
+def test_harness_service_probes_counterfactual_readonly_candidates(tmp_path):
+    db = tmp_path / "harness.db"
+    service = HarnessService(db_path=db, project_root=tmp_path, runtime_policy=FakeRuntimePolicy(["get_memory_usage", "list_artifacts"]))
+    created = service.create_task(
+        {
+            "goal": "probe readonly choices",
+            "target": "orangepi5",
+            "allowed_actions": ["list_artifacts", "get_memory_usage"],
+            "context": {"params": {"path": "."}},
+            "risk_level": "low",
+            "requires_approval": False,
+            "mode": "readonly",
+        }
+    )
+
+    result = service.probe_counterfactual_candidates(created["task"]["task_id"], max_candidates=2)
+
+    assert result["status"] == "completed"
+    assert result["known_candidate_count"] == 2
+    assert set(result["probed_actions"]) == {"list_artifacts", "get_memory_usage"}
+    with HarnessMemory(db) as memory:
+        experience = memory.get_experience(memory.recent_experiences(task_id=created["task"]["task_id"])[0]["experience_id"])
+    assert experience["phase"] == "counterfactual_probe"
+    assert experience["decision_policy"] == "counterfactual_probe_safety_gated"
+    assert len(experience["candidates"]) == 2
+    assert all(candidate["execution_result_known"] for candidate in experience["candidates"])
+    assert all(candidate["target_mask_json"]["success"] is True for candidate in experience["candidates"])
+
+
 def test_harness_service_runtime_model_does_not_bypass_approval(tmp_path):
     service = HarnessService(db_path=tmp_path / "harness.db", project_root=tmp_path, runtime_policy=FakeRuntimePolicy(["write_file"]))
     created = service.create_task(

@@ -85,6 +85,35 @@ def test_runtime_features_export_candidate_rows_with_target_masks(tmp_path):
     assert unselected["target_vector"] == [0.0, 0.0, 0.0, 0.0]
 
 
+def test_runtime_features_export_counterfactual_probe_known_candidates(tmp_path):
+    db = tmp_path / "harness.db"
+    service = HarnessService(db_path=db, project_root=tmp_path)
+    created = service.create_task(
+        {
+            "goal": "probe runtime choices",
+            "target": "orangepi5",
+            "allowed_actions": ["list_artifacts", "get_memory_usage"],
+            "context": {"params": {"path": "."}},
+            "risk_level": "low",
+            "requires_approval": False,
+            "mode": "readonly",
+        }
+    )
+    service.probe_counterfactual_candidates(created["task"]["task_id"], max_candidates=2)
+    replay = tmp_path / "runtime_replay.jsonl"
+    features = tmp_path / "runtime_features.jsonl"
+    run_runtime_replay_etl(RuntimeReplayEtlConfig(db_path=db, out_path=replay, min_rows=1))
+
+    exported = export_runtime_features(replay, features, test_ratio=0.0)
+    rows = [json.loads(line) for line in features.read_text(encoding="utf-8").splitlines()]
+
+    assert exported["rows"] == 2
+    assert len({row["candidate_set_id"] for row in rows}) == 1
+    assert {row["action_key"] for row in rows} == {"list_artifacts", "get_memory_usage"}
+    assert all(row["source"]["candidate"]["execution_result_known"] is True for row in rows)
+    assert all(row["target_mask"] == [1.0, 1.0, 1.0, 1.0] for row in rows)
+
+
 def test_runtime_feature_gate_keeps_short_dataset_out_of_training_ready(tmp_path):
     db = tmp_path / "harness.db"
     service = HarnessService(db_path=db, project_root=tmp_path)

@@ -70,6 +70,7 @@ def test_nk_help_exposes_menu_commands():
     assert "runtime-seed" in help_text
     assert "runtime-auto" in help_text
     assert "runtime-cycle" in help_text
+    assert "runtime-probe" in help_text
     assert "runtime-bench" in help_text
     assert "runtime-compare" in help_text
     assert "current-bench-all" in help_text
@@ -153,6 +154,9 @@ def test_nk_menu_shows_primary_actions(monkeypatch):
     assert pipeline_args.max_reward_mae == 0.35
     assert pipeline_args.force_deploy is False
     assert seed_args.cycles == 8
+    probe_args = nk_menu.build_menu_args(base, "runtime-probe")
+    assert probe_args.max_candidates == 4
+    assert probe_args.min_actions == 4
     assert seed_args.include_failures is True
     assert seed_args.export_dataset is True
     assert seed_args.min_actions == 4
@@ -234,6 +238,45 @@ def test_nk_runtime_seed_local_creates_real_execution_rows(tmp_path):
     assert seed["action_counts"]["tail_logs"] == 3
     assert db.exists()
     assert result["artifacts"] == {}
+
+
+def test_nk_runtime_probe_local_exports_counterfactual_features(tmp_path):
+    db = tmp_path / "harness.db"
+    replay = tmp_path / "runtime_replay.jsonl"
+    features = tmp_path / "runtime_features.jsonl"
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="runtime-probe",
+            source="local",
+            db=str(db),
+            remote_db="data/harness.db",
+            cache_db=None,
+            remote_host=None,
+            remote_project=None,
+            ssh_connect_timeout=10,
+            project_root=".",
+            profile="readonly-basic",
+            target="local",
+            cycles=1,
+            max_candidates=2,
+            include_failures=False,
+            export_dataset=True,
+            replay_out=str(replay),
+            features_out=str(features),
+            test_ratio=0.0,
+            min_rows=1,
+            min_actions=2,
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert result["probe"]["candidate_groups"] >= 1
+    assert result["probe"]["known_candidate_rows"] >= 2
+    assert result["runtime_data"]["ready_for_runtime_training"] is True
+    assert result["runtime_features"]["validation"]["rows"] >= 2
+    assert replay.exists()
+    assert features.exists()
 
 
 def test_nk_runtime_seed_local_exports_dataset_after_seed(tmp_path, monkeypatch):
