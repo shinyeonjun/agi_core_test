@@ -816,6 +816,8 @@ def _runtime_model_slot(config: ModelReleaseRemoteConfig) -> dict[str, Any]:
     probe = subprocess.run(
         ["ssh", *ssh_options, str(remote_host), f"test -f { _sh_quote(model_path) } && echo present || echo missing"],
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         check=False,
     )
@@ -840,6 +842,8 @@ def _runtime_model_slot(config: ModelReleaseRemoteConfig) -> dict[str, Any]:
         manifest = subprocess.run(
             ["ssh", *ssh_options, str(remote_host), f"cat { _sh_quote(manifest_path) }"],
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             check=False,
         )
@@ -903,7 +907,14 @@ def _copy_remote_file(remote_host: str, remote_path: str, local_path: Path) -> N
     temp_path = local_path.with_name(f"{local_path.name}.tmp")
     if temp_path.exists():
         temp_path.unlink()
-    result = subprocess.run(["scp", f"{remote_host}:{remote_path}", str(temp_path)], check=False, text=True, capture_output=True)
+    result = subprocess.run(
+        ["scp", f"{remote_host}:{remote_path}", str(temp_path)],
+        check=False,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+    )
     if result.returncode != 0:
         if temp_path.exists():
             temp_path.unlink()
@@ -927,12 +938,21 @@ def _copy_local_file(remote_host: str, local_path: Path, remote_path: str, *, ti
         ["ssh", *ssh_options, remote_host, f"mkdir -p {_sh_quote(remote_dir)}"],
         check=False,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
     )
     if mkdir.returncode != 0:
         detail = (mkdir.stderr or mkdir.stdout or "").strip()
         raise ModelReleaseError(f"runtime 슬롯 디렉터리 생성 실패: {detail}")
-    copied = subprocess.run(["scp", str(local_path), f"{remote_host}:{temp_remote}"], check=False, text=True, capture_output=True)
+    copied = subprocess.run(
+        ["scp", str(local_path), f"{remote_host}:{temp_remote}"],
+        check=False,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+    )
     if copied.returncode != 0:
         detail = (copied.stderr or copied.stdout or "").strip()
         raise ModelReleaseError(f"runtime 슬롯 전송 실패: {detail}")
@@ -940,6 +960,8 @@ def _copy_local_file(remote_host: str, local_path: Path, remote_path: str, *, ti
         ["ssh", *ssh_options, remote_host, f"mv {_sh_quote(temp_remote)} {_sh_quote(remote_path)}"],
         check=False,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
     )
     if moved.returncode != 0:
