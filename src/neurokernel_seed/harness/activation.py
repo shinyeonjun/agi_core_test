@@ -59,55 +59,58 @@ class ActivationService:
         commands: list[dict[str, Any]] = []
         preflight = _preflight_patch_result(patch_result)
         if not preflight.get("passed"):
-            with HarnessMemory(self.config.db_path) as memory:
-                memory.add_work_event(work_id, "activation_failed", actor=actor, payload={"stage": "preflight", "preflight": preflight})
-                _transition_if_possible(memory, work_id, "reviewing", actor=actor, payload={"stage": "preflight", "preflight": preflight})
-            raise ActivationError(f"activation preflight failed: {preflight.get('reason')}")
+            self._fail_activation(work_id, actor=actor, payload={"stage": "preflight", "preflight": preflight}, message=f"activation preflight failed: {preflight.get('reason')}")
         pre_sha = _git_output(self.runner, ["git", "rev-parse", "HEAD"], cwd=project_root, commands=commands)
         if self.config.require_clean_git:
             status = _git_output(self.runner, ["git", "status", "--porcelain"], cwd=project_root, commands=commands)
             if status.strip():
-                payload = {
-                    "stage": "clean_git",
-                    "error": "live repository has uncommitted changes; activation requires a clean tree",
-                    "dirty_files": status.strip().splitlines()[:80],
-                    "commands": commands,
-                }
-                with HarnessMemory(self.config.db_path) as memory:
-                    memory.add_work_event(work_id, "activation_failed", actor=actor, payload=payload)
-                    _transition_if_possible(memory, work_id, "reviewing", actor=actor, payload=payload)
-                raise ActivationError(payload["error"])
+                self._fail_activation(
+                    work_id,
+                    actor=actor,
+                    payload={
+                        "stage": "clean_git",
+                        "error": "live repository has uncommitted changes; activation requires a clean tree",
+                        "dirty_files": status.strip().splitlines()[:80],
+                        "commands": commands,
+                    },
+                    message="live repository has uncommitted changes; activation requires a clean tree",
+                )
 
         try:
             _run_checked(self.runner, ["git", "apply", "--check", "--whitespace=nowarn", str(patch_path)], cwd=project_root, timeout_seconds=60, commands=commands)
             _run_checked(self.runner, ["git", "apply", "--whitespace=nowarn", str(patch_path)], cwd=project_root, timeout_seconds=60, commands=commands)
         except Exception as exc:
-            with HarnessMemory(self.config.db_path) as memory:
-                memory.add_work_event(work_id, "activation_failed", actor=actor, payload={"stage": "apply", "error": redact_text(str(exc))})
-                _transition_if_possible(memory, work_id, "reviewing", actor=actor, payload={"stage": "apply", "error": redact_text(str(exc))})
-            raise
+            self._fail_activation(
+                work_id,
+                actor=actor,
+                payload={"stage": "apply", "error": redact_text(str(exc)), "commands": commands},
+                message="activation patch apply failed",
+                cause=exc,
+            )
 
         test_result = self.runner(list(self.config.test_command), cwd=project_root, timeout_seconds=self.config.test_timeout_seconds)
         commands.append(_command_record("test", list(self.config.test_command), test_result))
         if test_result.returncode != 0:
             rollback = self.runner(["git", "apply", "-R", "--whitespace=nowarn", str(patch_path)], cwd=project_root, timeout_seconds=60)
             commands.append(_command_record("rollback", ["git", "apply", "-R", "--whitespace=nowarn", str(patch_path)], rollback))
-            with HarnessMemory(self.config.db_path) as memory:
-                payload = {"stage": "test", "test": _public_result(test_result), "rollback": _public_result(rollback), "commands": commands}
-                memory.add_work_event(work_id, "activation_failed", actor=actor, payload=payload)
-                _transition_if_possible(memory, work_id, "reviewing", actor=actor, payload=payload)
-            raise ActivationError("activation tests failed; patch was rolled back")
+            self._fail_activation(
+                work_id,
+                actor=actor,
+                payload={"stage": "test", "test": _public_result(test_result), "rollback": _public_result(rollback), "commands": commands},
+                message="activation tests failed; patch was rolled back",
+            )
 
         verification = self._verify_activation(project_root, proposal)
         commands.extend(verification.pop("commands", []))
         if not verification.get("passed"):
             rollback = self.runner(["git", "apply", "-R", "--whitespace=nowarn", str(patch_path)], cwd=project_root, timeout_seconds=60)
             commands.append(_command_record("rollback", ["git", "apply", "-R", "--whitespace=nowarn", str(patch_path)], rollback))
-            with HarnessMemory(self.config.db_path) as memory:
-                payload = {"stage": "verify", "verification": verification, "rollback": _public_result(rollback), "commands": commands}
-                memory.add_work_event(work_id, "activation_failed", actor=actor, payload=payload)
-                _transition_if_possible(memory, work_id, "reviewing", actor=actor, payload=payload)
-            raise ActivationError("activation verification failed; patch was rolled back")
+            self._fail_activation(
+                work_id,
+                actor=actor,
+                payload={"stage": "verify", "verification": verification, "rollback": _public_result(rollback), "commands": commands},
+                message="activation verification failed; patch was rolled back",
+            )
 
         commit_result = None
         if self.config.commit_after_apply:
@@ -116,22 +119,26 @@ class ActivationService:
             except Exception as exc:
                 rollback = self.runner(["git", "apply", "-R", "--whitespace=nowarn", str(patch_path)], cwd=project_root, timeout_seconds=60)
                 commands.append(_command_record("rollback", ["git", "apply", "-R", "--whitespace=nowarn", str(patch_path)], rollback))
-                with HarnessMemory(self.config.db_path) as memory:
-                    payload = {"stage": "commit", "error": redact_text(str(exc)), "rollback": _public_result(rollback), "commands": commands}
-                    memory.add_work_event(work_id, "activation_failed", actor=actor, payload=payload)
-                    _transition_if_possible(memory, work_id, "reviewing", actor=actor, payload=payload)
-                raise ActivationError("activation commit failed; patch was rolled back") from exc
+                self._fail_activation(
+                    work_id,
+                    actor=actor,
+                    payload={"stage": "commit", "error": redact_text(str(exc)), "rollback": _public_result(rollback), "commands": commands},
+                    message="activation commit failed; patch was rolled back",
+                    cause=exc,
+                )
 
         reload_result = None
         if self.config.reload_command:
             reload_result = self.runner(list(self.config.reload_command), cwd=project_root, timeout_seconds=self.config.reload_timeout_seconds)
             commands.append(_command_record("reload", list(self.config.reload_command), reload_result))
             if reload_result.returncode != 0:
-                with HarnessMemory(self.config.db_path) as memory:
-                    payload = {"stage": "reload", "reload": _public_result(reload_result), "commands": commands}
-                    memory.add_work_event(work_id, "activation_reload_failed", actor=actor, payload=payload)
-                    _transition_if_possible(memory, work_id, "reviewing", actor=actor, payload=payload)
-                raise ActivationError("activation reload command failed")
+                self._fail_activation(
+                    work_id,
+                    actor=actor,
+                    event_type="activation_reload_failed",
+                    payload={"stage": "reload", "reload": _public_result(reload_result), "commands": commands},
+                    message="activation reload command failed",
+                )
 
         post_sha = _git_output(self.runner, ["git", "rev-parse", "HEAD"], cwd=project_root, commands=commands)
         result = {
@@ -163,6 +170,23 @@ class ActivationService:
                     memory.add_proposal_event(str(proposal["proposal_id"]), "activation_status_not_changed", actor=actor, payload=result)
                     memory.conn.commit()
         return result
+
+    def _fail_activation(
+        self,
+        work_id: str,
+        *,
+        actor: str,
+        payload: dict[str, Any],
+        message: str,
+        event_type: str = "activation_failed",
+        cause: Exception | None = None,
+    ) -> None:
+        with HarnessMemory(self.config.db_path) as memory:
+            memory.add_work_event(work_id, event_type, actor=actor, payload=payload)
+            _transition_if_possible(memory, work_id, "reviewing", actor=actor, payload=payload)
+        if cause is None:
+            raise ActivationError(message)
+        raise ActivationError(message) from cause
 
     def _verify_activation(self, project_root: Path, proposal: dict[str, Any] | None) -> dict[str, Any]:
         if not self.config.verify_activation:

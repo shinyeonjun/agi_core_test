@@ -143,6 +143,40 @@ def test_activation_blocks_dirty_live_repo(tmp_path):
     assert "README.md" in "\n".join(failure["payload_json"]["dirty_files"])
 
 
+def test_activation_apply_failure_is_recorded_as_reviewing(tmp_path):
+    project = _make_git_project(tmp_path)
+    db_path = tmp_path / "harness.db"
+    service = HarnessService(db_path=db_path, project_root=project)
+    proposal = service.create_capability_proposal_from_intent(user_text="CPU 사용률", capability_intent=_cpu_usage_intent())
+    work_id = proposal["work_item"]["work_id"]
+    proposal_id = proposal["proposal"]["proposal_id"]
+    service.transition_capability_proposal(proposal_id, "approved_for_dev", actor="test")
+    patch_path = _make_patch(project, tmp_path, work_id=work_id)
+    (project / "src" / "demo.py").write_text("VALUE = 3\n", encoding="utf-8")
+    _git(project, "add", "src/demo.py")
+    _git(project, "commit", "-m", "conflicting live change")
+    with HarnessMemory(db_path) as memory:
+        memory.transition_work_item(work_id, "waiting_approval", actor="test", payload={})
+        memory.add_work_event(work_id, "job_completed", actor="worker", payload={"job_id": "job1", "result": {"status": "patch_ready", "patch_path": str(patch_path)}})
+        memory.conn.commit()
+
+    with pytest.raises(ActivationError, match="patch apply failed"):
+        ActivationService(
+            ActivationConfig(
+                db_path=db_path,
+                project_root=project,
+                self_patch_run_root=project / "artifacts" / "self_patch",
+                test_command=("python", "-c", "pass"),
+                verify_activation=False,
+            )
+        ).activate_work_item(work_id, actor="test")
+
+    detail = service.work_item(work_id)
+    assert detail["work_item"]["status"] == "reviewing"
+    failure = [event for event in detail["events"] if event["event_type"] == "activation_failed"][-1]
+    assert failure["payload_json"]["stage"] == "apply"
+
+
 def test_activation_rolls_back_when_tests_fail(tmp_path):
     project = _make_git_project(tmp_path)
     db_path = tmp_path / "harness.db"
