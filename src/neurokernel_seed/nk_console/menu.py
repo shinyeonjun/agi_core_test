@@ -14,11 +14,18 @@ class MenuCommand:
 
 
 ACTION_ALIASES = {
+    "autopilot": "runtime-pipeline",
+    "오토파일럿": "runtime-pipeline",
+    "오토": "runtime-pipeline",
+    "풀자동": "runtime-pipeline",
+    "전체자동": "runtime-pipeline",
     "auto": "runtime-auto",
     "learn": "runtime-auto",
     "학습": "runtime-auto",
     "자동학습": "runtime-auto",
     "train-runtime": "runtime-train",
+    "학습만": "runtime-train",
+    "런타임학습": "runtime-train",
     "seed": "runtime-seed",
     "시드": "runtime-seed",
     "초기데이터": "runtime-seed",
@@ -40,6 +47,7 @@ ACTION_ALIASES = {
     "runtime-deploy": "deploy-runtime",
     "runtime-use": "deploy-runtime",
     "런타임배포": "deploy-runtime",
+    "배포만": "deploy-runtime",
     "edge": "current",
     "models": "list",
     "rank": "top",
@@ -49,6 +57,7 @@ ACTION_ALIASES = {
     "deploy": "deploy-best",
     "배포": "deploy-best",
     "월드배포": "deploy-best",
+    "상태": "status",
     "switch": "use",
     "q": "exit",
     "quit": "exit",
@@ -59,17 +68,19 @@ ACTION_ALIASES = {
 
 
 DASHBOARD_COMMANDS = (
-    MenuCommand("1", "runtime-seed", "시드", "런타임 초기 데이터만 준비"),
-    MenuCommand("2", "runtime-auto", "학습", "런타임 데이터로 특징 생성 후 CUDA/CPU 학습"),
-    MenuCommand("3", "runtime-cycle", "배포학습", "런타임 학습 후 OrangePi 슬롯에 배포"),
-    MenuCommand("4", "compare", "비교", "현재 world 모델과 최고 후보 비교"),
-    MenuCommand("5", "deploy-best", "월드배포", "최고 world 모델을 OrangePi에 적용"),
+    MenuCommand("1", "runtime-pipeline", "오토파일럿", "OrangePi 데이터 수집, 노트북 학습, 품질 통과 시 배포"),
+    MenuCommand("2", "runtime-seed", "시드", "런타임 초기 데이터만 준비"),
+    MenuCommand("3", "runtime-train", "학습만", "준비된 runtime_features로 노트북 학습"),
+    MenuCommand("4", "deploy-runtime", "런타임배포", "학습된 runtime 모델을 OrangePi에 적용"),
+    MenuCommand("5", "status", "상태", "world/runtime 슬롯과 후보 모델 확인"),
+    MenuCommand("6", "compare", "월드비교", "현재 world 모델과 최고 후보 비교"),
     MenuCommand("0", "exit", "종료", "콘솔 닫기"),
 )
 
 
 KNOWN_ACTIONS = {
     "data",
+    "runtime-pipeline",
     "runtime-seed",
     "runtime-auto",
     "runtime-cycle",
@@ -150,8 +161,17 @@ def build_menu_args(base: argparse.Namespace, action: str) -> argparse.Namespace
     menu_args.profile = "readonly-basic"
     menu_args.target = "orangepi5"
     menu_args.cycles = 8
+    menu_args.seed_cycles = 0
+    menu_args.epochs = 100 if menu_args.action in {"runtime-pipeline", "runtime-train"} else 50
+    menu_args.batch_size = 128
+    menu_args.device = "cuda" if menu_args.action in {"runtime-pipeline", "runtime-train"} else "auto"
+    menu_args.patience = 20
     menu_args.min_rows = 1
-    menu_args.min_actions = 4 if menu_args.action == "runtime-seed" else 1
+    menu_args.min_actions = 4 if menu_args.action in {"runtime-seed", "runtime-pipeline"} else 1
+    menu_args.min_success_accuracy = 0.75
+    menu_args.max_reward_mae = 0.35
+    menu_args.min_known_success_rows = 5
+    menu_args.force_deploy = False
     menu_args.lr = 1e-3
     menu_args.weight_decay = 1e-4
     menu_args.hidden_dim = 64
@@ -160,7 +180,7 @@ def build_menu_args(base: argparse.Namespace, action: str) -> argparse.Namespace
     menu_args.include_failures = True
     menu_args.export_dataset = True
     menu_args.runtime_model_out = runtime_model
-    menu_args.deploy_runtime = menu_args.action == "runtime-cycle"
+    menu_args.deploy_runtime = menu_args.action in {"runtime-cycle", "runtime-pipeline"}
     menu_args.json = False
     return menu_args
 

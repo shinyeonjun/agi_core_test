@@ -63,6 +63,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="action", metavar="명령")
 
+    for name in ("runtime-pipeline", "autopilot", "오토파일럿", "풀자동", "전체자동"):
+        item = sub.add_parser(name)
+        _add_runtime_pipeline_options(item)
+
     for name in ("runtime-auto", "auto", "자동", "학습", "파이프라인", "사용자동"):
         item = sub.add_parser(name)
         _add_runtime_auto_options(item)
@@ -104,7 +108,7 @@ def _build_parser() -> argparse.ArgumentParser:
         item.add_argument("--min-actions", type=int, default=1)
         item.add_argument("--json", action="store_true")
 
-    for name in ("runtime-train", "사용학습", "현실학습"):
+    for name in ("runtime-train", "사용학습", "현실학습", "학습만", "런타임학습"):
         item = sub.add_parser(name)
         _add_runtime_train_options(item)
 
@@ -231,6 +235,19 @@ def _add_runtime_auto_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true")
 
 
+def _add_runtime_pipeline_options(parser: argparse.ArgumentParser) -> None:
+    _add_runtime_auto_options(parser)
+    parser.set_defaults(deploy_runtime=True, device="cuda", epochs=100)
+    parser.add_argument("--seed-cycles", type=int, default=int(os.getenv("NEUROKERNEL_RUNTIME_PIPELINE_SEED_CYCLES", "0")))
+    parser.add_argument("--no-seed-failures", dest="include_failures", action="store_false")
+    parser.set_defaults(include_failures=True)
+    parser.add_argument("--min-success-accuracy", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MIN_SUCCESS_ACCURACY", "0.75")))
+    parser.add_argument("--max-reward-mae", type=float, default=float(os.getenv("NEUROKERNEL_RUNTIME_MAX_REWARD_MAE", "0.35")))
+    parser.set_defaults(min_actions=4)
+    parser.add_argument("--min-known-success-rows", type=int, default=int(os.getenv("NEUROKERNEL_RUNTIME_MIN_KNOWN_SUCCESS_ROWS", "5")))
+    parser.add_argument("--force-deploy", action="store_true")
+
+
 def _add_runtime_seed_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--source", choices=["edge", "local"], default=os.getenv("NEUROKERNEL_RUNTIME_DATA_SOURCE", "edge"))
     parser.add_argument("--db", default=os.getenv("NEUROKERNEL_HARNESS_DB", "data/harness.db"))
@@ -324,6 +341,8 @@ def _status_args(base: argparse.Namespace, action: str) -> argparse.Namespace:
 
 def _run_action(args: argparse.Namespace) -> dict[str, Any]:
     args.action = _normalize_action(args.action)
+    if args.action == "runtime-pipeline":
+        return _run_runtime_pipeline_action(args)
     if args.action in {"runtime-auto", "runtime-cycle"}:
         return _run_runtime_auto_action(args)
     if args.action == "runtime-seed":
@@ -517,6 +536,169 @@ def _write_runtime_auto_report(report: dict[str, Any]) -> Path:
     report_path = report_dir / f"runtime_action_auto_{stamp}.json"
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     latest_path = report_dir / "latest_runtime_action_auto.json"
+    latest_path.write_text(json.dumps({**report, "report": str(report_path)}, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return report_path
+
+
+def _run_runtime_pipeline_action(args: argparse.Namespace) -> dict[str, Any]:
+    replay_out = Path(getattr(args, "replay_out", None) or os.getenv("NEUROKERNEL_RUNTIME_REPLAY_OUT", "data/model_ready/runtime_replay.jsonl"))
+    features_out = Path(getattr(args, "features_out", None) or os.getenv("NEUROKERNEL_RUNTIME_FEATURES_OUT", "data/model_ready/runtime_features.jsonl"))
+    model_out = Path(getattr(args, "model_out", None) or os.getenv("NEUROKERNEL_RUNTIME_ACTION_MODEL_OUT", "artifacts/runtime_action_model.pt"))
+    seed_result = None
+    seed_cycles = int(getattr(args, "seed_cycles", 0) or 0)
+    if seed_cycles > 0:
+        seed_result = _run_runtime_seed_action(
+            argparse.Namespace(
+                action="runtime-seed",
+                source=getattr(args, "source", "edge"),
+                db=getattr(args, "db", "data/harness.db"),
+                remote_host=getattr(args, "remote_host", None),
+                remote_project=getattr(args, "remote_project", None),
+                remote_db=getattr(args, "remote_db", "data/harness.db"),
+                cache_db=getattr(args, "cache_db", None),
+                ssh_connect_timeout=getattr(args, "ssh_connect_timeout", 10),
+                remote_python=getattr(args, "remote_python", None),
+                project_root=".",
+                profile="readonly-basic",
+                target="orangepi5" if getattr(args, "source", "edge") == "edge" else "local",
+                cycles=seed_cycles,
+                include_failures=getattr(args, "include_failures", True),
+                export_dataset=False,
+                replay_out=str(replay_out),
+                features_out=str(features_out),
+                test_ratio=getattr(args, "test_ratio", 0.2),
+                min_rows=getattr(args, "min_rows", 10),
+                min_actions=getattr(args, "min_actions", 1),
+            )
+        )
+
+    data_result = _run_runtime_data_action(
+        argparse.Namespace(
+            action="runtime-data",
+            source=getattr(args, "source", "edge"),
+            db=getattr(args, "db", "data/harness.db"),
+            remote_host=getattr(args, "remote_host", None),
+            remote_project=getattr(args, "remote_project", None),
+            remote_db=getattr(args, "remote_db", "data/harness.db"),
+            cache_db=getattr(args, "cache_db", None),
+            out=str(replay_out),
+            limit=getattr(args, "limit", None),
+            min_rows=getattr(args, "min_rows", 10),
+            allow_no_execution=False,
+        )
+    )
+    _require_stage_ready(data_result, "런타임 데이터", "ready_for_runtime_training")
+
+    feature_result = _run_runtime_features_action(
+        argparse.Namespace(
+            action="runtime-features",
+            replay=str(replay_out),
+            out=str(features_out),
+            test_ratio=getattr(args, "test_ratio", 0.2),
+            min_rows=getattr(args, "min_rows", 10),
+            min_actions=getattr(args, "min_actions", 1),
+        )
+    )
+    _require_stage_ready(feature_result, "런타임 특징", "ready_for_runtime_model_training")
+
+    train_result = _run_runtime_training_action(
+        argparse.Namespace(
+            action="runtime-train",
+            features=str(features_out),
+            out=str(model_out),
+            epochs=getattr(args, "epochs", 50),
+            batch_size=getattr(args, "batch_size", 128),
+            lr=getattr(args, "lr", 1e-3),
+            weight_decay=getattr(args, "weight_decay", 1e-4),
+            hidden_dim=getattr(args, "hidden_dim", 64),
+            hidden_layers=getattr(args, "hidden_layers", 2),
+            device=getattr(args, "device", "cuda"),
+            patience=getattr(args, "patience", 10),
+            min_rows=getattr(args, "min_rows", 10),
+            min_actions=getattr(args, "min_actions", 1),
+        )
+    )
+    quality = _runtime_quality_gate(train_result, args)
+    deploy_result = None
+    current_after = None
+    deploy_requested = bool(getattr(args, "deploy_runtime", True))
+    if deploy_requested and (quality["passed"] or bool(getattr(args, "force_deploy", False))):
+        deploy_result = _run_deploy_runtime_action(
+            argparse.Namespace(
+                action="deploy-runtime",
+                model=str(train_result.get("checkpoint") or model_out),
+                remote_host=getattr(args, "remote_host", None),
+                remote_project=getattr(args, "remote_project", None),
+                ssh_connect_timeout=getattr(args, "ssh_connect_timeout", 10),
+            )
+        )
+        current_after = _run_current(
+            argparse.Namespace(
+                action="current",
+                remote_host=getattr(args, "remote_host", None),
+                remote_project=getattr(args, "remote_project", None),
+                ssh_connect_timeout=getattr(args, "ssh_connect_timeout", 10),
+            )
+        )
+
+    status = "deployed" if deploy_result else "trained"
+    if deploy_requested and not deploy_result:
+        status = "blocked_by_quality_gate"
+    report = {
+        "status": status,
+        "pipeline": "runtime_action_autopilot_v1",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "quality": quality,
+        "steps": {
+            "runtime_seed": seed_result,
+            "runtime_data": data_result,
+            "runtime_features": feature_result,
+            "runtime_train": train_result,
+            "runtime_deploy": deploy_result,
+            "current_after": current_after,
+        },
+        "artifacts": {
+            "replay": str(replay_out),
+            "features": str(features_out),
+            "model": train_result.get("checkpoint") or str(model_out),
+            "metrics": train_result.get("metrics"),
+            "manifest": train_result.get("manifest"),
+        },
+    }
+    report_path = _write_runtime_pipeline_report(report)
+    return {**report, "report": str(report_path)}
+
+
+def _runtime_quality_gate(train_result: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    test = train_result.get("test") if isinstance(train_result.get("test"), dict) else {}
+    success_accuracy = _as_float(test.get("success_accuracy"))
+    reward_mae = _as_float(test.get("reward_mae"))
+    known_success_rows = _as_float(test.get("known_success_rows"))
+    min_success = float(getattr(args, "min_success_accuracy", 0.75))
+    max_reward = float(getattr(args, "max_reward_mae", 0.35))
+    min_known = int(getattr(args, "min_known_success_rows", 5))
+    checks = {
+        "success_accuracy": {"passed": success_accuracy >= min_success, "actual": success_accuracy, "threshold": min_success},
+        "reward_mae": {"passed": reward_mae <= max_reward, "actual": reward_mae, "threshold": max_reward},
+        "known_success_rows": {"passed": known_success_rows >= min_known, "actual": known_success_rows, "threshold": min_known},
+    }
+    passed = all(item["passed"] for item in checks.values())
+    return {
+        "passed": passed,
+        "forced": bool(getattr(args, "force_deploy", False)),
+        "summary": "품질 게이트 통과" if passed else "품질 게이트 미통과",
+        "checks": checks,
+    }
+
+
+def _write_runtime_pipeline_report(report: dict[str, Any]) -> Path:
+    report_dir = Path(os.getenv("NEUROKERNEL_RUNTIME_PIPELINE_DIR", "artifacts/runtime_pipeline"))
+    report_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    report_path = report_dir / f"runtime_action_autopilot_{stamp}.json"
+    payload = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
+    report_path.write_text(payload, encoding="utf-8")
+    latest_path = report_dir / "latest_runtime_action_autopilot.json"
     latest_path.write_text(json.dumps({**report, "report": str(report_path)}, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     return report_path
 
@@ -1336,7 +1518,9 @@ def _print_result(action: str, result: dict[str, Any], *, json_mode: bool) -> No
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return
     action = _normalize_action(action)
-    if action in {"runtime-auto", "runtime-cycle"}:
+    if action == "runtime-pipeline":
+        _print_runtime_pipeline(result)
+    elif action in {"runtime-auto", "runtime-cycle"}:
         _print_runtime_auto(result)
     elif action == "runtime-seed":
         _print_runtime_seed(result)
@@ -1416,6 +1600,40 @@ def _print_runtime_auto(result: dict[str, Any]) -> None:
     deploy = steps.get("runtime_deploy") or {}
     if deploy:
         print(_kv("runtime", deploy.get("remote_model")))
+    print(_kv("리포트", result.get("report")))
+
+
+def _print_runtime_pipeline(result: dict[str, Any]) -> None:
+    status = str(result.get("status") or "unknown")
+    label = {
+        "deployed": "배포 완료",
+        "trained": "학습 완료",
+        "blocked_by_quality_gate": "품질 보류",
+    }.get(status, status)
+    print(_ok("오토파일럿", label) if status != "blocked_by_quality_gate" else _warn("오토파일럿", label))
+    steps = result.get("steps") or {}
+    data = steps.get("runtime_data") or {}
+    features = steps.get("runtime_features") or {}
+    train = steps.get("runtime_train") or {}
+    quality = result.get("quality") or {}
+    artifacts = result.get("artifacts") or {}
+    print(_kv("데이터", f"{(data.get('validation') or {}).get('rows')} rows / {data.get('source')}"))
+    print(_kv("특징", f"{(features.get('validation') or {}).get('rows')} rows"))
+    print(_kv("모델", artifacts.get("model")))
+    test = train.get("test") or {}
+    if test:
+        print(_kv("성공률", f"{float(test.get('success_accuracy', 0.0)):.3f}"))
+        print(_kv("보상오차", f"{float(test.get('reward_mae', 0.0)):.3f}"))
+        print(_kv("known", int(float(test.get("known_success_rows", 0.0)))))
+    print(_kv("품질", quality.get("summary")))
+    for name, item in (quality.get("checks") or {}).items():
+        mark = "통과" if item.get("passed") else "미통과"
+        print(_kv(f" - {name}", f"{mark} actual={item.get('actual')} threshold={item.get('threshold')}"))
+    deploy = steps.get("runtime_deploy") or {}
+    if deploy:
+        print(_kv("배포", deploy.get("remote_model")))
+    elif status == "blocked_by_quality_gate":
+        print(_kv("배포", "보류됨. --force-deploy를 쓰면 강제 배포 가능"))
     print(_kv("리포트", result.get("report")))
 
 

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from neurokernel_seed.nk_console import menu
@@ -61,8 +64,8 @@ class DashboardController:
 
     def print_dashboard(self, args: argparse.Namespace) -> None:
         print()
-        print(self._style("NK 학습 콘솔", "cyan"))
-        print("런타임 데이터, 학습, OrangePi 배포를 한 곳에서 실행합니다.")
+        print(self._style("NK", "cyan") + "  NeuroKernel 자동 학습 콘솔")
+        print("OrangePi 데이터를 모으고, 노트북 CUDA로 학습한 뒤, 품질 통과 모델만 배포합니다.")
         self._print_command_grid()
         print()
         self._print_status_snapshot(args)
@@ -87,12 +90,13 @@ class DashboardController:
         for command in menu.DASHBOARD_COMMANDS:
             print(f"{command.key:<4} {command.label:<10} {command.hint}")
         print()
-        print("빠른 입력  시드 | 학습 | 배포학습 | 비교 | 월드배포 | 종료")
-        print("직접 실행  nk runtime-train --device cuda  처럼 명령어로도 실행 가능")
+        print("빠른 입력  오토파일럿 | 시드 | 학습만 | 런타임배포 | 상태 | 종료")
+        print("직접 실행  nk 오토파일럿 --device cuda  또는  nk runtime-train --device cuda")
 
     def _print_status_snapshot(self, args: argparse.Namespace) -> None:
         current = self._probe(args, "current")
         best = self._probe(args, "top")
+        local = _local_runtime_snapshot()
         print("현재 상태")
         print(self._kv("world", self._short_current(current)))
         print(self._kv("best", self._short_best(best)))
@@ -100,6 +104,9 @@ class DashboardController:
         runtime = slots.get("runtime") if isinstance(slots, dict) and isinstance(slots.get("runtime"), dict) else {}
         if runtime:
             print(self._kv("runtime", f"{runtime.get('status', 'unknown')} {runtime.get('model') or ''}".strip()))
+        print(self._kv("local-data", local["data"]))
+        print(self._kv("local-model", local["model"]))
+        print(self._kv("추천", _recommend_next_action(local, runtime)))
 
     def _probe(self, args: argparse.Namespace, action: str) -> dict[str, Any] | None:
         try:
@@ -144,3 +151,59 @@ class DashboardController:
             input("\n계속하려면 Enter")
         except EOFError:
             return
+
+
+def _local_runtime_snapshot() -> dict[str, str]:
+    features = Path(os.getenv("NEUROKERNEL_RUNTIME_FEATURES_OUT", "data/model_ready/runtime_features.jsonl"))
+    model = Path(os.getenv("NEUROKERNEL_RUNTIME_ACTION_MODEL_OUT", "artifacts/runtime_action_model.pt"))
+    feature_manifest = _read_json(features.with_suffix(features.suffix + ".manifest.json"))
+    model_manifest = _read_json(model.with_suffix(".manifest.json"))
+    data_text = "없음"
+    if feature_manifest:
+        actions = len(feature_manifest.get("action_vocab") or [])
+        data_text = f"{feature_manifest.get('rows')} rows / action {actions}"
+    model_text = "없음"
+    if model.exists() and model_manifest:
+        model_text = f"candidate rows={model_manifest.get('rows')} input={model_manifest.get('input_dim')}"
+    elif model.exists():
+        model_text = "candidate manifest 없음"
+    return {"data": data_text, "model": model_text}
+
+
+def _recommend_next_action(local: dict[str, str], runtime: dict[str, Any]) -> str:
+    if local["data"] == "없음":
+        return "오토파일럿 또는 시드로 데이터 준비"
+    if local["model"] == "없음":
+        return "학습만 또는 오토파일럿"
+    remote_rows = _remote_runtime_rows(runtime)
+    local_rows = _rows_from_text(local["model"])
+    if local_rows and remote_rows is not None and local_rows > remote_rows:
+        return "런타임배포: 로컬 후보가 원격보다 최신"
+    return "오토파일럿: 데이터 갱신 후 품질 통과 시 자동 배포"
+
+
+def _remote_runtime_rows(runtime: dict[str, Any]) -> int | None:
+    manifest = runtime.get("manifest_payload") if isinstance(runtime, dict) else None
+    if not isinstance(manifest, dict):
+        return None
+    try:
+        return int(manifest.get("rows"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _rows_from_text(value: str) -> int | None:
+    if "rows=" not in value:
+        return None
+    raw = value.split("rows=", 1)[1].split()[0]
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}

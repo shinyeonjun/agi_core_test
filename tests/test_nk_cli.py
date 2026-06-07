@@ -74,7 +74,7 @@ def test_nk_dashboard_loops_until_exit(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert result == 0
     assert calls.count("top") >= 1
-    assert "NK 학습 콘솔" in output
+    assert "NeuroKernel 자동 학습 콘솔" in output
     assert "비교" in output
     assert "종료" in output
 
@@ -86,18 +86,21 @@ def test_nk_menu_shows_primary_actions(monkeypatch):
     base = argparse.Namespace()
 
     assert [(item.key, item.action) for item in nk_menu.DASHBOARD_COMMANDS] == [
-        ("1", "runtime-seed"),
-        ("2", "runtime-auto"),
-        ("3", "runtime-cycle"),
-        ("4", "compare"),
-        ("5", "deploy-best"),
+        ("1", "runtime-pipeline"),
+        ("2", "runtime-seed"),
+        ("3", "runtime-train"),
+        ("4", "deploy-runtime"),
+        ("5", "status"),
+        ("6", "compare"),
         ("0", "exit"),
     ]
+    assert nk_menu.dashboard_action("오토파일럿") == "runtime-pipeline"
     assert nk_menu.dashboard_action("시드") == "runtime-seed"
-    assert nk_menu.dashboard_action("학습") == "runtime-auto"
-    assert nk_menu.dashboard_action("배포학습") == "runtime-cycle"
-    assert nk_menu.dashboard_action("월드배포") == "deploy-best"
+    assert nk_menu.dashboard_action("학습만") == "runtime-train"
+    assert nk_menu.dashboard_action("런타임배포") == "deploy-runtime"
+    assert nk_menu.dashboard_action("상태") == "status"
     assert nk_menu.dashboard_action("종료") == "exit"
+    pipeline_args = nk_menu.build_menu_args(base, "runtime-pipeline")
     seed_args = nk_menu.build_menu_args(base, "runtime-seed")
     auto_args = nk_menu.build_menu_args(base, "runtime-auto")
     data_args = nk_menu.build_menu_args(base, "runtime-data")
@@ -106,6 +109,13 @@ def test_nk_menu_shows_primary_actions(monkeypatch):
     top_args = nk_menu.build_menu_args(base, "top")
     cycle_args = nk_menu.build_menu_args(base, "runtime-cycle")
 
+    assert pipeline_args.deploy_runtime is True
+    assert pipeline_args.device == "cuda"
+    assert pipeline_args.epochs == 100
+    assert pipeline_args.min_actions == 4
+    assert pipeline_args.min_success_accuracy == 0.75
+    assert pipeline_args.max_reward_mae == 0.35
+    assert pipeline_args.force_deploy is False
     assert seed_args.cycles == 8
     assert seed_args.include_failures is True
     assert seed_args.export_dataset is True
@@ -125,11 +135,17 @@ def test_nk_parser_accepts_korean_runtime_shortcuts():
     parser = nk_cli._build_parser()
 
     seed = parser.parse_args(["시드", "--no-export"])
+    pipeline = parser.parse_args(["오토파일럿", "--no-deploy"])
     cycle = parser.parse_args(["배포학습", "--no-deploy"])
     deploy = parser.parse_args(["런타임배포", "--model", "artifacts/runtime_action_model.pt"])
 
     assert seed.action == "시드"
     assert seed.export_dataset is False
+    assert pipeline.action == "오토파일럿"
+    assert pipeline.deploy_runtime is False
+    assert pipeline.device == "cuda"
+    assert pipeline.epochs == 100
+    assert pipeline.min_actions == 4
     assert cycle.action == "배포학습"
     assert cycle.deploy_runtime is False
     assert deploy.action == "런타임배포"
@@ -556,6 +572,155 @@ def test_nk_runtime_cycle_trains_deploys_and_rechecks_current(tmp_path, monkeypa
         ("deploy", str(model)),
         ("current", "orangepi5"),
     ]
+
+
+def test_nk_runtime_pipeline_deploys_only_after_quality_passes(tmp_path, monkeypatch):
+    replay = tmp_path / "runtime_replay.jsonl"
+    features = tmp_path / "runtime_features.jsonl"
+    model = tmp_path / "runtime_action_model.pt"
+    report_dir = tmp_path / "reports"
+    calls = []
+
+    monkeypatch.setenv("NEUROKERNEL_RUNTIME_PIPELINE_DIR", str(report_dir))
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_data_action",
+        lambda args: calls.append(("data", args.out)) or {"ready_for_runtime_training": True, "source": "edge", "validation": {"rows": 120}, "gates": {"gates": {}}},
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_features_action",
+        lambda args: calls.append(("features", args.replay, args.out))
+        or {"ready_for_runtime_model_training": True, "validation": {"rows": 240, "input_dim": 31}, "gates": {"gates": {}}},
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_training_action",
+        lambda args: calls.append(("train", args.features, args.out))
+        or {
+            "checkpoint": str(model),
+            "manifest": str(model.with_suffix(".manifest.json")),
+            "metrics": str(model.with_suffix(".metrics.json")),
+            "test": {"success_accuracy": 0.91, "reward_mae": 0.12, "known_success_rows": 42.0},
+        },
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_deploy_runtime_action",
+        lambda args: calls.append(("deploy", args.model)) or {"status": "deployed_and_activated", "remote_model": "/remote/runtime.pt"},
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_current",
+        lambda args: calls.append(("current", args.remote_host)) or {"model_slots": {"runtime": {"status": "active"}}},
+    )
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="runtime-pipeline",
+            source="edge",
+            db="data/harness.db",
+            remote_host="orangepi5",
+            remote_project="/remote",
+            remote_db="data/harness.db",
+            cache_db=None,
+            replay_out=str(replay),
+            features_out=str(features),
+            model_out=str(model),
+            test_ratio=0.2,
+            min_rows=10,
+            min_actions=4,
+            epochs=1,
+            batch_size=8,
+            device="cpu",
+            patience=3,
+            deploy_runtime=True,
+            seed_cycles=0,
+            include_failures=True,
+            min_success_accuracy=0.75,
+            max_reward_mae=0.35,
+            min_known_success_rows=5,
+            force_deploy=False,
+            ssh_connect_timeout=10,
+        )
+    )
+
+    assert result["status"] == "deployed"
+    assert result["quality"]["passed"] is True
+    assert calls == [
+        ("data", str(replay)),
+        ("features", str(replay), str(features)),
+        ("train", str(features), str(model)),
+        ("deploy", str(model)),
+        ("current", "orangepi5"),
+    ]
+
+
+def test_nk_runtime_pipeline_blocks_deploy_when_quality_fails(tmp_path, monkeypatch):
+    replay = tmp_path / "runtime_replay.jsonl"
+    features = tmp_path / "runtime_features.jsonl"
+    model = tmp_path / "runtime_action_model.pt"
+    report_dir = tmp_path / "reports"
+    calls = []
+
+    monkeypatch.setenv("NEUROKERNEL_RUNTIME_PIPELINE_DIR", str(report_dir))
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_data_action",
+        lambda args: calls.append(("data", args.out)) or {"ready_for_runtime_training": True, "source": "edge", "validation": {"rows": 120}, "gates": {"gates": {}}},
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_features_action",
+        lambda args: calls.append(("features", args.replay, args.out))
+        or {"ready_for_runtime_model_training": True, "validation": {"rows": 240, "input_dim": 31}, "gates": {"gates": {}}},
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_training_action",
+        lambda args: calls.append(("train", args.features, args.out))
+        or {
+            "checkpoint": str(model),
+            "manifest": str(model.with_suffix(".manifest.json")),
+            "metrics": str(model.with_suffix(".metrics.json")),
+            "test": {"success_accuracy": 0.4, "reward_mae": 0.9, "known_success_rows": 42.0},
+        },
+    )
+    monkeypatch.setattr(nk_cli, "_run_deploy_runtime_action", lambda args: calls.append(("deploy", args.model)) or {})
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="runtime-pipeline",
+            source="edge",
+            db="data/harness.db",
+            remote_host="orangepi5",
+            remote_project="/remote",
+            remote_db="data/harness.db",
+            cache_db=None,
+            replay_out=str(replay),
+            features_out=str(features),
+            model_out=str(model),
+            test_ratio=0.2,
+            min_rows=10,
+            min_actions=4,
+            epochs=1,
+            batch_size=8,
+            device="cpu",
+            patience=3,
+            deploy_runtime=True,
+            seed_cycles=0,
+            include_failures=True,
+            min_success_accuracy=0.75,
+            max_reward_mae=0.35,
+            min_known_success_rows=5,
+            force_deploy=False,
+            ssh_connect_timeout=10,
+        )
+    )
+
+    assert result["status"] == "blocked_by_quality_gate"
+    assert result["quality"]["passed"] is False
+    assert ("deploy", str(model)) not in calls
 
 
 def test_nk_train_runs_local_pipeline_without_deploy(tmp_path, monkeypatch):
