@@ -58,6 +58,19 @@ def create_app(*, db_path: str | Path = "data/harness.db", project_root: str | P
     def work_pipeline_status(limit: int = 20, stale_after_seconds: int = 300):
         return service.work_pipeline_status(limit=limit, stale_after_seconds=stale_after_seconds)
 
+    @app.get("/improvements/analyze")
+    def improvements_analyze(min_gap_count: int = 2, lookback: int = 200):
+        return service.analyze_improvements(min_gap_count=min_gap_count, lookback=lookback)
+
+    @app.post("/improvements/propose")
+    def improvements_propose(payload: dict[str, Any] | None = None):
+        payload = payload or {}
+        return service.propose_improvements(
+            min_gap_count=int(payload.get("min_gap_count") or 2),
+            lookback=int(payload.get("lookback") or 200),
+            actor=str(payload.get("actor") or "api"),
+        )
+
     @app.get("/queue/health")
     def queue_health():
         return service.queue_health()

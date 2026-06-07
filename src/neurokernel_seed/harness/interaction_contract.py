@@ -33,6 +33,17 @@ ACTION_OUTPUTS: dict[str, tuple[str, ...]] = {
     "tail_logs": ("logs",),
 }
 
+OUTPUT_KEYWORDS["active_model_status"] = (
+    "active model",
+    "loaded model",
+    "runtime/world",
+    "runtime model",
+    "world model",
+    "current model",
+    "model status",
+    "in memory",
+)
+
 
 def infer_required_outputs(request_text: str, task: dict[str, Any] | None = None) -> list[str]:
     text = str(request_text or "").lower()
@@ -136,6 +147,8 @@ def _outputs_from_result_payload(value: Any) -> set[str]:
         outputs.add("logs")
     if "items" in value and "path" in value:
         outputs.add("artifacts")
+    if {"runtime_model", "world_model"} <= set(value) or {"active_runtime_model", "active_world_model"} <= set(value):
+        outputs.add("active_model_status")
     if "traces" in value:
         outputs.add("traces")
     if "summary" in value and "observations" in value:

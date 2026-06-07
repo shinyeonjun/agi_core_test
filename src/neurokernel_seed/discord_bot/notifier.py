@@ -15,6 +15,8 @@ async def work_notification_loop(
     client: Any,
     core: CoreClient,
     config: DiscordBotConfig,
+    proposal_view_factory: Any | None,
+    work_view_factory: Any | None,
     activation_view_factory: Any | None,
     retry_view_factory: Any | None,
     promote_view_factory: Any | None,
@@ -26,7 +28,7 @@ async def work_notification_loop(
             payload = await _call(core.get, "/work-items?limit=30")
             items = payload.get("work_items") if isinstance(payload, dict) else []
             if isinstance(items, list):
-                await notify_work_changes(client, core, config, activation_view_factory, retry_view_factory, promote_view_factory, items, seen=seen, first_poll=first_poll)
+                await notify_work_changes(client, core, config, proposal_view_factory, work_view_factory, activation_view_factory, retry_view_factory, promote_view_factory, items, seen=seen, first_poll=first_poll)
             first_poll = False
         except Exception as exc:
             print(f"[discord-work-notifier] poll failed: {type(exc).__name__}: {exc}", flush=True)
@@ -37,6 +39,8 @@ async def notify_work_changes(
     client: Any,
     core: CoreClient,
     config: DiscordBotConfig,
+    proposal_view_factory: Any | None,
+    work_view_factory: Any | None,
     activation_view_factory: Any | None,
     retry_view_factory: Any | None,
     promote_view_factory: Any | None,
@@ -73,12 +77,18 @@ async def notify_work_changes(
             view = retry_view_factory(work_id)
         elif view_kind == "promote" and promote_view_factory:
             view = promote_view_factory(work_id)
+        elif view_kind == "work" and work_view_factory:
+            view = work_view_factory(work_id)
+        elif view_kind and view_kind.startswith("proposal:") and proposal_view_factory:
+            proposal_id = view_kind.split(":", 1)[1]
+            if proposal_id:
+                view = proposal_view_factory(proposal_id)
         for index, chunk in enumerate(_discord_chunks(text)):
             await channel.send(chunk, view=view if index == 0 else None)
 
 
 def is_notifiable_work_status(status: str) -> bool:
-    return status in {"planned", "waiting_approval", "reviewing", "blocked", "failed", "completed"}
+    return status in {"proposed", "planned", "waiting_approval", "reviewing", "blocked", "failed", "completed"}
 
 
 async def resolve_notification_channel(client: Any, item: dict[str, Any], config: DiscordBotConfig) -> Any | None:

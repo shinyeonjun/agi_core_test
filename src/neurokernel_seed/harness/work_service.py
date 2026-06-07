@@ -34,7 +34,8 @@ class WorkItemService:
             notes = memory.work_notes(work_id)
             jobs = memory.list_work_jobs(work_id=work_id, limit=20)
             children = memory.child_work_items(work_id, limit=20)
-        return {"work_item": item, "events": events, "notes": notes, "jobs": jobs, "child_work_items": children}
+            proposal = memory.find_capability_proposal_by_work_id(work_id)
+        return {"work_item": item, "events": events, "notes": notes, "jobs": jobs, "child_work_items": children, "capability_proposal": proposal}
 
     def list_jobs(
         self,

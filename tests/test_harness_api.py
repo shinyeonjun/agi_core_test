@@ -118,3 +118,39 @@ def test_core_api_activation_error_returns_conflict_detail(tmp_path, monkeypatch
     payload = response.json()
     assert payload["detail"]["error_type"] == "activation_failed"
     assert "clean tree" in payload["detail"]["message"]
+
+
+@pytest.mark.skipif(importlib.util.find_spec("fastapi") is None, reason="fastapi not installed")
+def test_core_api_improvement_analysis_and_proposal(tmp_path):
+    from fastapi.testclient import TestClient
+    from neurokernel_seed.api.server import create_app
+
+    db = tmp_path / "harness.db"
+    app = create_app(db_path=db, project_root=tmp_path)
+    client = TestClient(app)
+    for index in range(2):
+        client.post(
+            "/memory/interaction-outcomes",
+            json={
+                "source": "discord",
+                "request_text": f"current runtime/world model status {index}",
+                "response_text": "artifact files exist",
+                "task": {"allowed_actions": ["list_artifacts"]},
+                "core_result": {
+                    "status": "completed",
+                    "action": "list_artifacts",
+                    "execution_result": {
+                        "success": True,
+                        "action_id": "list_artifacts",
+                        "result": {"path": "artifacts", "items": []},
+                    },
+                },
+            },
+        )
+
+    analyzed = client.get("/improvements/analyze", params={"min_gap_count": 2}).json()
+    proposed = client.post("/improvements/propose", json={"min_gap_count": 2, "actor": "test"}).json()
+
+    assert analyzed["candidate_gaps"][0]["output_key"] == "active_model_status"
+    assert proposed["created_count"] == 1
+    assert proposed["created"][0]["proposal"]["action_id"] == "get_active_model_status"

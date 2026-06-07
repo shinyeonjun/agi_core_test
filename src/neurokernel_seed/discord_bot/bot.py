@@ -61,7 +61,18 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
         nonlocal notify_task
         print(f"Discord bot logged in as {client.user} | channel={config.channel_id} | core={config.core_url}", flush=True)
         if config.work_notify_enabled and notify_task is None:
-            notify_task = asyncio.create_task(_work_notification_loop(client, core, config, view_factories.activation, view_factories.retry, view_factories.promote))
+            notify_task = asyncio.create_task(
+                _work_notification_loop(
+                    client,
+                    core,
+                    config,
+                    view_factories.proposal,
+                    view_factories.work,
+                    view_factories.activation,
+                    view_factories.retry,
+                    view_factories.promote,
+                )
+            )
 
     @client.event
     async def on_message(message: Any) -> None:

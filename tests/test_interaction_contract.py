@@ -21,3 +21,24 @@ def test_interaction_contract_marks_partial_answer_from_actual_runtime_result():
     assert contract["answered_outputs"] == ["cpu_usage"]
     assert contract["missing_outputs"] == ["disk_usage", "memory_usage"]
     assert contract["answer_quality"] == "partial"
+
+
+def test_interaction_contract_tracks_active_model_status_gap():
+    contract = interaction_contract_from_runtime(
+        request_text="current runtime/world model status",
+        response_text="artifact files exist",
+        task={"allowed_actions": ["list_artifacts"]},
+        core_result={
+            "status": "completed",
+            "action": "list_artifacts",
+            "execution_result": {
+                "success": True,
+                "action_id": "list_artifacts",
+                "result": {"path": "artifacts", "items": []},
+            },
+        },
+    )
+
+    assert "active_model_status" in contract["required_outputs"]
+    assert "artifacts" in contract["answered_outputs"]
+    assert "active_model_status" in contract["missing_outputs"]

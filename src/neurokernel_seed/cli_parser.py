@@ -399,6 +399,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--block-ms", type=int, default=0)
     p.add_argument("--once", action="store_true")
 
+    p = sub.add_parser("harness-improvements")
+    p.add_argument("--db", default="data/harness.db")
+    p.add_argument("--project-root", default=".")
+    p.add_argument("--min-gap-count", type=int, default=2)
+    p.add_argument("--lookback", type=int, default=200)
+    p.add_argument("--propose", action="store_true")
+
+    p = sub.add_parser("serve-improvement-watchdog")
+    p.add_argument("--db", default="data/harness.db")
+    p.add_argument("--project-root", default=".")
+    p.add_argument("--interval-seconds", type=float, default=120.0)
+    p.add_argument("--min-gap-count", type=int, default=2)
+    p.add_argument("--lookback", type=int, default=200)
+    p.add_argument("--once", action="store_true")
+
     p = sub.add_parser("language-to-core")
     p.add_argument("text")
 

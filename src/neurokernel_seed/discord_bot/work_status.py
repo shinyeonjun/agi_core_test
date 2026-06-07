@@ -14,7 +14,15 @@ def format_work_notification(payload: dict[str, Any]) -> tuple[str, str | None]:
     result_status = str(result.get("status") or "")
     changed_files = result.get("changed_files") if isinstance(result.get("changed_files"), list) else []
     changed_text = ", ".join(str(path) for path in changed_files[:5])
+    proposal = payload.get("capability_proposal") if isinstance(payload.get("capability_proposal"), dict) else {}
 
+    if status == "proposed" and str(item.get("type") or "") == "self_patch":
+        proposal_id = str(proposal.get("proposal_id") or "").strip()
+        view_kind = f"proposal:{proposal_id}" if proposal_id else "work"
+        return (
+            f"새 자기개선 후보가 올라왔어: {title}\n승인하면 개발 worker가 구현/테스트를 시작하고, 장착은 다시 승인받아.",
+            view_kind,
+        )
     child_summary = external_work_child_summary(children)
     if status == "planned" and str(item.get("type") or "") == "external_work" and child_summary:
         return child_summary, None

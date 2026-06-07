@@ -73,10 +73,14 @@ mkdir -p "$LOG_DIR" data
 core_pid=""
 bot_pid=""
 worker_pid=""
+improvement_pid=""
 
 stop_children() {
   if [[ -n "$worker_pid" ]] && kill -0 "$worker_pid" 2>/dev/null; then
     kill "$worker_pid" 2>/dev/null || true
+  fi
+  if [[ -n "$improvement_pid" ]] && kill -0 "$improvement_pid" 2>/dev/null; then
+    kill "$improvement_pid" 2>/dev/null || true
   fi
   if [[ -n "$bot_pid" ]] && kill -0 "$bot_pid" 2>/dev/null; then
     kill "$bot_pid" 2>/dev/null || true
@@ -134,10 +138,26 @@ if [[ "$NEUROKERNEL_WORKER_ENABLED" =~ ^(1|true|yes|y)$ ]]; then
   worker_pid="$!"
 fi
 
-echo "[stack] running. core_pid=${core_pid} bot_pid=${bot_pid} worker_pid=${worker_pid:-disabled}"
+if [[ "${NEUROKERNEL_IMPROVEMENT_ENABLED:-false}" =~ ^(1|true|yes|y)$ ]]; then
+  echo "[stack] starting Improvement Watchdog"
+  python -m neurokernel_seed.cli serve-improvement-watchdog \
+    --db "$HARNESS_DB" \
+    --project-root "$PROJECT_ROOT" \
+    --interval-seconds "${NEUROKERNEL_IMPROVEMENT_INTERVAL_SECONDS:-120}" \
+    --min-gap-count "${NEUROKERNEL_IMPROVEMENT_MIN_GAP_COUNT:-2}" \
+    --lookback "${NEUROKERNEL_IMPROVEMENT_LOOKBACK:-200}" \
+    >> "$LOG_DIR/improvement_watchdog.log" 2>&1 &
+  improvement_pid="$!"
+fi
+
+echo "[stack] running. core_pid=${core_pid} bot_pid=${bot_pid} worker_pid=${worker_pid:-disabled} improvement_pid=${improvement_pid:-disabled}"
 set +e
-if [[ -n "$worker_pid" ]]; then
+if [[ -n "$worker_pid" ]] && [[ -n "$improvement_pid" ]]; then
+  wait -n "$core_pid" "$bot_pid" "$worker_pid" "$improvement_pid"
+elif [[ -n "$worker_pid" ]]; then
   wait -n "$core_pid" "$bot_pid" "$worker_pid"
+elif [[ -n "$improvement_pid" ]]; then
+  wait -n "$core_pid" "$bot_pid" "$improvement_pid"
 else
   wait -n "$core_pid" "$bot_pid"
 fi

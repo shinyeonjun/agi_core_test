@@ -440,6 +440,29 @@ def main(argv: list[str] | None = None) -> int:
         from neurokernel_seed.harness.worker import serve_worker
         serve_worker(db_path=args.db, project_root=args.project_root, worker_id=args.worker_id, queues=args.queues, block_ms=args.block_ms, once=args.once)
         return 0
+    if args.cmd == "harness-improvements":
+        service = _make_harness_service(args.db, args.project_root)
+        if args.propose:
+            result = service.propose_improvements(min_gap_count=args.min_gap_count, lookback=args.lookback, actor="cli")
+        else:
+            result = service.analyze_improvements(min_gap_count=args.min_gap_count, lookback=args.lookback)
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    if args.cmd == "serve-improvement-watchdog":
+        service = _make_harness_service(args.db, args.project_root)
+        from neurokernel_seed.harness.improvement import ImprovementWatchConfig, ImprovementWatchdog
+        watcher = ImprovementWatchdog(
+            config=ImprovementWatchConfig(
+                db_path=Path(args.db),
+                interval_seconds=args.interval_seconds,
+                min_gap_count=args.min_gap_count,
+                lookback=args.lookback,
+                once=args.once,
+            ),
+            service=service.improvement_service,
+        )
+        watcher.run_forever()
+        return 0
     if args.cmd == "language-to-core":
         from neurokernel_seed.language.codex_harness import CodexLanguageHarness, config_from_env
         config = config_from_env()

@@ -11,6 +11,7 @@ from .capability_service import CapabilityProposalService
 from .executors.benchmark import BenchmarkExecutor
 from .executors.readonly_command import ReadOnlyCommandExecutor
 from .executors.readonly_system import ReadOnlyExecutor
+from .improvement import ImprovementService
 from .interaction_contract import interaction_contract_from_runtime
 from .memory import HarnessMemory
 from .preferences import preference_map
@@ -49,6 +50,7 @@ class HarnessService:
         self.work_queue, self.queue_error = _resolve_work_queue(work_queue)
         self.work_items_service = WorkItemService(db_path=self.db_path, work_queue=self.work_queue, queue_error=self.queue_error)
         self.capability_service = CapabilityProposalService(db_path=self.db_path, catalog=self.catalog, work_items=self.work_items_service)
+        self.improvement_service = ImprovementService(db_path=self.db_path, catalog=self.catalog, work_items=self.work_items_service)
         self.activation_service = ActivationService(build_activation_config_from_env(db_path=self.db_path, project_root=self.project_root))
 
     def health(self) -> dict[str, Any]:
@@ -144,6 +146,22 @@ class HarnessService:
             user_id=user_id,
             channel_id=channel_id,
             source_message_id=source_message_id,
+        )
+
+    def analyze_improvements(self, *, min_gap_count: int = 2, lookback: int = 200) -> dict[str, Any]:
+        return self.improvement_service.analyze(min_gap_count=min_gap_count, lookback=lookback)
+
+    def propose_improvements(
+        self,
+        *,
+        min_gap_count: int = 2,
+        lookback: int = 200,
+        actor: str = "improvement_watchdog",
+    ) -> dict[str, Any]:
+        return self.improvement_service.propose_missing_output_gaps(
+            min_gap_count=min_gap_count,
+            lookback=lookback,
+            actor=actor,
         )
 
     def create_task(self, data: dict[str, Any], *, created_by: str = "system", source: str = "cli") -> dict[str, Any]:
