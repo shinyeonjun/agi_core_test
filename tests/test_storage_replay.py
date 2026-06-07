@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -88,6 +89,7 @@ def test_collect_dataset_cli_exports_replay_and_features(tmp_path: Path):
         check=True,
         text=True,
         capture_output=True,
+        env=os.environ | {"PYTHONPATH": "src"},
     )
     payload = json.loads(result.stdout)
     assert payload["replay_validation"]["rows"] > 0

@@ -19,6 +19,7 @@ queue = ["redis>=5.0"]
 
 [project.scripts]
 neuroseed = "neurokernel_seed.cli:main"
+nk = "neurokernel_seed.nk_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

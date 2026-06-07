@@ -1,11 +1,18 @@
 import json
+import os
 import sqlite3
 import subprocess
 import sys
 
 
 def test_cli_lists_test_envs():
-    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "list-envs", "--split", "test"], check=True, text=True, capture_output=True)
+    result = subprocess.run(
+        [sys.executable, "-m", "neurokernel_seed.cli", "list-envs", "--split", "test"],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=os.environ | {"PYTHONPATH": "src"},
+    )
     assert "lock.test" in result.stdout
     assert "tool.test" in result.stdout
     assert "maze.test" in result.stdout
@@ -18,6 +25,7 @@ def test_cli_run_suite_logs_all_test_envs_to_one_db(tmp_path):
         check=True,
         text=True,
         capture_output=True,
+        env=os.environ | {"PYTHONPATH": "src"},
     )
     payload = json.loads(result.stdout)
     assert set(payload) == {"lock.test", "maze.test", "tool.test"}

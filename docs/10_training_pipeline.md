@@ -1,110 +1,120 @@
 # Training Pipeline v1
 
-`run-training-pipeline`은 모델 실험 하나를 한 번에 실행하는 명령이다.
-데이터 검증, slot dataset gate, 학습, 모델 평가, action ranking, ONNX export, gate ablation을 같은 run 폴더에 기록한다.
+모델 학습은 노트북에서 돌리고, 결과 모델은 오렌지파이에 버전 릴리즈로 보낸다.
+기존 모델은 덮어쓰지 않는다. 새 모델은 `model_releases/<run_name>` 아래에 저장되고, 검증 후 원할 때만 현재 모델로 활성화한다.
 
-## 기본 실행
+## 가장 짧은 사용법
 
-```powershell
-cd /d D:\agi_seed\agi_core_test
-$env:PYTHONPATH = "src"
-python -m neurokernel_seed.cli run-training-pipeline `
-  --features D:\agi_seed\data\model_ready\features_slot_v2_model_needed_v3.jsonl `
-  --out-dir D:\agi_seed\artifacts\training_runs `
-  --run-name slot_v2_model_needed_v3_auto_001 `
-  --epochs 50 `
-  --batch-size 1024 `
-  --device cuda `
-  --patience 10 `
-  --strict
-```
-
-## 학습 후 오렌지파이 릴리즈 배포
-
-노트북에서 CUDA로 학습하고, 기존 모델 파일을 덮어쓰지 않고 오렌지파이에 새 릴리즈로 보낼 때는 `train-deploy-model`을 쓴다.
-
-먼저 터미널에 기본 경로를 한 번 잡아둔다.
+`D:\agi_seed`에서 아래처럼 쓴다.
 
 ```cmd
-set PYTHONPATH=src
-set NEUROKERNEL_TRAIN_FEATURES=D:\agi_seed\data\model_ready\features_slot_v2_model_needed_v3.jsonl
-set NEUROKERNEL_TRAIN_RUN_DIR=D:\agi_seed\artifacts\training_runs
-set NEUROKERNEL_EDGE_HOST=orangepi5
-set NEUROKERNEL_EDGE_PROJECT=/home/ubuntu/projects/neurokernel-agi-seed
+nk
 ```
 
-이후 실사용 명령은 짧다.
-
-```cmd
-python -m neurokernel_seed.cli train-deploy-model slot_v2_mn_v3_004
-```
-
-원격에는 아래처럼 새 폴더가 생긴다.
+그러면 메뉴가 뜬다.
 
 ```text
-/home/ubuntu/projects/neurokernel-agi-seed/artifacts/model_releases/slot_v2_mn_v3_004/
+1. 학습 전 확인
+2. 학습 + 오렌지파이 배포
+3. 학습 + 배포 + 현재 모델로 활성화
+4. 냉정 벤치만 다시 실행
+5. 벤치 상위 모델 비교
+6. 오렌지파이 모델 목록
+7. 현재 활성 모델 확인
+8. 기존 모델 활성화
 ```
 
-같은 `run-name` 폴더가 이미 있으면 학습 전에 실패한다. 기존 모델은 덮어쓰지 않는다.
-
-학습 없이 경로와 원격 release 중복만 확인하려면 dry-run을 쓴다.
+바로 실행하고 싶으면 아래처럼 쓴다.
 
 ```cmd
-python -m neurokernel_seed.cli train-deploy-model slot_v2_mn_v3_004 --dry-run
+nk check
+nk train
+nk train-use
+nk bench <run_name>
+nk top
+nk list
+nk current
+nk use <run_name>
 ```
 
-현재 모델 포인터까지 바꾸고 싶을 때만 명시적으로 `--activate`를 붙인다.
+`run_name`을 생략하면 feature 파일 이름과 UTC 시간을 섞어서 자동 생성한다.
+
+## run name이 필요한 이유
+
+`slot_v2_mn_v3_004` 같은 이름은 모델 릴리즈 이름이다.
+
+필요한 이유는 세 가지다.
+
+- 기존 모델을 덮어쓰지 않기 위해서
+- 여러 모델을 나란히 보관하고 비교하기 위해서
+- 새 모델이 이상하면 이전 모델로 되돌리기 위해서
+
+평소에는 직접 안 지어도 된다. `nk train`이 자동으로 만든다.
+특정 실험을 사람이 구분하고 싶을 때만 `nk train 내실험이름`처럼 지정하면 된다.
+
+## 기본 경로
+
+`D:\agi_seed\nk.cmd`는 기본값을 자동으로 잡는다.
 
 ```cmd
-python -m neurokernel_seed.cli train-deploy-model slot_v2_mn_v3_004 --activate
+NEUROKERNEL_TRAIN_FEATURES=D:\agi_seed\data\model_ready\features_slot_v2_model_needed_v3.jsonl
+NEUROKERNEL_TRAIN_RUN_DIR=D:\agi_seed\artifacts\training_runs
+NEUROKERNEL_EDGE_HOST=orangepi5
+NEUROKERNEL_EDGE_PROJECT=/home/ubuntu/projects/neurokernel-agi-seed
 ```
 
-`--activate`도 모델 파일을 덮어쓰지 않고 `current.json`, `current_world_model.onnx` 심볼릭 링크만 갱신한다.
+다른 데이터셋으로 학습하고 싶으면 환경변수나 옵션으로 바꾸면 된다.
 
-배포는 원격의 `.incoming` 임시 폴더에서 먼저 압축 해제와 필수 파일 검증을 끝낸 뒤, 마지막에 `model_releases/<run-name>`으로 이동한다.
-따라서 최종 release 폴더에는 완성된 모델만 남는다.
+## 학습이 하는 일
 
-## 빠른 smoke 실행
+`nk train`은 내부적으로 아래 단계를 한 번에 실행한다.
 
-게이트/학습 배선만 확인할 때는 gate ablation을 생략할 수 있다.
+1. feature 파일과 manifest 확인
+2. dataset gate 확인
+3. CUDA 학습
+4. world model 평가
+5. action ranking 평가
+6. ONNX export와 검증
+7. gate ablation 냉정 벤치
+8. 오렌지파이에 원자적 배포
 
-```powershell
-python -m neurokernel_seed.cli run-training-pipeline `
-  --features D:\agi_seed\data\model_ready\features_slot_v2_model_needed_v3.jsonl `
-  --out-dir D:\agi_seed\artifacts\training_runs `
-  --run-name smoke_cuda `
-  --epochs 1 `
-  --batch-size 1024 `
-  --device cuda `
-  --skip-gate-ablation
+벤치가 통과하지 못하면 기본적으로 배포를 실패 처리한다.
+실험용으로만 실패 결과까지 보고 싶을 때는 내부 CLI의 `--allow-benchmark-failure`를 명시적으로 써야 한다.
+
+## 모델 비교
+
+최근 학습 결과 중 상위 5개를 보려면:
+
+```cmd
+nk top
 ```
 
-## 산출물
+정렬 기준은 다음 순서다.
 
-run 폴더에는 아래 파일들이 생긴다.
+1. `hybrid_veto` macro success rate
+2. model-needed signal group count
+3. `hybrid_veto`의 prior 대비 이득
 
-- `training_pipeline_manifest.json`: 전체 진행 상태와 단계별 요약
-- `feature_validation.json`: feature schema 검증 결과
-- `dataset_gates.json`: slot dataset gate 결과
-- `world_model.pt`: PyTorch checkpoint
-- `train_result.json`: 학습 결과
-- `world_model_eval_test.json`: world model test split 평가
-- `action_ranking_test.json`: 행동 랭킹 평가
-- `world_model.onnx`: ONNX 모델
-- `onnx_export.json`: ONNX export 및 검증 결과
-- `gate_ablation/`: model_only, prior_only, hybrid, hybrid_veto 비교 결과
+즉 단순히 “성공률 1.0”만 보는 게 아니라, prior만으로 풀린 건지 모델이 실제로 보탰는지도 같이 본다.
 
-## 실패 정책
+## 현재 모델 확인과 활성화
 
-기본 정책은 명확한 실패다.
+오렌지파이에 저장된 모델 목록:
 
-- feature manifest가 없으면 중단한다.
-- slot dataset gate가 실패하면 중단한다.
-- gate ablation에서 `hybrid` 또는 `hybrid_veto`가 승격되지 않으면 중단한다.
+```cmd
+nk list
+```
 
-실험 목적으로 실패한 데이터도 끝까지 흘려보고 싶을 때만 아래 옵션을 명시적으로 쓴다.
+현재 활성 모델:
 
-- `--allow-gate-failure`
-- `--allow-benchmark-failure`
+```cmd
+nk current
+```
 
-이 옵션들은 fallback이 아니라 실패 조건을 의식적으로 완화하는 실험 스위치다.
+기존 릴리즈를 현재 모델로 바꾸기:
+
+```cmd
+nk use <run_name>
+```
+
+`nk use`는 모델 파일을 새로 만들지 않고 `current.json`, `current_world_model.onnx`, `current_world_model.manifest.json` 포인터만 바꾼다.

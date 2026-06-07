@@ -65,6 +65,22 @@ class ResolvedTrainDeployConfig:
     remote_project: str
 
 
+@dataclass(frozen=True)
+class ModelReleaseRemoteConfig:
+    remote_host: str | None = None
+    remote_project: str | None = None
+    ssh_connect_timeout: int = 10
+    ssh_server_alive_interval: int = 5
+    ssh_server_alive_count_max: int = 2
+
+
+@dataclass(frozen=True)
+class ResolvedModelReleaseRemoteConfig:
+    remote_host: str
+    remote_project: str
+    ssh_options: list[str]
+
+
 def train_deploy_model(config: TrainDeployModelConfig) -> dict[str, Any]:
     resolved = _resolve_train_deploy_config(config)
     preflight = _preflight_model_release(resolved, config)
@@ -125,6 +141,98 @@ def train_deploy_model(config: TrainDeployModelConfig) -> dict[str, Any]:
 
 def preflight_model_release(config: TrainDeployModelConfig) -> dict[str, Any]:
     return _preflight_model_release(_resolve_train_deploy_config(config), config)
+
+
+def list_model_releases(config: ModelReleaseRemoteConfig | None = None) -> dict[str, Any]:
+    resolved = _resolve_remote_release_config(config or ModelReleaseRemoteConfig())
+    remote_releases_dir = f"{resolved.remote_project.rstrip('/')}/artifacts/model_releases"
+    result = _run_native(
+        [
+            "ssh",
+            *resolved.ssh_options,
+            resolved.remote_host,
+            (
+                "set -eu; "
+                f"dir={_sh_quote(remote_releases_dir)}; "
+                "if [ ! -d \"$dir\" ]; then exit 0; fi; "
+                "find \"$dir\" -mindepth 1 -maxdepth 1 -type d ! -name .incoming -printf '%f\\n' | sort"
+            ),
+        ]
+    )
+    releases = [line.strip() for line in (getattr(result, "stdout", "") or "").splitlines() if line.strip()]
+    return {
+        "schema_version": MODEL_RELEASE_SCHEMA_VERSION,
+        "status": "ok",
+        "remote_host": resolved.remote_host,
+        "remote_project": resolved.remote_project,
+        "remote_releases_dir": remote_releases_dir,
+        "releases": releases,
+        "count": len(releases),
+    }
+
+
+def current_model_release(config: ModelReleaseRemoteConfig | None = None) -> dict[str, Any]:
+    resolved = _resolve_remote_release_config(config or ModelReleaseRemoteConfig())
+    current_path = f"{resolved.remote_project.rstrip('/')}/artifacts/model_releases/current.json"
+    result = _run_native(
+        [
+            "ssh",
+            *resolved.ssh_options,
+            resolved.remote_host,
+            (
+                "set -eu; "
+                f"if [ ! -f {_sh_quote(current_path)} ]; then exit 19; fi; "
+                f"cat {_sh_quote(current_path)}"
+            ),
+        ]
+    )
+    try:
+        current = json.loads(getattr(result, "stdout", "") or "{}")
+    except json.JSONDecodeError as exc:
+        raise ModelReleaseError(f"current model release manifest is not valid JSON: {current_path}") from exc
+    return {
+        "schema_version": MODEL_RELEASE_SCHEMA_VERSION,
+        "status": "ok",
+        "remote_host": resolved.remote_host,
+        "remote_project": resolved.remote_project,
+        "current_path": current_path,
+        "current": current,
+    }
+
+
+def activate_model_release(release_name: str, config: ModelReleaseRemoteConfig | None = None) -> dict[str, Any]:
+    _assert_safe_release_name(release_name)
+    resolved = _resolve_remote_release_config(config or ModelReleaseRemoteConfig())
+    remote_releases_dir = f"{resolved.remote_project.rstrip('/')}/artifacts/model_releases"
+    remote_release_dir = f"{remote_releases_dir}/{release_name}"
+    _run_native(
+        [
+            "ssh",
+            *resolved.ssh_options,
+            resolved.remote_host,
+            (
+                "set -eu; "
+                f"test -f {_sh_quote(remote_release_dir + '/world_model.onnx')}; "
+                f"test -f {_sh_quote(remote_release_dir + '/world_model.manifest.json')}; "
+                f"test -f {_sh_quote(remote_release_dir + '/model_release_manifest.json')}"
+            ),
+        ]
+    )
+    _activate_remote_release(
+        resolved.remote_host,
+        resolved.remote_project,
+        remote_releases_dir,
+        remote_release_dir,
+        resolved.ssh_options,
+    )
+    return {
+        "schema_version": MODEL_RELEASE_SCHEMA_VERSION,
+        "status": "activated",
+        "release_name": release_name,
+        "remote_host": resolved.remote_host,
+        "remote_release_dir": remote_release_dir,
+        "activated_at": _utc_now(),
+    }
 
 
 def deploy_training_run(
@@ -295,6 +403,22 @@ def _resolve_train_deploy_config(config: TrainDeployModelConfig) -> ResolvedTrai
         run_name=run_name,
         remote_host=str(remote_host),
         remote_project=remote_project,
+    )
+
+
+def _resolve_remote_release_config(config: ModelReleaseRemoteConfig) -> ResolvedModelReleaseRemoteConfig:
+    remote_host = _resolve_value(config.remote_host, "NEUROKERNEL_EDGE_HOST", "orangepi5")
+    remote_project = _normalize_remote_project(
+        _resolve_value(config.remote_project, "NEUROKERNEL_EDGE_PROJECT", "/home/ubuntu/projects/neurokernel-agi-seed")
+    )
+    return ResolvedModelReleaseRemoteConfig(
+        remote_host=str(remote_host),
+        remote_project=remote_project,
+        ssh_options=_ssh_options(
+            connect_timeout=config.ssh_connect_timeout,
+            server_alive_interval=config.ssh_server_alive_interval,
+            server_alive_count_max=config.ssh_server_alive_count_max,
+        ),
     )
 
 

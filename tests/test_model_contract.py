@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -61,32 +62,36 @@ def test_canonical_action_key_is_stable():
 
 
 def test_model_cli_commands_are_registered():
-    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "train-world-model", "--help"], check=True, text=True, capture_output=True)
+    env = os.environ | {"PYTHONPATH": "src"}
+    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "train-world-model", "--help"], check=True, text=True, capture_output=True, env=env)
     assert "--features" in result.stdout
-    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "eval-learned-gate", "--help"], check=True, text=True, capture_output=True)
+    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "eval-learned-gate", "--help"], check=True, text=True, capture_output=True, env=env)
     assert "--model" in result.stdout
-    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "collect-counterfactual-dataset", "--help"], check=True, text=True, capture_output=True)
+    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "collect-counterfactual-dataset", "--help"], check=True, text=True, capture_output=True, env=env)
     assert "--counterfactual-out" in result.stdout
-    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "eval-action-ranking", "--help"], check=True, text=True, capture_output=True)
+    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "eval-action-ranking", "--help"], check=True, text=True, capture_output=True, env=env)
     assert "--checkpoint" in result.stdout
-    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "export-world-model-onnx", "--help"], check=True, text=True, capture_output=True)
+    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "export-world-model-onnx", "--help"], check=True, text=True, capture_output=True, env=env)
     assert "--static-batch" in result.stdout
-    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "run-training-pipeline", "--help"], check=True, text=True, capture_output=True)
+    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "run-training-pipeline", "--help"], check=True, text=True, capture_output=True, env=env)
     assert "--gate-ablation-episodes" in result.stdout
-    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "train-deploy-model", "--help"], check=True, text=True, capture_output=True)
+    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "train-deploy-model", "--help"], check=True, text=True, capture_output=True, env=env)
     assert "--activate" in result.stdout
-    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "benchmark-runtime", "--help"], check=True, text=True, capture_output=True)
+    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.nk_cli", "--help"], check=True, text=True, capture_output=True, env=env)
+    assert "train-use" in result.stdout
+    assert "current" in result.stdout
+    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "benchmark-runtime", "--help"], check=True, text=True, capture_output=True, env=env)
     assert "--backend" in result.stdout
-    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "harness-create-task", "--help"], check=True, text=True, capture_output=True)
+    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "harness-create-task", "--help"], check=True, text=True, capture_output=True, env=env)
     assert "--task-json" in result.stdout
-    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "serve-core-api", "--help"], check=True, text=True, capture_output=True)
+    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "serve-core-api", "--help"], check=True, text=True, capture_output=True, env=env)
     assert "--port" in result.stdout
-    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "serve-discord-bot", "--help"], check=True, text=True, capture_output=True)
+    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "serve-discord-bot", "--help"], check=True, text=True, capture_output=True, env=env)
     assert "--channel-id" in result.stdout
     assert "--allowed-user-id" in result.stdout
     assert "--auto-do-low-risk" in result.stdout
-    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "language-to-core", "--help"], check=True, text=True, capture_output=True)
+    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "language-to-core", "--help"], check=True, text=True, capture_output=True, env=env)
     assert "--no-codex" not in result.stdout
-    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "language-to-human", "--help"], check=True, text=True, capture_output=True)
+    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "language-to-human", "--help"], check=True, text=True, capture_output=True, env=env)
     assert "--core-result-json" in result.stdout
     assert "--no-codex" not in result.stdout

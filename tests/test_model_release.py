@@ -128,3 +128,81 @@ def test_train_deploy_model_dry_run_stops_before_training(tmp_path, monkeypatch)
     assert result["preflight"]["passed"] is True
     assert len(commands) == 1
     assert "test ! -e" not in " ".join(commands[0])
+
+
+def test_list_model_releases_reads_remote_release_names(monkeypatch):
+    commands: list[list[str]] = []
+
+    class Result:
+        stdout = "release_a\nrelease_b\n"
+        stderr = ""
+        returncode = 0
+
+    def fake_run_native(command):
+        commands.append(command)
+        return Result()
+
+    monkeypatch.setattr(release, "_run_native", fake_run_native)
+
+    result = release.list_model_releases(
+        release.ModelReleaseRemoteConfig(
+            remote_host="orangepi5",
+            remote_project="/home/ubuntu/projects/neurokernel-agi-seed",
+        )
+    )
+
+    assert result["releases"] == ["release_a", "release_b"]
+    assert result["count"] == 2
+    joined = " ".join(commands[0])
+    assert "artifacts/model_releases" in joined
+    assert ".incoming" in joined
+
+
+def test_current_model_release_parses_remote_manifest(monkeypatch):
+    payload = {"release_name": "release_a", "remote_release_dir": "/tmp/release_a"}
+
+    class Result:
+        stdout = json.dumps(payload)
+        stderr = ""
+        returncode = 0
+
+    monkeypatch.setattr(release, "_run_native", lambda command: Result())
+
+    result = release.current_model_release(
+        release.ModelReleaseRemoteConfig(
+            remote_host="orangepi5",
+            remote_project="/home/ubuntu/projects/neurokernel-agi-seed",
+        )
+    )
+
+    assert result["current"]["release_name"] == "release_a"
+    assert result["current_path"].endswith("/artifacts/model_releases/current.json")
+
+
+def test_activate_model_release_validates_artifacts_before_pointer_update(monkeypatch):
+    commands: list[list[str]] = []
+
+    class Result:
+        stdout = ""
+        stderr = ""
+        returncode = 0
+
+    def fake_run_native(command):
+        commands.append(command)
+        return Result()
+
+    monkeypatch.setattr(release, "_run_native", fake_run_native)
+
+    result = release.activate_model_release(
+        "release_a",
+        release.ModelReleaseRemoteConfig(
+            remote_host="orangepi5",
+            remote_project="/home/ubuntu/projects/neurokernel-agi-seed",
+        ),
+    )
+
+    assert result["status"] == "activated"
+    joined = "\n".join(" ".join(command) for command in commands)
+    assert "test -f" in joined
+    assert "current.json" in joined
+    assert "ln -sfn" in joined
