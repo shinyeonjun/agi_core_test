@@ -14,6 +14,7 @@ from typing import Any
 
 from neurokernel_seed.eval.gate_ablation import GateAblationConfig, run_gate_ablation
 from neurokernel_seed.harness.service import HarnessService
+from neurokernel_seed.harness.runtime_policy import RuntimeActionPolicy, RuntimePolicyConfig
 from neurokernel_seed.model.pipeline import TrainingPipelineConfig, run_training_pipeline
 from neurokernel_seed.model.release import (
     ModelReleaseError,
@@ -967,6 +968,7 @@ def _run_runtime_seed_local_action(args: argparse.Namespace) -> dict[str, Any]:
     service = HarnessService(
         db_path=getattr(args, "db", "data/harness.db"),
         project_root=getattr(args, "project_root", "."),
+        runtime_policy=RuntimeActionPolicy(RuntimePolicyConfig(model_path=None)),
     )
     specs = _runtime_seed_task_specs(
         profile=str(getattr(args, "profile", "readonly-basic")),
