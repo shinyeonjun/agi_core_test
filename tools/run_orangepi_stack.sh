@@ -152,16 +152,8 @@ fi
 
 echo "[stack] running. core_pid=${core_pid} bot_pid=${bot_pid} worker_pid=${worker_pid:-disabled} improvement_pid=${improvement_pid:-disabled}"
 set +e
-if [[ -n "$worker_pid" ]] && [[ -n "$improvement_pid" ]]; then
-  wait -n "$core_pid" "$bot_pid" "$worker_pid" "$improvement_pid"
-elif [[ -n "$worker_pid" ]]; then
-  wait -n "$core_pid" "$bot_pid" "$worker_pid"
-elif [[ -n "$improvement_pid" ]]; then
-  wait -n "$core_pid" "$bot_pid" "$improvement_pid"
-else
-  wait -n "$core_pid" "$bot_pid"
-fi
+wait -n "$core_pid" "$bot_pid"
 exit_code="$?"
 set -e
-echo "[stack] one child exited with code ${exit_code}; shutting down stack"
+echo "[stack] critical child exited with code ${exit_code}; shutting down stack"
 exit "$exit_code"

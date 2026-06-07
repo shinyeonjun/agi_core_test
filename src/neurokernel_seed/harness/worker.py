@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import socket
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,6 +27,7 @@ class WorkDispatcherConfig:
     block_ms: int = 0
     once: bool = False
     idle_sleep_seconds: float = 0.0
+    error_sleep_seconds: float = 5.0
 
 
 class WorkDispatcher:
@@ -40,7 +42,14 @@ class WorkDispatcher:
 
     def run_forever(self) -> None:
         while True:
-            count = self.run_once()
+            try:
+                count = self.run_once()
+            except Exception as exc:
+                if self.config.once:
+                    raise
+                _log_worker_error(self.config.worker_id, exc)
+                time.sleep(self.config.error_sleep_seconds)
+                continue
             if self.config.once:
                 return
             if count == 0:
@@ -114,6 +123,10 @@ def _dispatch_note(work_type: str, job_id: str) -> str:
     if work_type == "external_work":
         return f"External work job {job_id} reached the dispatcher. Next worker should expand it into a project/research execution plan."
     return f"Work job {job_id} reached the dispatcher."
+
+
+def _log_worker_error(worker_id: str, exc: Exception) -> None:
+    print(f"[work-worker] worker_id={worker_id} transient_loop_error={type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
 
 
 def _mark_runnable_work_started(memory: HarnessMemory, work: dict[str, Any], *, job_id: str, queue_name: str, actor: str) -> bool:
