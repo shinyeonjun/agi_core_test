@@ -19,6 +19,42 @@ python -m neurokernel_seed.cli run-training-pipeline `
   --strict
 ```
 
+## 학습 후 오렌지파이 릴리즈 배포
+
+노트북에서 CUDA로 학습하고, 기존 모델 파일을 덮어쓰지 않고 오렌지파이에 새 릴리즈로 보낼 때는 `train-deploy-model`을 쓴다.
+
+먼저 터미널에 기본 경로를 한 번 잡아둔다.
+
+```cmd
+set PYTHONPATH=src
+set NEUROKERNEL_TRAIN_FEATURES=D:\agi_seed\data\model_ready\features_slot_v2_model_needed_v3.jsonl
+set NEUROKERNEL_TRAIN_RUN_DIR=D:\agi_seed\artifacts\training_runs
+set NEUROKERNEL_EDGE_HOST=orangepi5
+set NEUROKERNEL_EDGE_PROJECT=/home/ubuntu/projects/neurokernel-agi-seed
+```
+
+이후 실사용 명령은 짧다.
+
+```cmd
+python -m neurokernel_seed.cli train-deploy-model --run-name slot_v2_mn_v3_004
+```
+
+원격에는 아래처럼 새 폴더가 생긴다.
+
+```text
+/home/ubuntu/projects/neurokernel-agi-seed/artifacts/model_releases/slot_v2_mn_v3_004/
+```
+
+같은 `run-name` 폴더가 이미 있으면 실패한다. 기존 모델은 덮어쓰지 않는다.
+
+현재 모델 포인터까지 바꾸고 싶을 때만 명시적으로 `--activate`를 붙인다.
+
+```cmd
+python -m neurokernel_seed.cli train-deploy-model --run-name slot_v2_mn_v3_004 --activate
+```
+
+`--activate`도 모델 파일을 덮어쓰지 않고 `current.json`, `current_world_model.onnx` 심볼릭 링크만 갱신한다.
+
 ## 빠른 smoke 실행
 
 게이트/학습 배선만 확인할 때는 gate ablation을 생략할 수 있다.

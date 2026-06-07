@@ -73,6 +73,8 @@ def test_model_cli_commands_are_registered():
     assert "--static-batch" in result.stdout
     result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "run-training-pipeline", "--help"], check=True, text=True, capture_output=True)
     assert "--gate-ablation-episodes" in result.stdout
+    result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "train-deploy-model", "--help"], check=True, text=True, capture_output=True)
+    assert "--activate" in result.stdout
     result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "benchmark-runtime", "--help"], check=True, text=True, capture_output=True)
     assert "--backend" in result.stdout
     result = subprocess.run([sys.executable, "-m", "neurokernel_seed.cli", "harness-create-task", "--help"], check=True, text=True, capture_output=True)
