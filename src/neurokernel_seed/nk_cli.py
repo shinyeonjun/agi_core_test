@@ -227,6 +227,7 @@ def _add_runtime_seed_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--remote-db", default=os.getenv("NEUROKERNEL_EDGE_HARNESS_DB", "data/harness.db"))
     parser.add_argument("--cache-db", default=os.getenv("NEUROKERNEL_RUNTIME_DB_CACHE"))
     _add_remote_options(parser)
+    parser.add_argument("--remote-python", default=os.getenv("NEUROKERNEL_EDGE_PYTHON"))
     parser.add_argument("--project-root", default=".")
     parser.add_argument("--profile", choices=["readonly-basic"], default="readonly-basic")
     parser.add_argument("--target", choices=["local", "orangepi5"], default="orangepi5")
@@ -733,12 +734,14 @@ def _run_remote_runtime_seed_command(args: argparse.Namespace) -> dict[str, Any]
     remote_project = (getattr(args, "remote_project", None) or os.getenv("NEUROKERNEL_EDGE_PROJECT", "/home/ubuntu/projects/neurokernel-agi-seed")).rstrip("/")
     timeout = int(getattr(args, "ssh_connect_timeout", 10))
     remote_db = getattr(args, "remote_db", None) or os.getenv("NEUROKERNEL_EDGE_HARNESS_DB", "data/harness.db")
+    remote_python = getattr(args, "remote_python", None) or os.getenv("NEUROKERNEL_EDGE_PYTHON")
+    python_cmd = _sh_quote(str(remote_python)) if remote_python else "$(test -x venv/bin/python && printf %s venv/bin/python || printf %s python3)"
     command_parts = [
         "cd",
         _sh_quote(remote_project),
         "&&",
         "PYTHONPATH=src",
-        "python3",
+        python_cmd,
         "-m",
         "neurokernel_seed.nk_cli",
         "runtime-seed",

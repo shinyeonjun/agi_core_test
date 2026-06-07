@@ -265,6 +265,42 @@ def test_nk_runtime_seed_edge_runs_remote_seed_then_exports(tmp_path, monkeypatc
     ]
 
 
+def test_nk_runtime_seed_remote_command_prefers_venv_python(monkeypatch):
+    captured = {}
+
+    class Result:
+        returncode = 0
+        stdout = json.dumps({"status": "completed", "seed": {"tasks_created": 14}})
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return Result()
+
+    monkeypatch.setattr(nk_cli.subprocess, "run", fake_run)
+
+    result = nk_cli._run_remote_runtime_seed_command(
+        argparse.Namespace(
+            remote_host="orangepi5",
+            remote_project="/remote",
+            remote_db="data/harness.db",
+            remote_python=None,
+            ssh_connect_timeout=10,
+            profile="readonly-basic",
+            cycles=2,
+            include_failures=True,
+        )
+    )
+
+    remote_command = captured["cmd"][-1]
+    assert result["seed"]["tasks_created"] == 14
+    assert "test -x venv/bin/python" in remote_command
+    assert "PYTHONPATH=src" in remote_command
+    assert "runtime-seed --source local" in remote_command
+    assert captured["kwargs"]["encoding"] == "utf-8"
+
+
 def test_nk_compare_reports_current_best_and_deploy_need(tmp_path, monkeypatch):
     _write_ablation(tmp_path / "best", hybrid_veto=1.0, prior=0.6, signal_count=3)
     monkeypatch.setattr(
