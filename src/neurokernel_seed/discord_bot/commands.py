@@ -14,6 +14,9 @@ PRESET_ACTIONS: dict[str, tuple[str, dict[str, Any]]] = {
     "temp": ("get_cpu_temp", {}),
     "artifacts": ("list_artifacts", {"path": "artifacts"}),
     "trace": ("get_recent_trace", {"limit": 5}),
+    "code": ("inspect_code_structure", {"paths": ["src", "tests"]}),
+    "code-structure": ("inspect_code_structure", {"paths": ["src", "tests"]}),
+    "structure": ("inspect_code_structure", {"paths": ["src", "tests"]}),
 }
 
 

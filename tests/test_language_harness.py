@@ -51,6 +51,17 @@ def test_language_to_core_routes_memory_lookup_from_catalog_without_codex(tmp_pa
     assert result["requires_confirmation"] is False
 
 
+def test_language_to_core_routes_symptom_diagnosis_from_catalog_without_codex(tmp_path):
+    harness = CodexLanguageHarness(_missing_codex_config(tmp_path))
+
+    result = harness.to_core("느려짐이 있고 학습 중단 의심돼. 모델 파일 이상도 진단해줘")
+
+    assert result["intent"] == "task"
+    assert result["task_spec"]["allowed_actions"] == ["diagnose_system_symptoms"]
+    assert result["task_spec"]["context"]["params"]["artifact_path"] == "artifacts"
+    assert result["requires_confirmation"] is False
+
+
 def test_language_to_core_catalog_router_has_no_action_specific_cpu_predicate():
     source = Path("src/neurokernel_seed/language/codex_harness.py").read_text(encoding="utf-8")
 

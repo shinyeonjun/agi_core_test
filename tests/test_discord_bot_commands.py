@@ -37,6 +37,14 @@ def test_build_preset_task_uses_readonly_action():
     assert task["mode"] == "readonly"
 
 
+def test_build_preset_task_can_inspect_code_structure():
+    task = build_preset_task("code-structure")
+    assert task["allowed_actions"] == ["inspect_code_structure"]
+    assert task["context"]["params"]["paths"] == ["src", "tests"]
+    assert task["requires_approval"] is False
+    assert task["mode"] == "readonly"
+
+
 def test_build_preset_task_rejects_unknown_preset():
     with pytest.raises(ValueError):
         build_preset_task("delete_everything")

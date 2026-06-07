@@ -70,6 +70,81 @@ def test_default_catalog_includes_cpu_per_core_usage():
     assert action.requires_approval is False
 
 
+def test_default_catalog_includes_symptom_diagnosis_action():
+    action = default_action_catalog()["diagnose_system_symptoms"]
+    assert action.executor == "readonly_system"
+    assert action.risk_level == "low"
+    assert action.side_effect is False
+    assert action.requires_approval is False
+    assert action.params_schema["symptoms"]["default"] == ""
+    assert action.params_schema["log_paths"]["default"] == []
+
+
+def test_readonly_executor_diagnoses_symptoms_from_composed_probes(monkeypatch, tmp_path):
+    log = tmp_path / "train.log"
+    log.write_text("step 10 ok\nERROR out of memory while loading model\n", encoding="utf-8")
+    executor = ReadOnlyExecutor(project_root=tmp_path, memory_path=tmp_path / "harness.db")
+    monkeypatch.setattr(executor, "_get_uptime", lambda: {"uptime_seconds": 123.0})
+    monkeypatch.setattr(executor, "_get_disk_usage", lambda path: {"path": path, "used_percent": 95.0})
+    monkeypatch.setattr(executor, "_get_memory_usage", lambda: {"used_percent": 96.0, "available_bytes": 128 * 1024 * 1024})
+    monkeypatch.setattr(executor, "_get_cpu_temp", lambda: {"celsius": 82.0})
+    monkeypatch.setattr(executor, "_get_cpu_per_core_usage", lambda: {"per_core_percent": [{"core": 0, "used_percent": 99.0}], "core_count": 1})
+    monkeypatch.setattr(executor, "_list_artifacts", lambda path: {"path": path, "exists": True, "items": []})
+    monkeypatch.setattr(executor, "_get_recent_trace", lambda limit: {"traces": [{"status": "failed", "error_type": "RuntimeError"}]})
+
+    result = executor.execute(
+        "diagnose_system_symptoms",
+        {
+            "symptoms": "학습이 멈춘 것 같고 모델 파일도 이상해",
+            "log_paths": ["train.log"],
+            "log_lines": 20,
+            "artifact_path": "artifacts",
+            "trace_limit": 3,
+        },
+    )
+
+    assert result.success
+    summary = result.result["summary"]
+    candidate_ids = {candidate["id"] for candidate in summary["cause_candidates"]}
+    assert summary["status"] == "attention_needed"
+    assert {
+        "memory_pressure",
+        "disk_pressure",
+        "cpu_saturation",
+        "thermal_throttling",
+        "log_errors",
+        "recent_failures",
+        "artifact_path_empty",
+    } <= candidate_ids
+    assert "next_actions" in summary
+    assert result.result["observations"]["logs"][0]["signal_counts"]["error"] == 1
+    assert result.result["observations"]["logs"][0]["signal_counts"]["oom"] >= 1
+
+
+def test_default_catalog_includes_code_structure_inspection():
+    action = default_action_catalog()["inspect_code_structure"]
+    assert action.executor == "readonly_system"
+    assert action.risk_level == "low"
+    assert action.side_effect is False
+    assert action.requires_approval is False
+
+
+def test_readonly_executor_inspects_code_structure(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "module.py").write_text("\n".join(["def f():", *["    x = 1" for _ in range(20)], "    return x"]), encoding="utf-8")
+    executor = ReadOnlyExecutor(project_root=tmp_path)
+
+    result = executor.execute(
+        "inspect_code_structure",
+        {"paths": ["src"], "long_file_lines": 10, "large_function_lines": 10},
+    )
+
+    assert result.success
+    assert result.result["candidate_count"] == 1
+    assert result.result["candidates"][0]["path"] == "src/module.py"
+
+
 def test_harness_service_runs_readonly_task_and_records_result(tmp_path):
     db = tmp_path / "harness.db"
     service = HarnessService(db_path=db, project_root=tmp_path)
