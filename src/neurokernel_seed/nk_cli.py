@@ -50,20 +50,30 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="nk",
         description="NeuroKernel 모델 콘솔. `nk`만 입력하면 반복 TUI가 열립니다.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "자주 쓰는 명령:\n"
+            "  nk 시드 --source edge            런타임 초기 데이터만 준비\n"
+            "  nk runtime-train --device cuda   준비된 runtime_features로 CUDA 학습\n"
+            "  nk 런타임배포 --model artifacts/runtime_action_model.pt\n"
+            "  nk current                       world/runtime 슬롯 상태 확인\n"
+            "\n"
+            "영문 명령도 계속 지원합니다: runtime-seed, runtime-auto, runtime-cycle, deploy-runtime, deploy-use, bench-current, top"
+        ),
     )
-    sub = parser.add_subparsers(dest="action")
+    sub = parser.add_subparsers(dest="action", metavar="명령")
 
     for name in ("runtime-auto", "auto", "자동", "학습", "파이프라인", "사용자동"):
         item = sub.add_parser(name)
         _add_runtime_auto_options(item)
         item.set_defaults(deploy_runtime=False)
 
-    for name in ("runtime-cycle", "auto-deploy", "learn-deploy"):
+    for name in ("runtime-cycle", "auto-deploy", "learn-deploy", "배포학습", "학습배포", "순환"):
         item = sub.add_parser(name)
         _add_runtime_auto_options(item)
         item.set_defaults(deploy_runtime=True)
 
-    for name in ("runtime-seed", "seed-runtime"):
+    for name in ("runtime-seed", "seed-runtime", "시드", "초기데이터"):
         item = sub.add_parser(name)
         _add_runtime_seed_options(item)
 
@@ -98,7 +108,7 @@ def _build_parser() -> argparse.ArgumentParser:
         item = sub.add_parser(name)
         _add_runtime_train_options(item)
 
-    for name in ("deploy-runtime", "runtime-deploy", "runtime-use"):
+    for name in ("deploy-runtime", "runtime-deploy", "runtime-use", "런타임배포"):
         item = sub.add_parser(name)
         _add_runtime_deploy_options(item)
 
@@ -1410,26 +1420,26 @@ def _print_runtime_auto(result: dict[str, Any]) -> None:
 
 
 def _print_runtime_seed(result: dict[str, Any]) -> None:
-    print(_ok("runtime-seed", result.get("status", "completed")))
+    print(_ok("런타임 시드", result.get("status", "completed")))
     seed = result.get("seed") or result.get("remote_seed", {}).get("seed") or {}
-    print(_kv("source", result.get("source")))
-    print(_kv("tasks", seed.get("tasks_created")))
-    print(_kv("success", seed.get("success_rows")))
-    print(_kv("failure", seed.get("failure_rows")))
+    print(_kv("출처", result.get("source")))
+    print(_kv("작업", seed.get("tasks_created")))
+    print(_kv("성공", seed.get("success_rows")))
+    print(_kv("실패", seed.get("failure_rows")))
     action_counts = seed.get("action_counts") or {}
     if action_counts:
-        print(_kv("actions", ", ".join(f"{key}:{value}" for key, value in action_counts.items())))
+        print(_kv("액션", ", ".join(f"{key}:{value}" for key, value in action_counts.items())))
     data = result.get("runtime_data") or {}
     features = result.get("runtime_features") or {}
     if data:
-        print(_kv("replay_rows", (data.get("validation") or {}).get("rows")))
+        print(_kv("replay행", (data.get("validation") or {}).get("rows")))
     if features:
-        print(_kv("feature_rows", (features.get("validation") or {}).get("rows")))
-        print(_kv("ready", result.get("ready_for_runtime_model_training")))
+        print(_kv("특징행", (features.get("validation") or {}).get("rows")))
+        print(_kv("학습준비", result.get("ready_for_runtime_model_training")))
     artifacts = result.get("artifacts") or {}
     if artifacts:
         print(_kv("replay", artifacts.get("replay")))
-        print(_kv("features", artifacts.get("features")))
+        print(_kv("특징", artifacts.get("features")))
 
 
 def _print_runtime_data(result: dict[str, Any]) -> None:

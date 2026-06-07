@@ -74,8 +74,9 @@ def test_nk_dashboard_loops_until_exit(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert result == 0
     assert calls.count("top") >= 1
-    assert "compare" in output
-    assert "exit" in output
+    assert "NK 학습 콘솔" in output
+    assert "비교" in output
+    assert "종료" in output
 
 
 def test_nk_menu_shows_primary_actions(monkeypatch):
@@ -92,6 +93,11 @@ def test_nk_menu_shows_primary_actions(monkeypatch):
         ("5", "deploy-best"),
         ("0", "exit"),
     ]
+    assert nk_menu.dashboard_action("시드") == "runtime-seed"
+    assert nk_menu.dashboard_action("학습") == "runtime-auto"
+    assert nk_menu.dashboard_action("배포학습") == "runtime-cycle"
+    assert nk_menu.dashboard_action("월드배포") == "deploy-best"
+    assert nk_menu.dashboard_action("종료") == "exit"
     seed_args = nk_menu.build_menu_args(base, "runtime-seed")
     auto_args = nk_menu.build_menu_args(base, "runtime-auto")
     data_args = nk_menu.build_menu_args(base, "runtime-data")
@@ -113,6 +119,21 @@ def test_nk_menu_shows_primary_actions(monkeypatch):
     assert train_args.out == "artifacts/runtime_action_model.pt"
     assert top_args.limit == 5
     assert cycle_args.deploy_runtime is True
+
+
+def test_nk_parser_accepts_korean_runtime_shortcuts():
+    parser = nk_cli._build_parser()
+
+    seed = parser.parse_args(["시드", "--no-export"])
+    cycle = parser.parse_args(["배포학습", "--no-deploy"])
+    deploy = parser.parse_args(["런타임배포", "--model", "artifacts/runtime_action_model.pt"])
+
+    assert seed.action == "시드"
+    assert seed.export_dataset is False
+    assert cycle.action == "배포학습"
+    assert cycle.deploy_runtime is False
+    assert deploy.action == "런타임배포"
+    assert deploy.model == "artifacts/runtime_action_model.pt"
 
 
 def test_nk_runtime_seed_local_creates_real_execution_rows(tmp_path):

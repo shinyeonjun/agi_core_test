@@ -43,17 +43,17 @@ class DashboardController:
     def run(self, args: argparse.Namespace) -> int:
         while True:
             self.print_dashboard(args)
-            raw = self._read_prompt("\n> ")
+            raw = self._read_prompt("\n선택> ")
             if raw is None:
                 return 0
             if not raw:
                 continue
             action = menu.dashboard_action(raw)
             if action == "exit":
-                print("exit")
+                print("종료")
                 return 0
             if action is None:
-                print("failed: unknown command")
+                print("알 수 없는 명령입니다. 번호나 빠른 명령을 입력해줘.")
                 self._wait_for_enter()
                 continue
             if not self._run_menu_action(args, action, raw):
@@ -61,7 +61,8 @@ class DashboardController:
 
     def print_dashboard(self, args: argparse.Namespace) -> None:
         print()
-        print(self._style("NK", "cyan") + "  training automation")
+        print(self._style("NK 학습 콘솔", "cyan"))
+        print("런타임 데이터, 학습, OrangePi 배포를 한 곳에서 실행합니다.")
         self._print_command_grid()
         print()
         self._print_status_snapshot(args)
@@ -73,7 +74,7 @@ class DashboardController:
             self._ask_for_missing_args(menu_args)
             result = self._run_action(menu_args)
         except self._model_error_type as exc:
-            print(f"failed: {exc}", file=sys.stderr)
+            print(f"실패: {exc}", file=sys.stderr)
             self._wait_for_enter()
             return False
         self._print_result(menu_args.action, result)
@@ -81,14 +82,18 @@ class DashboardController:
         return True
 
     def _print_command_grid(self) -> None:
-        for command in menu.DASHBOARD_COMMANDS:
-            print(f"{command.key}  {self._style(command.label, 'bold'):<10} {command.hint}")
         print()
-        print("quick  seed | learn | cycle | compare | deploy | exit")
+        print("번호  명령       작업")
+        for command in menu.DASHBOARD_COMMANDS:
+            print(f"{command.key:<4} {command.label:<10} {command.hint}")
+        print()
+        print("빠른 입력  시드 | 학습 | 배포학습 | 비교 | 월드배포 | 종료")
+        print("직접 실행  nk runtime-train --device cuda  처럼 명령어로도 실행 가능")
 
     def _print_status_snapshot(self, args: argparse.Namespace) -> None:
         current = self._probe(args, "current")
         best = self._probe(args, "top")
+        print("현재 상태")
         print(self._kv("world", self._short_current(current)))
         print(self._kv("best", self._short_best(best)))
         slots = current.get("model_slots") if isinstance(current, dict) else {}
@@ -104,11 +109,11 @@ class DashboardController:
 
     def _ask_for_missing_args(self, args: argparse.Namespace) -> None:
         if args.action in {"check", "train"} and not getattr(args, "run_name", None):
-            args.run_name = self._optional_prompt("run name")
+            args.run_name = self._optional_prompt("실행 이름")
         elif args.action in {"deploy", "deploy-use", "use"} and not getattr(args, "run_name", None):
-            args.run_name = self._required_prompt("run name")
+            args.run_name = self._required_prompt("실행 이름")
         elif args.action == "bench" and not getattr(args, "run_name", None) and not getattr(args, "model", None):
-            raw = self._required_prompt("model/run")
+            raw = self._required_prompt("모델 또는 실행 이름")
             if raw.lower().endswith(".onnx"):
                 args.model = raw
             else:
@@ -121,7 +126,7 @@ class DashboardController:
     def _required_prompt(self, label: str) -> str:
         value = self._read_prompt(f"{label}> ")
         if not value:
-            raise self._model_error_type(f"{label} required")
+            raise self._model_error_type(f"{label} 필요")
         return value
 
     @staticmethod
@@ -136,6 +141,6 @@ class DashboardController:
         if not sys.stdin.isatty():
             return
         try:
-            input("\nEnter to continue")
+            input("\n계속하려면 Enter")
         except EOFError:
             return
