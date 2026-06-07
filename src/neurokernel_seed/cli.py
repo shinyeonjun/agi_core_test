@@ -77,6 +77,72 @@ def main(argv: list[str] | None = None) -> int:
         result = inspect_replay_features(args.path)
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
+    if args.cmd == "export-runtime-replay":
+        from neurokernel_seed.replay.runtime_dataset import export_runtime_replay
+        result = export_runtime_replay(args.db, args.out, limit=args.limit)
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    if args.cmd == "run-runtime-replay-etl":
+        from neurokernel_seed.replay.runtime_dataset import RuntimeReplayEtlConfig, run_runtime_replay_etl
+        result = run_runtime_replay_etl(
+            RuntimeReplayEtlConfig(
+                db_path=args.db,
+                out_path=args.out,
+                limit=args.limit,
+                min_rows=args.min_rows,
+                require_execution=not args.allow_no_execution,
+            )
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if result["ready_for_runtime_training"] else 1
+    if args.cmd == "validate-runtime-replay":
+        from neurokernel_seed.replay.runtime_dataset import validate_runtime_replay
+        result = validate_runtime_replay(args.path)
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if result["accepted"] else 1
+    if args.cmd == "check-runtime-replay-gates":
+        from neurokernel_seed.replay.runtime_dataset import check_runtime_replay_gates
+        result = check_runtime_replay_gates(args.path, min_rows=args.min_rows, require_execution=not args.allow_no_execution)
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if result["passed"] else 1
+    if args.cmd == "export-runtime-features":
+        from neurokernel_seed.replay.runtime_features import export_runtime_features
+        result = export_runtime_features(args.runtime_replay_path, args.out, test_ratio=args.test_ratio)
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    if args.cmd == "validate-runtime-features":
+        from neurokernel_seed.replay.runtime_features import validate_runtime_features
+        result = validate_runtime_features(args.path)
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if result["accepted"] else 1
+    if args.cmd == "check-runtime-feature-gates":
+        from neurokernel_seed.replay.runtime_features import check_runtime_feature_gates
+        result = check_runtime_feature_gates(args.path, min_rows=args.min_rows, min_actions=args.min_actions)
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if result["passed"] else 1
+    if args.cmd == "train-runtime-action-model":
+        from neurokernel_seed.model.runtime_action import train_runtime_action_model
+        result = train_runtime_action_model(
+            args.features,
+            args.out,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            lr=args.lr,
+            weight_decay=args.weight_decay,
+            hidden_dim=args.hidden_dim,
+            hidden_layers=args.hidden_layers,
+            device=args.device,
+            patience=args.patience,
+            min_rows=args.min_rows,
+            min_actions=args.min_actions,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    if args.cmd == "eval-runtime-action-model":
+        from neurokernel_seed.model.runtime_action import eval_runtime_action_checkpoint
+        result = eval_runtime_action_checkpoint(args.checkpoint, args.features, split=args.split, device=args.device)
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
     if args.cmd == "export-features":
         result = export_flat_features(args.replay_path, args.out)
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))

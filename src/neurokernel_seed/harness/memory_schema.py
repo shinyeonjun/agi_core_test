@@ -44,6 +44,41 @@ CREATE INDEX IF NOT EXISTS idx_agent_events_created_at ON agent_events(created_a
 CREATE INDEX IF NOT EXISTS idx_agent_events_work_id ON agent_events(work_id);
 CREATE INDEX IF NOT EXISTS idx_agent_events_job_id ON agent_events(job_id);
 CREATE INDEX IF NOT EXISTS idx_agent_events_type ON agent_events(event_type);
+CREATE TABLE IF NOT EXISTS experiences (
+  experience_id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  phase TEXT NOT NULL,
+  status TEXT NOT NULL,
+  decision_policy TEXT NOT NULL,
+  model_used INTEGER NOT NULL DEFAULT 0,
+  model_unavailable_reason TEXT,
+  before_state_json TEXT NOT NULL,
+  after_state_json TEXT NOT NULL DEFAULT '{}',
+  outcome_json TEXT NOT NULL DEFAULT '{}',
+  learning_masks_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_experiences_task_id ON experiences(task_id);
+CREATE INDEX IF NOT EXISTS idx_experiences_created_at ON experiences(created_at);
+CREATE TABLE IF NOT EXISTS experience_candidates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  experience_id TEXT NOT NULL REFERENCES experiences(experience_id) ON DELETE CASCADE,
+  task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  candidate_index INTEGER NOT NULL,
+  action_id TEXT NOT NULL,
+  params_json TEXT NOT NULL DEFAULT '{}',
+  safety_decision_json TEXT NOT NULL DEFAULT '{}',
+  model_score_json TEXT NOT NULL DEFAULT '{}',
+  selected INTEGER NOT NULL DEFAULT 0,
+  executed INTEGER NOT NULL DEFAULT 0,
+  execution_result_known INTEGER NOT NULL DEFAULT 0,
+  outcome_json TEXT NOT NULL DEFAULT '{}',
+  target_mask_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_experience_candidates_experience_id ON experience_candidates(experience_id);
+CREATE INDEX IF NOT EXISTS idx_experience_candidates_task_id ON experience_candidates(task_id);
 CREATE TABLE IF NOT EXISTS action_decisions (
   decision_id INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,

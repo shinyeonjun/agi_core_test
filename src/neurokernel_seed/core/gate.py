@@ -108,7 +108,6 @@ class ActionGate:
 
     def score_breakdown(self, state: WorldState, action: Action, prediction: Prediction) -> dict[str, Any]:
         model_score = self._score(state, prediction)
-        legacy_visibility_guard = self._legacy_visibility_guard_adjustment(state, action)
         prior_components = self.compatibility_prior_components(state, action)
         prior_score = float(prior_components["total"])
         model_veto = self.model_veto(state, action, prediction)
@@ -116,7 +115,7 @@ class ActionGate:
         veto_escape_allowed = self._veto_escape_allowed(state, action)
         hard_blocked = False
         if self.config.mode == "model_only":
-            final_score = model_score + legacy_visibility_guard
+            final_score = model_score
         elif self.config.mode == "prior_only":
             final_score = prior_score
         elif self.config.mode == "hybrid_veto":
@@ -133,7 +132,6 @@ class ActionGate:
                 final_score = model_score + prior_score
         return {
             "model_score": float(model_score),
-            "legacy_visibility_guard": float(legacy_visibility_guard),
             "compatibility_prior": float(prior_score),
             "match_guard": float(prior_components["match_guard"]),
             "information_guard": float(prior_components["information_guard"]),
@@ -318,23 +316,6 @@ class ActionGate:
         if info.current_required_action_known and info.reveals_information and bool(state.facts.get("compatible_but_bad_action", False)):
             return True
         return False
-
-    def _legacy_visibility_guard_adjustment(self, state: WorldState, action: Action) -> float:
-        spec = find_action_spec(action, self.action_specs)
-        if spec is None:
-            return 0.0
-        facts = state.facts
-        score = 0.0
-        mode = str(facts.get("visibility_mode", "visible"))
-        current_unknown = not bool(facts.get("current_slot_known", True))
-        if mode != "visible" and current_unknown:
-            if spec.reveals_information:
-                score += 1.0
-            if spec.requires_known_slot:
-                score -= 2.0
-        if spec.terminal_only and not bool(facts.get("is_last_step_index", False)):
-            score -= 2.0
-        return score
 
 
 def current_required_action_key(state: WorldState) -> str | None:

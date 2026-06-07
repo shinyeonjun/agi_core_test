@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -192,12 +192,12 @@ class ReadOnlyExecutor:
         memory = observations.get("memory", {})
         memory_used = _as_float(memory.get("used_percent"))
         if memory_used is not None and memory_used >= 90:
-            candidates.append(_candidate("memory_pressure", "high", f"메모리 사용률이 {memory_used:.1f}%입니다.", ["학습 배치 크기나 동시 실행 작업 수를 줄입니다."]))
+            candidates.append(_candidate("memory_pressure", "high", f"메모리 사용률이 {memory_used:.1f}%입니다.", ["동시 실행 작업 수와 학습 배치 크기를 확인합니다."]))
 
         disk = observations.get("disk", {})
         disk_used = _as_float(disk.get("used_percent"))
         if disk_used is not None and disk_used >= 90:
-            candidates.append(_candidate("disk_pressure", "high", f"디스크 사용률이 {disk_used:.1f}%입니다.", ["checkpoint, 로그, 임시 artifact를 정리할 대상을 확인합니다."]))
+            candidates.append(_candidate("disk_pressure", "high", f"디스크 사용률이 {disk_used:.1f}%입니다.", ["checkpoint, 로그, 임시 artifact 용량을 확인합니다."]))
 
         cores = observations.get("cpu_per_core", {}).get("per_core_percent") or []
         core_values = [_as_float(item.get("used_percent")) for item in cores if isinstance(item, dict)]
@@ -206,16 +206,16 @@ class ReadOnlyExecutor:
             avg_cpu = sum(core_values) / len(core_values)
             max_cpu = max(core_values)
             if avg_cpu >= 90 or max_cpu >= 98:
-                candidates.append(_candidate("cpu_saturation", "medium", f"CPU 평균 {avg_cpu:.1f}%, 최대 코어 {max_cpu:.1f}%입니다.", ["CPU를 많이 쓰는 학습/변환 작업이 겹쳤는지 확인합니다."]))
+                candidates.append(_candidate("cpu_saturation", "medium", f"CPU 평균 {avg_cpu:.1f}%, 최대 코어 {max_cpu:.1f}%입니다.", ["CPU를 많이 쓰는 학습/변환/벤치마크 작업이 겹쳤는지 확인합니다."]))
 
         temp = observations.get("cpu_temperature", {})
         celsius = _as_float(temp.get("celsius"))
         if celsius is not None and celsius >= 80:
-            candidates.append(_candidate("thermal_throttling", "medium", f"CPU 온도가 {celsius:.1f}도입니다.", ["쿨링 상태를 확인하고 부하를 낮춘 뒤 재측정합니다."]))
+            candidates.append(_candidate("thermal_throttling", "medium", f"CPU 온도가 {celsius:.1f}도입니다.", ["쿨링 상태와 장시간 부하 작업을 확인합니다."]))
 
         log_hits = _combined_log_hits(observations.get("logs", []))
         if log_hits.get("error", 0) or log_hits.get("exception", 0) or log_hits.get("oom", 0):
-            candidates.append(_candidate("log_errors", "medium", f"최근 로그에서 오류 신호가 발견됐습니다: {log_hits}", ["로그 꼬리의 오류 직전 단계와 변경된 입력 파일을 확인합니다."]))
+            candidates.append(_candidate("log_errors", "medium", f"최근 로그에서 오류 신호가 발견되었습니다: {log_hits}", ["오류 직전 단계와 변경된 입력 파일을 확인합니다."]))
 
         traces = observations.get("recent_trace", {}).get("traces") or []
         failure_count = sum(1 for trace in traces if isinstance(trace, dict) and _trace_looks_failed(trace))
@@ -224,11 +224,10 @@ class ReadOnlyExecutor:
 
         artifacts = observations.get("artifacts", {})
         items = artifacts.get("items") or []
-        symptom_text = str(observations.get("symptoms") or "").lower()
-        if artifacts.get("exists") is False and any(token in symptom_text for token in ("model", "file", "모델", "파일", "rknn", "onnx")):
-            candidates.append(_candidate("artifact_path_missing", "medium", f"artifact 경로가 없습니다: {artifacts.get('path')}", ["모델/파일 저장 경로 설정과 최근 생성 위치를 확인합니다."]))
-        elif isinstance(items, list) and not items and any(token in symptom_text for token in ("model", "file", "모델", "파일", "rknn", "onnx")):
-            candidates.append(_candidate("artifact_path_empty", "medium", "artifact 목록이 비어 있습니다.", ["학습/변환 산출물이 다른 경로에 저장됐는지 확인합니다."]))
+        if artifacts.get("exists") is False:
+            candidates.append(_candidate("artifact_path_missing", "medium", f"artifact 경로가 없습니다: {artifacts.get('path')}", ["모델/벤치마크 산출물 저장 경로와 현재 프로젝트 루트를 확인합니다."]))
+        elif isinstance(items, list) and not items:
+            candidates.append(_candidate("artifact_path_empty", "medium", "artifact 목록이 비어 있습니다.", ["학습/변환/벤치마크 산출물이 다른 경로에 저장됐는지 확인합니다."]))
 
         return candidates
 
@@ -239,9 +238,9 @@ class ReadOnlyExecutor:
                 if action not in actions:
                     actions.append(str(action))
         if observations.get("logs") == []:
-            actions.append("허용된 로그 경로가 확정되면 log_paths에 추가해 다시 진단합니다.")
+            actions.append("관련 로그 경로가 있으면 log_paths에 넣고 다시 진단합니다.")
         if not actions:
-            actions.append("명확한 병목은 보이지 않습니다. 증상 발생 직후 로그 경로와 대상 서비스를 지정해 다시 확인합니다.")
+            actions.append("명확한 병목은 보이지 않습니다. 증상 직후 로그 경로와 관련 서비스를 지정해 다시 확인합니다.")
         return actions[:6]
 
     def _inspect_code_structure(self, params: dict[str, Any]) -> dict[str, Any]:

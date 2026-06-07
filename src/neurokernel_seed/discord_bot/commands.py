@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 
-DEFAULT_MODEL_PATH = "artifacts/world_model_slot_v2_model_needed_v3.onnx"
+CURRENT_MODEL_POINTER = "artifacts/current_world_model.onnx"
 
 PRESET_ACTIONS: dict[str, tuple[str, dict[str, Any]]] = {
     "uptime": ("get_uptime", {}),
@@ -39,7 +39,7 @@ def build_preset_task(name: str, *, target: str = "orangepi5") -> dict[str, Any]
     }
 
 
-def build_benchmark_task(*, model: str = DEFAULT_MODEL_PATH, episodes: int = 3, target: str = "orangepi5") -> dict[str, Any]:
+def build_benchmark_task(*, model: str = CURRENT_MODEL_POINTER, episodes: int = 3, target: str = "orangepi5") -> dict[str, Any]:
     return {
         "goal": "discord preset: safe benchmark",
         "target": target,
@@ -81,25 +81,26 @@ def summarize_status(payload: dict[str, Any]) -> str:
     lines = ["Core 상태: OK" if payload.get("health", {}).get("ok") else "Core 상태: 확인 필요"]
     lines.append(f"최근 task: {len(tasks)}개 / 최근 trace: {len(traces)}개")
     for task in tasks[:3]:
-        lines.append(f"- {task.get('task_id')} · {task.get('status')} · {task.get('goal')}")
+        lines.append(f"- {task.get('task_id')} / {task.get('status')} / {task.get('goal')}")
     return "\n".join(lines)
 
 
 def help_text(prefix: str) -> str:
+    command = prefix or ""
     return "\n".join(
         [
             "NeuroKernel Discord v0",
-            f"`{prefix} status` - Core 상태 확인",
-            f"`{prefix} actions` - 허용된 액션 목록",
-            f"`{prefix} run uptime|disk|memory|temp|artifacts|trace` - 안전한 읽기 작업 실행",
-            f"`{prefix} benchmark [episodes]` - 안전 벤치마크 실행",
-            f"`{prefix} ask <말>` - 실행 없이 대화",
-            f"`{prefix} plan <말>` - 자연어를 작업 계획으로 바꾸고 미리 점검",
-            f"`{prefix} do <말>` - 안전한 조회 작업만 실행",
-            f"`{prefix} task {{...json...}}` - 개발자용 작업 생성 후 미리 점검",
-            f"`{prefix} run-task <task_id>` - 생성된 task 실행",
-            f"`{prefix} approve <task_id> [reason]` / `{prefix} reject <task_id> [reason]`",
-            "`prefs show|set|forget|reset` - 답변 선호 저장/조회",
-            "`memory recent|context` - 최근 대화 기억 확인",
+            f"`{command}status` - Core 상태 확인",
+            f"`{command}actions` - 허용된 액션 목록",
+            f"`{command}run uptime|disk|memory|temp|artifacts|trace` - 읽기 작업 실행",
+            f"`{command}benchmark [episodes]` - 현재 모델 안전 벤치마크",
+            f"`{command}ask <말>` - 실행 없이 답변",
+            f"`{command}plan <말>` - 작업 계획 생성",
+            f"`{command}do <말>` - 낮은 위험 읽기 작업 실행",
+            f"`{command}task {{...json...}}` - TaskSpec 생성 후 dry-run",
+            f"`{command}run-task <task_id>` - 생성된 task 실행",
+            f"`{command}approve <task_id> [reason]` / `{command}reject <task_id> [reason]`",
+            "`prefs show|set|forget|reset` - 대화 선호 조회/저장",
+            "`memory recent|context` - 최근 기억 확인",
         ]
     )

@@ -1,27 +1,64 @@
 import asyncio
 
 from neurokernel_seed.discord_bot.bot import _maybe_save_conversational_preferences
-from neurokernel_seed.memory.preference_extractor import extract_preference_candidates
+from neurokernel_seed.memory.preference_extractor import extract_preference_candidates, preference_candidates_from_intent
 
 
-def test_extracts_explicit_short_response_preference():
-    candidates = extract_preference_candidates("앞으로 답변 짧게 해줘")
-    assert [(item.key, item.value) for item in candidates] == [("response_length", "short")]
+def test_raw_text_does_not_create_preference_candidates():
+    assert extract_preference_candidates("앞으로 답변 짧게 해줘") == []
 
 
-def test_extracts_multiple_explicit_preferences():
-    candidates = extract_preference_candidates("이제부터 짧게 말하고 내부용어 쓰지마")
-    values = {item.key: item.value for item in candidates}
-    assert values["response_length"] == "short"
-    assert values["avoid_internal_terms"] is True
+def test_structured_preference_intent_creates_candidates():
+    intent = {
+        "kind": "preference_update",
+        "reply": "알겠어. 앞으로 짧게 말할게.",
+        "candidates": [
+            {
+                "key": "response_length",
+                "value": "short",
+                "scope": "global",
+                "source": "explicit_user_request",
+                "confidence": 0.95,
+                "evidence": "앞으로 답변 짧게 해줘",
+            }
+        ],
+        "confidence": 0.95,
+        "requires_confirmation": False,
+        "clarifying_question": None,
+        "safety_notes": [],
+    }
+
+    candidates = preference_candidates_from_intent(intent)
+
+    assert [(item.key, item.value, item.scope) for item in candidates] == [("response_length", "short", "global")]
 
 
-def test_ignores_non_explicit_style_comment():
-    assert extract_preference_candidates("짧은 답변도 괜찮네") == []
+def test_structured_preference_intent_rejects_unknown_key():
+    intent = {
+        "kind": "preference_update",
+        "reply": "저장할게.",
+        "candidates": [
+            {
+                "key": "private_token",
+                "value": "abc",
+                "scope": "global",
+                "source": "explicit_user_request",
+                "confidence": 0.95,
+                "evidence": "내 토큰 기억해",
+            }
+        ],
+        "confidence": 0.95,
+        "requires_confirmation": False,
+        "clarifying_question": None,
+        "safety_notes": [],
+    }
 
-
-def test_rejects_sensitive_memory_request():
-    assert extract_preference_candidates("앞으로 내 비밀번호 기억해") == []
+    try:
+        preference_candidates_from_intent(intent)
+    except Exception as exc:
+        assert "unknown preference key" in str(exc)
+    else:
+        raise AssertionError("unknown preference key should be rejected")
 
 
 def test_conversational_preference_save_uses_core_api():
@@ -71,5 +108,5 @@ def test_conversational_preference_save_uses_core_api():
                 "source": "explicit_user_request",
                 "confidence": 0.95,
             },
-        )
+        ),
     ]

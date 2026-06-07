@@ -54,6 +54,7 @@ def test_build_benchmark_task_is_low_risk():
     task = build_benchmark_task(episodes=2)
     assert task["allowed_actions"] == ["run_safe_benchmark"]
     assert task["context"]["params"]["episodes"] == 2
+    assert task["context"]["params"]["model"] == "artifacts/current_world_model.onnx"
     assert task["risk_level"] == "low"
 
 

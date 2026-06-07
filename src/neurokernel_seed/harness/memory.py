@@ -94,6 +94,103 @@ class HarnessMemory:
         )
         self.conn.commit()
 
+    def record_experience(
+        self,
+        *,
+        task_id: str,
+        phase: str,
+        status: str,
+        decision_policy: str,
+        before_state: dict[str, Any],
+        candidates: list[dict[str, Any]],
+        model_used: bool = False,
+        model_unavailable_reason: str | None = None,
+        after_state: dict[str, Any] | None = None,
+        outcome: dict[str, Any] | None = None,
+        learning_masks: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        experience_id = new_id("exp", phase)
+        self.conn.execute(
+            """
+            INSERT INTO experiences(
+              experience_id, task_id, phase, status, decision_policy, model_used,
+              model_unavailable_reason, before_state_json, after_state_json,
+              outcome_json, learning_masks_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                experience_id,
+                _required_text(task_id, "task_id"),
+                _required_text(phase, "phase"),
+                _required_text(status, "status"),
+                _required_text(decision_policy, "decision_policy"),
+                int(bool(model_used)),
+                model_unavailable_reason,
+                _json(before_state),
+                _json(after_state or {}),
+                _json(outcome or {}),
+                _json(learning_masks or {}),
+            ),
+        )
+        for index, candidate in enumerate(candidates):
+            self.conn.execute(
+                """
+                INSERT INTO experience_candidates(
+                  experience_id, task_id, candidate_index, action_id, params_json,
+                  safety_decision_json, model_score_json, selected, executed,
+                  execution_result_known, outcome_json, target_mask_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    experience_id,
+                    task_id,
+                    int(candidate.get("candidate_index", index)),
+                    _required_text(str(candidate.get("action_id") or ""), "action_id"),
+                    _json(candidate.get("params") or {}),
+                    _json(candidate.get("safety_decision") or {}),
+                    _json(candidate.get("model_score") or {}),
+                    int(bool(candidate.get("selected"))),
+                    int(bool(candidate.get("executed"))),
+                    int(bool(candidate.get("execution_result_known"))),
+                    _json(candidate.get("outcome") or {}),
+                    _json(candidate.get("target_mask") or {}),
+                ),
+            )
+        self._insert_agent_event(
+            event_type=f"experience.{phase}.{status}",
+            source="experience_log",
+            task_id=task_id,
+            payload={"experience_id": experience_id, "candidate_count": len(candidates)},
+        )
+        self.conn.commit()
+        return self.get_experience(experience_id)
+
+    def get_experience(self, experience_id: str) -> dict[str, Any]:
+        row = self.conn.execute("SELECT * FROM experiences WHERE experience_id=?", (_required_text(experience_id, "experience_id"),)).fetchone()
+        if row is None:
+            raise KeyError(f"unknown experience: {experience_id}")
+        payload = _row(row)
+        payload["model_used"] = bool(payload.get("model_used"))
+        candidates = self.conn.execute(
+            "SELECT * FROM experience_candidates WHERE experience_id=? ORDER BY candidate_index, id",
+            (experience_id,),
+        ).fetchall()
+        payload["candidates"] = [_experience_candidate_row(item) for item in candidates]
+        return payload
+
+    def recent_experiences(self, *, limit: int = 20, task_id: str | None = None) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit), 100))
+        if task_id:
+            rows = self.conn.execute(
+                "SELECT * FROM experiences WHERE task_id=? ORDER BY created_at DESC LIMIT ?",
+                (task_id, limit),
+            ).fetchall()
+        else:
+            rows = self.conn.execute("SELECT * FROM experiences ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        return [_row(row) for row in rows]
+
     def add_execution_result(self, task_id: str, result: dict[str, Any]) -> None:
         self.conn.execute(
             """
@@ -874,3 +971,10 @@ class HarnessMemory:
     def proposal_events(self, proposal_id: str) -> list[dict[str, Any]]:
         rows = self.conn.execute("SELECT * FROM proposal_events WHERE proposal_id=? ORDER BY event_id", (proposal_id,)).fetchall()
         return [_row(row) for row in rows]
+
+
+def _experience_candidate_row(row: sqlite3.Row) -> dict[str, Any]:
+    payload = _row(row)
+    for key in ("selected", "executed", "execution_result_known"):
+        payload[key] = bool(payload.get(key))
+    return payload

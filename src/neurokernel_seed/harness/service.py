@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from neurokernel_seed.language.contracts import ALLOWED_PREFERENCE_KEYS, ALLOWED_PREFERENCE_SCOPES
+
 from .action_catalog import ActionDefinition, build_action_catalog, public_catalog
 from .activation import ActivationService, build_activation_config_from_env
 from .capability_service import CapabilityProposalService
@@ -13,7 +15,7 @@ from .memory import HarnessMemory
 from .preferences import preference_map
 from .safety_gate import check_action_safety
 from .task_spec import TaskSpec, task_spec_from_dict
-from .trace import failure_trace
+from .trace import failure_trace, redact_text
 from .work_queue import WorkQueue, WorkQueueError, build_work_queue_from_env
 from .work_service import WorkItemService
 
@@ -157,11 +159,7 @@ class HarnessService:
     def dry_run(self, task_id: str) -> dict[str, Any]:
         task = self._load_task_spec(task_id)
         candidates = self._candidate_actions(task)
-        decisions = []
-        for action_id in candidates:
-            decision = check_action_safety(task, action_id, catalog=self.catalog)
-            decisions.append({"action_id": action_id, "safety": decision.as_dict()})
-        chosen = next((item for item in decisions if item["safety"]["decision"] in {"allow", "dry_run_only"}), decisions[0] if decisions else None)
+        decisions, chosen = self._evaluate_candidates(task, candidates)
         with HarnessMemory(self.db_path) as memory:
             memory.add_action_decision(
                 task_id,
@@ -169,6 +167,19 @@ class HarnessService:
                 [{"action_id": item["action_id"]} for item in decisions],
                 {"action_id": chosen["action_id"]} if chosen else None,
                 chosen["safety"] if chosen else {"decision": "deny", "reason": "no candidate"},
+            )
+            memory.record_experience(
+                task_id=task_id,
+                phase="dry_run",
+                status="completed",
+                decision_policy="deterministic_safety_first",
+                model_used=False,
+                model_unavailable_reason="no_current_runtime_action_model",
+                before_state=self._experience_before_state(task, candidates, "dry_run"),
+                after_state={"task_status": memory.get_task(task_id)["status"], "dry_run": True},
+                outcome={"chosen_action": chosen["action_id"] if chosen else None, "executed": False},
+                learning_masks={"candidate_outcomes_known": False, "safety_known": True, "selection_known": True},
+                candidates=self._experience_candidates(task, decisions, chosen["action_id"] if chosen else None),
             )
             memory.add_event(task_id, "dry_run", {"decisions": decisions, "chosen": chosen})
         return {"task_id": task_id, "mode": "dry_run", "candidate_decisions": decisions, "chosen": chosen}
@@ -188,31 +199,88 @@ class HarnessService:
             memory.transition_task(task_id, "running", {})
             memory.transition_task(task_id, "deciding", {})
 
-        chosen_action, safety = self._choose_first_allowed(task, candidates)
+        decisions, chosen = self._evaluate_candidates(task, candidates)
+        chosen_action = chosen["action_id"] if chosen else None
+        safety_payload = chosen["safety"] if chosen else None
         with HarnessMemory(self.db_path) as memory:
             memory.add_action_decision(
                 task_id,
                 0,
                 [{"action_id": action_id} for action_id in candidates],
                 {"action_id": chosen_action} if chosen_action else None,
-                safety.as_dict() if safety else {"decision": "deny"},
+                safety_payload if safety_payload else {"decision": "deny"},
             )
-        if chosen_action is None or safety is None:
-            return self._fail_task(task_id, "safety_denied_all_actions", {"candidates": candidates})
-        if safety.decision == "requires_approval":
+        if chosen_action is None or safety_payload is None:
             with HarnessMemory(self.db_path) as memory:
-                memory.transition_task(task_id, "waiting_approval", safety.as_dict())
-            return {"task_id": task_id, "status": "waiting_approval", "safety": safety.as_dict()}
-        if safety.decision == "dry_run_only":
+                memory.record_experience(
+                    task_id=task_id,
+                    phase="run",
+                    status="failed",
+                    decision_policy="deterministic_safety_first",
+                    model_used=False,
+                    model_unavailable_reason="no_current_runtime_action_model",
+                    before_state=self._experience_before_state(task, candidates, "deciding"),
+                    after_state={"task_status": "failed"},
+                    outcome={"failure_bucket": "safety_denied_all_actions"},
+                    learning_masks={"candidate_outcomes_known": False, "safety_known": True, "selection_known": True},
+                    candidates=self._experience_candidates(task, decisions, None),
+                )
+            return self._fail_task(task_id, "safety_denied_all_actions", {"candidates": candidates})
+        if safety_payload.get("decision") == "requires_approval":
+            with HarnessMemory(self.db_path) as memory:
+                memory.transition_task(task_id, "waiting_approval", safety_payload)
+                memory.record_experience(
+                    task_id=task_id,
+                    phase="run",
+                    status="waiting_approval",
+                    decision_policy="deterministic_safety_first",
+                    model_used=False,
+                    model_unavailable_reason="no_current_runtime_action_model",
+                    before_state=self._experience_before_state(task, candidates, "deciding"),
+                    after_state={"task_status": "waiting_approval"},
+                    outcome={"chosen_action": chosen_action, "approval_required": True},
+                    learning_masks={"candidate_outcomes_known": False, "approval_known": True, "safety_known": True, "selection_known": True},
+                    candidates=self._experience_candidates(task, decisions, chosen_action),
+                )
+            return {"task_id": task_id, "status": "waiting_approval", "safety": safety_payload}
+        if safety_payload.get("decision") == "dry_run_only":
             with HarnessMemory(self.db_path) as memory:
                 memory.set_task_completed(task_id, {"dry_run_only": True, "chosen_action": chosen_action})
-            return {"task_id": task_id, "status": "completed", "dry_run_only": True, "chosen_action": chosen_action, "safety": safety.as_dict()}
+                memory.record_experience(
+                    task_id=task_id,
+                    phase="run",
+                    status="completed",
+                    decision_policy="deterministic_safety_first",
+                    model_used=False,
+                    model_unavailable_reason="no_current_runtime_action_model",
+                    before_state=self._experience_before_state(task, candidates, "deciding"),
+                    after_state={"task_status": "completed", "dry_run_only": True},
+                    outcome={"chosen_action": chosen_action, "dry_run_only": True},
+                    learning_masks={"candidate_outcomes_known": False, "safety_known": True, "selection_known": True},
+                    candidates=self._experience_candidates(task, decisions, chosen_action),
+                )
+            return {"task_id": task_id, "status": "completed", "dry_run_only": True, "chosen_action": chosen_action, "safety": safety_payload}
 
         with HarnessMemory(self.db_path) as memory:
             memory.transition_task(task_id, "executing", {"action_id": chosen_action})
         result = self._execute(chosen_action, task)
         self._record_execution(task_id, chosen_action, result)
-        return {"task_id": task_id, "status": "completed" if result["success"] else "failed", "action": chosen_action, "safety": safety.as_dict(), "execution_result": result}
+        final_status = "completed" if result["success"] else "failed"
+        with HarnessMemory(self.db_path) as memory:
+            memory.record_experience(
+                task_id=task_id,
+                phase="run",
+                status=final_status,
+                decision_policy="deterministic_safety_first",
+                model_used=False,
+                model_unavailable_reason="no_current_runtime_action_model",
+                before_state=self._experience_before_state(task, candidates, "executing"),
+                after_state={"task_status": final_status, "action_id": chosen_action, "success": bool(result["success"])},
+                outcome=self._experience_outcome(result),
+                learning_masks={"candidate_outcomes_known": True, "safety_known": True, "selection_known": True},
+                candidates=self._experience_candidates(task, decisions, chosen_action, executed_action=chosen_action, result=result),
+            )
+        return {"task_id": task_id, "status": final_status, "action": chosen_action, "safety": safety_payload, "execution_result": result}
 
     def approve(self, task_id: str, *, approved_by: str = "user", reason: str | None = None) -> dict[str, Any]:
         with HarnessMemory(self.db_path) as memory:
@@ -247,6 +315,14 @@ class HarnessService:
         source = str(payload.get("source") or "explicit_user_request").strip()
         confidence = float(payload.get("confidence") if payload.get("confidence") is not None else 1.0)
         expires_at = payload.get("expires_at")
+        if key not in ALLOWED_PREFERENCE_KEYS:
+            raise ValueError(f"unknown preference key: {key}")
+        if scope not in ALLOWED_PREFERENCE_SCOPES:
+            raise ValueError(f"unknown preference scope: {scope}")
+        if source != "explicit_user_request":
+            raise ValueError("preference source must be explicit_user_request")
+        if confidence < 0.0 or confidence > 1.0:
+            raise ValueError("preference confidence must be between 0 and 1")
         with HarnessMemory(self.db_path) as memory:
             preference = memory.set_preference(user_id, key, value, scope=scope, source=source, confidence=confidence, expires_at=expires_at)
         return {"saved": True, "preference": preference}
@@ -321,6 +397,20 @@ class HarnessService:
     def _candidate_actions(self, task: TaskSpec) -> list[str]:
         return [action_id for action_id in task.allowed_actions if action_id not in task.blocked_actions]
 
+    def _evaluate_candidates(self, task: TaskSpec, candidates: list[str]) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        decisions = []
+        chosen_requires_approval = None
+        chosen = None
+        for action_id in candidates:
+            safety = check_action_safety(task, action_id, catalog=self.catalog)
+            item = {"action_id": action_id, "safety": safety.as_dict()}
+            decisions.append(item)
+            if chosen is None and safety.decision in {"allow", "dry_run_only"}:
+                chosen = item
+            if safety.decision == "requires_approval" and chosen_requires_approval is None:
+                chosen_requires_approval = item
+        return decisions, chosen or chosen_requires_approval
+
     def _choose_first_allowed(self, task: TaskSpec, candidates: list[str]):
         chosen_requires_approval = None
         for action_id in candidates:
@@ -361,6 +451,70 @@ class HarnessService:
             memory.set_task_failed(task_id, analysis)
         return {"task_id": task_id, "status": "failed", "failure_bucket": bucket, "analysis": analysis}
 
+    def _experience_before_state(self, task: TaskSpec, candidates: list[str], phase: str) -> dict[str, Any]:
+        params = task.context.get("params", {}) if isinstance(task.context.get("params", {}), dict) else {}
+        return {
+            "phase": phase,
+            "task_id": task.task_id,
+            "target": task.target,
+            "mode": task.mode,
+            "risk_level": task.risk_level,
+            "requires_approval": task.requires_approval,
+            "allowed_actions": list(task.allowed_actions),
+            "blocked_actions": list(task.blocked_actions),
+            "candidate_actions": list(candidates),
+            "params_redacted": redact_text(str(params), max_chars=800),
+        }
+
+    def _experience_candidates(
+        self,
+        task: TaskSpec,
+        decisions: list[dict[str, Any]],
+        chosen_action: str | None,
+        *,
+        executed_action: str | None = None,
+        result: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        params = task.context.get("params", {}) if isinstance(task.context.get("params", {}), dict) else {}
+        items = []
+        for index, decision in enumerate(decisions):
+            action_id = str(decision["action_id"])
+            executed = bool(executed_action and action_id == executed_action)
+            known = bool(executed and result is not None)
+            items.append(
+                {
+                    "candidate_index": index,
+                    "action_id": action_id,
+                    "params": params if action_id == chosen_action else {},
+                    "safety_decision": decision.get("safety") or {},
+                    "model_score": {"model_used": False, "reason": "no_current_runtime_action_model"},
+                    "selected": action_id == chosen_action,
+                    "executed": executed,
+                    "execution_result_known": known,
+                    "outcome": self._experience_outcome(result) if known and result else {},
+                    "target_mask": {
+                        "success": known,
+                        "reward": known,
+                        "duration_seconds": known,
+                        "failure_present": known,
+                    },
+                }
+            )
+        return items
+
+    def _experience_outcome(self, result: dict[str, Any] | None) -> dict[str, Any]:
+        if not result:
+            return {}
+        success = bool(result.get("success"))
+        return {
+            "action_id": result.get("action_id"),
+            "success": success,
+            "reward": 1.0 if success else -1.0,
+            "duration_seconds": _duration_seconds(result.get("started_at"), result.get("ended_at")),
+            "failure_present": not success or bool(result.get("error_type")),
+            "error_type": result.get("error_type"),
+        }
+
 
 def _resolve_work_queue(work_queue: WorkQueue | None) -> tuple[WorkQueue | None, str | None]:
     if work_queue is not None:
@@ -369,3 +523,16 @@ def _resolve_work_queue(work_queue: WorkQueue | None) -> tuple[WorkQueue | None,
         return build_work_queue_from_env(), None
     except WorkQueueError as exc:
         return None, str(exc)
+
+
+def _duration_seconds(started_at: Any, ended_at: Any) -> float:
+    from datetime import datetime
+
+    try:
+        if not started_at or not ended_at:
+            return 0.0
+        start = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+        end = datetime.fromisoformat(str(ended_at).replace("Z", "+00:00"))
+        return max(0.0, (end - start).total_seconds())
+    except ValueError:
+        return 0.0

@@ -5,6 +5,8 @@ import pytest
 from neurokernel_seed.harness.action_catalog import default_action_catalog
 from neurokernel_seed.harness.executors import readonly_system
 from neurokernel_seed.harness.executors.readonly_system import ReadOnlyExecutor
+from neurokernel_seed.harness.executors.benchmark import BenchmarkExecutor
+from neurokernel_seed.harness.memory import HarnessMemory
 from neurokernel_seed.harness.service import HarnessService
 
 
@@ -60,6 +62,15 @@ def test_readonly_executor_cpu_per_core_usage_is_read_only(monkeypatch, tmp_path
 
     assert result.success
     assert calls == [{"interval": 0.2, "percpu": True}]
+
+
+def test_benchmark_executor_requires_explicit_model(tmp_path):
+    executor = BenchmarkExecutor(project_root=tmp_path)
+
+    result = executor.execute("run_safe_benchmark", {"episodes": 1})
+
+    assert not result.success
+    assert result.error_type == "ValueError"
 
 
 def test_default_catalog_includes_cpu_per_core_usage():
@@ -183,6 +194,36 @@ def test_harness_service_runs_readonly_task_and_records_result(tmp_path):
     fetched = service.get_task(task_id)
     assert fetched["task"]["status"] == "completed"
     assert any(event["event_type"] == "completed" for event in fetched["events"])
+
+    with HarnessMemory(db) as memory:
+        experiences = memory.recent_experiences(task_id=task_id)
+        assert len(experiences) == 1
+        experience = memory.get_experience(experiences[0]["experience_id"])
+
+    assert experience["phase"] == "run"
+    assert experience["status"] == "completed"
+    assert experience["decision_policy"] == "deterministic_safety_first"
+    assert experience["model_used"] is False
+    assert experience["model_unavailable_reason"] == "no_current_runtime_action_model"
+    assert len(experience["candidates"]) == 1
+    candidate = experience["candidates"][0]
+    assert candidate["action_id"] == "list_artifacts"
+    assert candidate["selected"] is True
+    assert candidate["executed"] is True
+    assert candidate["execution_result_known"] is True
+    assert candidate["target_mask_json"] == {
+        "success": True,
+        "reward": True,
+        "duration_seconds": True,
+        "failure_present": True,
+    }
+
+
+def test_harness_service_rejects_unknown_preference_key(tmp_path):
+    service = HarnessService(db_path=tmp_path / "harness.db", project_root=tmp_path)
+
+    with pytest.raises(ValueError, match="unknown preference key"):
+        service.set_preference({"user_id": "discord:1", "key": "private_token", "value": "abc"})
 
 
 def test_harness_service_keeps_approval_task_waiting(tmp_path):

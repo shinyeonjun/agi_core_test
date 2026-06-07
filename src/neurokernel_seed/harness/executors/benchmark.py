@@ -19,7 +19,10 @@ class BenchmarkExecutor:
         try:
             from neurokernel_seed.eval.benchmark import BenchmarkConfig, run_benchmark
 
-            model = self._resolve_project_path(str(params.get("model") or "artifacts/world_model_slot_v2_model_needed_v3.onnx"))
+            model_param = str(params.get("model") or "").strip()
+            if not model_param:
+                raise ValueError("model param is required")
+            model = self._resolve_project_path(model_param)
             episodes = int(params.get("episodes") or 5)
             if episodes < 1 or episodes > 50:
                 raise ValueError("episodes must be between 1 and 50")
@@ -40,4 +43,3 @@ class BenchmarkExecutor:
         except ValueError as exc:
             raise ValueError(f"path escapes project root: {path}") from exc
         return target
-

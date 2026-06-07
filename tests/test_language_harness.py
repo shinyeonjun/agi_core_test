@@ -51,6 +51,17 @@ def test_language_to_core_routes_memory_lookup_from_catalog_without_codex(tmp_pa
     assert result["requires_confirmation"] is False
 
 
+def test_language_to_core_routes_model_file_lookup_to_artifacts_without_codex(tmp_path):
+    harness = CodexLanguageHarness(_missing_codex_config(tmp_path))
+
+    result = harness.to_core("모델파일위치 어디있고 모델파일이름 뭐임?")
+
+    assert result["intent"] == "task"
+    assert result["task_spec"]["allowed_actions"] == ["list_artifacts"]
+    assert result["task_spec"]["context"]["params"]["path"] == "artifacts"
+    assert result["requires_confirmation"] is False
+
+
 def test_language_to_core_routes_symptom_diagnosis_from_catalog_without_codex(tmp_path):
     harness = CodexLanguageHarness(_missing_codex_config(tmp_path))
 

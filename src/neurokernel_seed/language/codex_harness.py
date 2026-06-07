@@ -246,6 +246,11 @@ def _weighted_action_terms(action: ActionDefinition) -> dict[str, float]:
         weights[term] = max(weights.get(term, 0.0), 2.0)
     for term in _tokenize_for_match(action.title):
         weights[term] = max(weights.get(term, 0.0), 3.0)
+    for term in _tokenize_for_match(action.description):
+        weights[term] = max(weights.get(term, 0.0), 1.5)
+    for example in action.examples:
+        for term in _tokenize_for_match(str(example)):
+            weights[term] = max(weights.get(term, 0.0), 1.5)
     for term in _tokenize_for_match(action.role):
         weights[term] = max(weights.get(term, 0.0), 0.5)
     for name in action.params_schema:

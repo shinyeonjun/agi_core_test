@@ -1,64 +1,65 @@
-# Training Pipeline v1
+# 모델 학습/배포 파이프라인
 
-모델 학습은 노트북에서 돌리고, 결과 모델은 오렌지파이에 버전 릴리즈로 보낸다.
-기존 모델은 덮어쓰지 않는다. 새 모델은 `model_releases/<run_name>` 아래에 저장되고, 검증 후 원할 때만 현재 모델로 활성화한다.
+이 문서는 노트북에서 모델을 학습하고, 벤치마크로 검증한 뒤, Orange Pi에 배포하는 흐름을 정의한다.
+
+핵심 원칙은 세 가지다.
+
+- 기존 운영 모델을 조용히 덮어쓰지 않는다.
+- 학습 결과는 벤치마크를 통과한 뒤에만 배포 후보가 된다.
+- 현재 운영 모델, 후보 모델, 실패한 모델을 모두 추적 가능하게 남긴다.
 
 ## 가장 짧은 사용법
 
-`D:\agi_seed`에서 아래처럼 쓴다.
+`D:\agi_seed`에서:
 
 ```cmd
 nk
 ```
 
-그러면 메뉴가 뜬다.
-
-```text
-1. 학습 전 확인
-2. 학습 + 냉정 벤치 저장
-3. 벤치 상위 모델 비교
-4. 냉정 벤치만 다시 실행
-5. 현재 코어 모델 벤치 저장
-6. 선택 모델 오렌지파이 배포
-7. 선택 모델 배포 후 현재 모델로 활성화
-8. 오렌지파이 모델 목록
-9. 현재 활성 모델 확인
-10. 기존 배포 모델 활성화
-```
-
-바로 실행하고 싶으면 아래처럼 쓴다.
+또는 직접:
 
 ```cmd
-nk check
-nk train
-nk bench <run_name>
-nk bench-current
-nk top
-nk deploy <run_name>
-nk deploy-use <run_name>
-nk list
-nk current
-nk use <run_name>
+nk 확인
+nk 학습
+nk 순위
+nk 벤치 <run_name>
+nk 현재벤치
+nk 배포적용 <run_name>
+nk 현재
 ```
 
-`run_name`을 생략하면 feature 파일 이름과 UTC 시간을 섞어서 자동 생성한다.
+## 기본 흐름
+
+```text
+학습 전 확인
+-> 데이터 계약 확인
+-> 학습
+-> 평가
+-> ONNX 변환
+-> gate ablation 벤치
+-> 후보 비교
+-> Orange Pi 배포
+-> 현재 모델 포인터 갱신
+```
+
+`nk 학습`은 배포까지 자동으로 가지 않는다. 학습 모델이 기존 운영 모델보다 나쁜데 바로 붙는 사고를 막기 위해서다.
 
 ## run name이 필요한 이유
 
-`slot_v2_mn_v3_004` 같은 이름은 모델 릴리즈 이름이다.
+`slot_v2_mn_v3_004` 같은 이름은 모델 릴리스 이름이다.
 
-필요한 이유는 세 가지다.
+이름이 필요한 이유:
 
-- 기존 모델을 덮어쓰지 않기 위해서
-- 여러 모델을 나란히 보관하고 비교하기 위해서
-- 새 모델이 이상하면 이전 모델로 되돌리기 위해서
+- 기존 모델을 덮어쓰지 않기 위해
+- 여러 후보 모델을 나란히 비교하기 위해
+- 문제가 생기면 이전 모델로 되돌리기 위해
+- 데이터, 모델, 벤치마크 결과를 한 묶음으로 추적하기 위해
 
-평소에는 직접 안 지어도 된다. `nk train`이 자동으로 만든다.
-특정 실험을 사람이 구분하고 싶을 때만 `nk train 내실험이름`처럼 지정하면 된다.
+`nk 학습`에서 이름을 생략하면 자동 생성된다.
 
 ## 기본 경로
 
-`D:\agi_seed\nk.cmd`는 기본값을 자동으로 잡는다.
+기본 환경값은 `D:\agi_seed\nk.cmd` 또는 환경변수로 설정한다.
 
 ```cmd
 NEUROKERNEL_TRAIN_FEATURES=D:\agi_seed\data\model_ready\features_slot_v2_model_needed_v3.jsonl
@@ -67,86 +68,74 @@ NEUROKERNEL_EDGE_HOST=orangepi5
 NEUROKERNEL_EDGE_PROJECT=/home/ubuntu/projects/neurokernel-agi-seed
 ```
 
-다른 데이터셋으로 학습하고 싶으면 환경변수나 옵션으로 바꾸면 된다.
+## 학습 데이터 계약
 
-## 학습이 하는 일
+현재 world model은 raw 대화, raw 로그, raw Discord 메시지를 직접 학습하지 않는다.
 
-`nk train`은 내부적으로 아래 단계를 한 번에 실행한다.
+학습 입력은 `features*.jsonl`과 그 옆의 `.manifest.json`이다.
 
-1. feature 파일과 manifest 확인
-2. dataset gate 확인
-3. CUDA 학습
-4. world model 평가
-5. action ranking 평가
-6. ONNX export와 검증
-7. gate ablation 냉정 벤치
+학습에 넣을 수 있는 데이터:
 
-`nk train`은 여기서 멈춘다. 바로 오렌지파이에 배포하지 않는다.
-이유는 새 모델이 기존 모델보다 나은지 비교하기 전에는 운영 모델을 건드리지 않기 위해서다.
+- MicroWorld transition feature
+- counterfactual action candidate feature
+- action 결과가 명확히 라벨링된 runtime transition
+- 실패 trace에서 원인/결과가 구조화된 데이터
 
-벤치가 통과하지 못하면 기본적으로 학습 run을 실패 처리한다.
-실험용으로만 실패 결과까지 보고 싶을 때는 내부 CLI의 `--allow-benchmark-failure`를 명시적으로 써야 한다.
+학습에 넣으면 안 되는 데이터:
 
-## 모델 비교
+- `.env`, 토큰, 비밀값
+- 개인정보가 포함된 raw 로그
+- 성공/실패 라벨이 불명확한 데이터
+- schema version이 없는 JSONL
+- train/test/heldout split이 섞인 데이터
+- 실패를 성공처럼 바꾼 synthetic label
 
-최근 학습 결과 중 상위 5개를 보려면:
+자세한 계약은 [docs/11_data_and_no_fallback_contract.md](11_data_and_no_fallback_contract.md)를 따른다.
 
-```cmd
-nk top
-```
+## 모델 비교 기준
 
-정렬 기준은 다음 순서다.
+`nk 순위`는 단순 성공률만 보지 않는다.
 
-1. `hybrid_veto` macro success rate
-2. model-needed signal group count
-3. `hybrid_veto`의 prior 대비 이득
+우선순위:
 
-즉 단순히 “성공률 1.0”만 보는 게 아니라, prior만으로 풀린 건지 모델이 실제로 보탰는지도 같이 본다.
+1. `hybrid_veto` 성공률
+2. model-needed signal group 수
+3. `hybrid_veto`가 prior-only보다 이긴 정도
 
-현재 오렌지파이에 물려 있는 core 모델도 같은 방식으로 벤치 기록을 남길 수 있다.
-
-```cmd
-nk bench-current
-```
-
-이 명령은 오렌지파이의 `current_world_model.onnx`를 노트북으로 가져와서 냉정 벤치를 돌리고, `training_runs/current_core_<release>_<time>` 폴더에 `gate_ablation_result.json`을 저장한다.
-따라서 `nk top`에서 새 모델들과 같은 기준으로 비교할 수 있다.
+즉 “규칙만으로 풀린 모델”보다 “모델 예측이 실제 행동 선택에 기여한 모델”을 더 높게 본다.
 
 ## 배포와 활성화
 
-학습과 비교가 끝난 뒤 선택한 모델을 오렌지파이에 배포한다.
+학습 후보를 Orange Pi에 보내기:
 
 ```cmd
-nk deploy <run_name>
+nk 배포 <run_name>
 ```
 
-배포까지 하고 바로 현재 모델로 바꾸려면:
+보내고 바로 현재 모델로 적용하기:
 
 ```cmd
-nk deploy-use <run_name>
+nk 배포적용 <run_name>
 ```
 
-`deploy`와 `deploy-use`는 로컬 `training_runs/<run_name>` 폴더를 기준으로 배포한다.
-같은 이름의 릴리즈가 오렌지파이에 이미 있으면 실패한다.
-
-## 현재 모델 확인과 기존 릴리즈 활성화
-
-오렌지파이에 저장된 모델 목록:
+이미 배포된 모델로 현재 포인터만 바꾸기:
 
 ```cmd
-nk list
+nk 적용 <run_name>
 ```
 
-현재 활성 모델:
+현재 포인터는 Orange Pi의 `artifacts/current_world_model.onnx`와 `artifacts/current_world_model.manifest.json`이다.
 
-```cmd
-nk current
-```
+## 실패 처리
 
-기존 릴리즈를 현재 모델로 바꾸기:
+실패하면 다른 모델이나 경로로 조용히 넘어가지 않는다.
 
-```cmd
-nk use <run_name>
-```
+예:
 
-`nk use`는 모델 파일을 새로 만들지 않고 `current.json`, `current_world_model.onnx`, `current_world_model.manifest.json` 포인터만 바꾼다.
+- feature manifest가 없으면 실패
+- dataset gate가 떨어지면 실패
+- benchmark가 통과하지 못하면 실패
+- remote release가 이미 있으면 실패
+- current model 파일이 없으면 실패
+
+이 실패는 숨기지 않고 보고한다. 실패를 데이터로 남겨 다음 개선에 쓴다.

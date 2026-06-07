@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 from neurokernel_seed import nk_cli
+from neurokernel_seed.nk_console import menu as nk_menu
 
 
 def _write_ablation(run_dir: Path, *, hybrid_veto: float, prior: float, signal_count: int) -> None:
@@ -43,8 +44,304 @@ def test_nk_top_ranks_training_runs_by_benchmark_quality(tmp_path):
 def test_nk_help_exposes_menu_commands():
     parser = nk_cli._build_parser()
     help_text = parser.format_help()
+    assert "runtime-auto" in help_text
+    assert "runtime-cycle" in help_text
     assert "deploy-use" in help_text
     assert "top" in help_text
+
+
+def test_nk_dashboard_loops_until_exit(monkeypatch, capsys):
+    calls = []
+
+    def fake_run_action(args):
+        calls.append(args.action)
+        if args.action == "current":
+            return {"current": {"release_name": "current_a"}}
+        if args.action == "top":
+            return {"top": []}
+        if args.action == "compare":
+            return {"status": "ok", "current_name": "current_a", "best": None, "needs_deploy": False}
+        raise AssertionError(args.action)
+
+    answers = iter(["compare", "0"])
+    monkeypatch.setattr(nk_cli, "_run_action", fake_run_action)
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    monkeypatch.setattr(nk_cli.sys.stdin, "isatty", lambda: False)
+
+    result = nk_cli._run_dashboard(argparse.Namespace(action=None, run_dir=None, limit=5))
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert calls.count("top") >= 1
+    assert "compare" in output
+    assert "exit" in output
+
+
+def test_nk_menu_shows_three_primary_actions(monkeypatch):
+    monkeypatch.delenv("NEUROKERNEL_RUNTIME_REPLAY_OUT", raising=False)
+    monkeypatch.delenv("NEUROKERNEL_RUNTIME_FEATURES_OUT", raising=False)
+    monkeypatch.delenv("NEUROKERNEL_RUNTIME_ACTION_MODEL_OUT", raising=False)
+    base = argparse.Namespace()
+
+    assert [(item.key, item.action) for item in nk_menu.DASHBOARD_COMMANDS] == [
+        ("1", "runtime-auto"),
+        ("2", "runtime-cycle"),
+        ("3", "compare"),
+        ("4", "deploy-best"),
+        ("0", "exit"),
+    ]
+    auto_args = nk_menu.build_menu_args(base, "runtime-auto")
+    data_args = nk_menu.build_menu_args(base, "runtime-data")
+    feature_args = nk_menu.build_menu_args(base, "runtime-features")
+    train_args = nk_menu.build_menu_args(base, "runtime-train")
+    top_args = nk_menu.build_menu_args(base, "top")
+    cycle_args = nk_menu.build_menu_args(base, "runtime-cycle")
+
+    assert auto_args.limit is None
+    assert data_args.limit is None
+    assert data_args.out == "data/model_ready/runtime_replay.jsonl"
+    assert feature_args.replay == "data/model_ready/runtime_replay.jsonl"
+    assert feature_args.out == "data/model_ready/runtime_features.jsonl"
+    assert train_args.features == "data/model_ready/runtime_features.jsonl"
+    assert train_args.out == "artifacts/runtime_action_model.pt"
+    assert top_args.limit == 5
+    assert cycle_args.deploy_runtime is True
+
+
+def test_nk_compare_reports_current_best_and_deploy_need(tmp_path, monkeypatch):
+    _write_ablation(tmp_path / "best", hybrid_veto=1.0, prior=0.6, signal_count=3)
+    monkeypatch.setattr(
+        nk_cli,
+        "current_model_release",
+        lambda config: {"current": {"release_name": "old_model"}, "remote_host": "orangepi5", "remote_project": "/remote"},
+    )
+
+    result = nk_cli._run_action(argparse.Namespace(action="compare", run_dir=str(tmp_path), limit=5, remote_host=None, remote_project=None, ssh_connect_timeout=10))
+
+    assert result["current_name"] == "old_model"
+    assert result["best_name"] == "best"
+    assert result["needs_deploy"] is True
+
+
+def test_nk_current_reports_world_and_runtime_model_slots(monkeypatch):
+    monkeypatch.setattr(
+        nk_cli,
+        "current_model_release",
+        lambda config: {
+            "status": "ok",
+            "remote_host": "orangepi5",
+            "remote_project": "/remote",
+            "current": {
+                "release_name": "world_a",
+                "primary_model": "/remote/artifacts/current_world_model.onnx",
+                "remote_release_dir": "/remote/artifacts/model_releases/world_a",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_runtime_model_slot",
+        lambda config: {
+            "slot": "runtime_action",
+            "status": "active",
+            "model": "/remote/artifacts/current_runtime_action_model.pt",
+            "data_origin": "runtime_experience_log",
+        },
+    )
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="current",
+            remote_host="orangepi5",
+            remote_project="/remote",
+            ssh_connect_timeout=10,
+        )
+    )
+
+    assert result["model_slots"]["world"]["slot"] == "world"
+    assert result["model_slots"]["world"]["release_name"] == "world_a"
+    assert result["model_slots"]["runtime"]["slot"] == "runtime_action"
+    assert result["model_slots"]["runtime"]["status"] == "active"
+    assert result["model_slots"]["runtime"]["data_origin"] == "runtime_experience_log"
+
+
+def test_nk_deploy_best_skips_when_current_matches_best(tmp_path, monkeypatch):
+    _write_ablation(tmp_path / "best", hybrid_veto=1.0, prior=0.6, signal_count=3)
+    monkeypatch.setattr(
+        nk_cli,
+        "current_model_release",
+        lambda config: {"current": {"release_name": "best"}, "remote_host": "orangepi5", "remote_project": "/remote"},
+    )
+
+    result = nk_cli._run_action(argparse.Namespace(action="deploy-best", run_dir=str(tmp_path), limit=5, remote_host=None, remote_project=None, ssh_connect_timeout=10))
+
+    assert result["status"] == "already_current"
+
+
+def test_nk_deploy_best_deploys_when_best_differs(tmp_path, monkeypatch):
+    _write_ablation(tmp_path / "best", hybrid_veto=1.0, prior=0.6, signal_count=3)
+    captured = {}
+    monkeypatch.setattr(
+        nk_cli,
+        "current_model_release",
+        lambda config: {"current": {"release_name": "old_model"}, "remote_host": "orangepi5", "remote_project": "/remote"},
+    )
+
+    def fake_deploy(source_dir, **kwargs):
+        captured["source_dir"] = source_dir
+        captured["kwargs"] = kwargs
+        return {"remote_release_dir": "/remote/best"}
+
+    monkeypatch.setattr(nk_cli, "deploy_training_run", fake_deploy)
+
+    result = nk_cli._run_action(argparse.Namespace(action="deploy-best", run_dir=str(tmp_path), limit=5, remote_host="orangepi5", remote_project="/remote", ssh_connect_timeout=10))
+
+    assert result["status"] == "deployed_and_activated"
+    assert result["run_name"] == "best"
+    assert captured["source_dir"] == tmp_path / "best"
+    assert captured["kwargs"]["activate"] is True
+
+
+def test_nk_runtime_auto_runs_data_features_and_training(tmp_path, monkeypatch):
+    replay = tmp_path / "runtime_replay.jsonl"
+    features = tmp_path / "runtime_features.jsonl"
+    model = tmp_path / "runtime_action_model.pt"
+    report_dir = tmp_path / "reports"
+    calls = []
+
+    def fake_runtime_data(args):
+        calls.append(("data", args.out))
+        return {
+            "ready_for_runtime_training": True,
+            "source": "edge",
+            "validation": {"rows": 12},
+            "gates": {"gates": {}},
+        }
+
+    def fake_runtime_features(args):
+        calls.append(("features", args.replay, args.out))
+        return {
+            "ready_for_runtime_model_training": True,
+            "validation": {"input_dim": 24},
+            "gates": {"gates": {}},
+        }
+
+    def fake_runtime_train(args):
+        calls.append(("train", args.features, args.out))
+        return {
+            "checkpoint": str(model),
+            "metrics": str(model.with_suffix(".metrics.json")),
+            "test": {"success_accuracy": 0.8, "reward_mae": 0.2},
+        }
+
+    monkeypatch.setenv("NEUROKERNEL_RUNTIME_PIPELINE_DIR", str(report_dir))
+    monkeypatch.setattr(nk_cli, "_run_runtime_data_action", fake_runtime_data)
+    monkeypatch.setattr(nk_cli, "_run_runtime_features_action", fake_runtime_features)
+    monkeypatch.setattr(nk_cli, "_run_runtime_training_action", fake_runtime_train)
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="runtime-auto",
+            source="edge",
+            db="data/harness.db",
+            remote_host="orangepi5",
+            remote_project="/home/ubuntu/projects/neurokernel-agi-seed",
+            remote_db="data/harness.db",
+            cache_db=None,
+            replay_out=str(replay),
+            features_out=str(features),
+            model_out=str(model),
+            test_ratio=0.2,
+            min_rows=10,
+            min_actions=1,
+            epochs=1,
+            batch_size=8,
+            device="cpu",
+            patience=3,
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert calls == [
+        ("data", str(replay)),
+        ("features", str(replay), str(features)),
+        ("train", str(features), str(model)),
+    ]
+    assert Path(result["report"]).exists()
+
+
+def test_nk_runtime_cycle_trains_deploys_and_rechecks_current(tmp_path, monkeypatch):
+    replay = tmp_path / "runtime_replay.jsonl"
+    features = tmp_path / "runtime_features.jsonl"
+    model = tmp_path / "runtime_action_model.pt"
+    report_dir = tmp_path / "reports"
+    calls = []
+
+    monkeypatch.setenv("NEUROKERNEL_RUNTIME_PIPELINE_DIR", str(report_dir))
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_data_action",
+        lambda args: calls.append(("data", args.out)) or {"ready_for_runtime_training": True, "validation": {"rows": 12}, "gates": {"gates": {}}},
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_features_action",
+        lambda args: calls.append(("features", args.replay, args.out))
+        or {"ready_for_runtime_model_training": True, "validation": {"input_dim": 24}, "gates": {"gates": {}}},
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_runtime_training_action",
+        lambda args: calls.append(("train", args.features, args.out))
+        or {"checkpoint": str(model), "manifest": str(model.with_suffix(".manifest.json")), "metrics": str(model.with_suffix(".metrics.json"))},
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_deploy_runtime_action",
+        lambda args: calls.append(("deploy", args.model))
+        or {"status": "deployed_and_activated", "remote_model": "/remote/artifacts/current_runtime_action_model.pt"},
+    )
+    monkeypatch.setattr(
+        nk_cli,
+        "_run_current",
+        lambda args: calls.append(("current", args.remote_host))
+        or {"model_slots": {"runtime": {"status": "active", "model": "/remote/artifacts/current_runtime_action_model.pt"}}},
+    )
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="runtime-cycle",
+            source="edge",
+            db="data/harness.db",
+            remote_host="orangepi5",
+            remote_project="/remote",
+            remote_db="data/harness.db",
+            cache_db=None,
+            replay_out=str(replay),
+            features_out=str(features),
+            model_out=str(model),
+            test_ratio=0.2,
+            min_rows=10,
+            min_actions=1,
+            epochs=1,
+            batch_size=8,
+            device="cpu",
+            patience=3,
+            deploy_runtime=True,
+            ssh_connect_timeout=10,
+        )
+    )
+
+    assert result["pipeline"] == "runtime_action_cycle_v1"
+    assert result["steps"]["runtime_deploy"]["status"] == "deployed_and_activated"
+    assert result["steps"]["current_after"]["model_slots"]["runtime"]["status"] == "active"
+    assert calls == [
+        ("data", str(replay)),
+        ("features", str(replay), str(features)),
+        ("train", str(features), str(model)),
+        ("deploy", str(model)),
+        ("current", "orangepi5"),
+    ]
 
 
 def test_nk_train_runs_local_pipeline_without_deploy(tmp_path, monkeypatch):
@@ -79,6 +376,224 @@ def test_nk_train_runs_local_pipeline_without_deploy(tmp_path, monkeypatch):
     assert result["status"] == "completed"
     assert captured["config"].run_name == "local_run"
     assert captured["config"].run_gate_ablation is True
+
+
+def test_nk_data_checks_training_feature_contract(tmp_path, monkeypatch):
+    features = tmp_path / "features.jsonl"
+    features.write_text("{}", encoding="utf-8")
+    captured = {}
+
+    def fake_validate(path):
+        captured["validate"] = Path(path)
+        return {"rows": 10, "schema_version": "neurokernel-slot-transition-v2", "input_dim": 41, "target_dim": 9}
+
+    def fake_gates(path):
+        captured["gates"] = Path(path)
+        return {"passed": True, "audit_shortage_report": []}
+
+    monkeypatch.setattr(nk_cli, "validate_slot_features", fake_validate)
+    monkeypatch.setattr(nk_cli, "check_slot_dataset_gates", fake_gates)
+
+    result = nk_cli._run_action(argparse.Namespace(action="data", features=str(features)))
+
+    assert result["ready_for_training"] is True
+    assert captured == {"validate": features, "gates": features}
+
+
+def test_nk_runtime_features_exports_and_checks_contract(tmp_path, monkeypatch):
+    replay = tmp_path / "runtime_replay.jsonl"
+    features = tmp_path / "runtime_features.jsonl"
+    captured = {}
+
+    def fake_export(source, out, *, test_ratio):
+        captured["export"] = (Path(source), Path(out), test_ratio)
+        return {"rows": 3, "schema_version": "neurokernel-runtime-action-feature-v1", "input_dim": 10, "target_dim": 4}
+
+    def fake_validate(path):
+        captured["validate"] = Path(path)
+        return {"accepted": True, "rows": 3, "schema_version": "neurokernel-runtime-action-feature-v1", "input_dim": 10, "target_dim": 4}
+
+    def fake_gates(path, *, min_rows, min_actions):
+        captured["gates"] = (Path(path), min_rows, min_actions)
+        return {"passed": True, "ready_for_runtime_model_training": True, "warnings": []}
+
+    monkeypatch.setattr(nk_cli, "export_runtime_features", fake_export)
+    monkeypatch.setattr(nk_cli, "validate_runtime_features", fake_validate)
+    monkeypatch.setattr(nk_cli, "check_runtime_feature_gates", fake_gates)
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="runtime-features",
+            replay=str(replay),
+            out=str(features),
+            test_ratio=0.1,
+            min_rows=2,
+            min_actions=1,
+        )
+    )
+
+    assert result["ready_for_runtime_model_training"] is True
+    assert captured["export"] == (replay, features, 0.1)
+    assert captured["validate"] == features
+    assert captured["gates"] == (features, 2, 1)
+
+
+def test_nk_runtime_data_pulls_edge_db_to_cache(tmp_path, monkeypatch):
+    cache_db = tmp_path / "cache" / "harness.db"
+    replay = tmp_path / "runtime_replay.jsonl"
+    captured = {}
+
+    def fake_copy(remote_host, remote_path, local_path):
+        captured["copy"] = (remote_host, remote_path, Path(local_path))
+        Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(local_path).write_text("db", encoding="utf-8")
+
+    def fake_etl(config):
+        captured["etl"] = config
+        return {
+            "status": "passed",
+            "out": str(config.out_path),
+            "validation": {"rows": 1, "success_rows": 1, "failure_rows": 0, "schema_version": "neurokernel-runtime-action-v1"},
+            "gates": {"passed": True, "gates": {}},
+            "ready_for_runtime_training": True,
+        }
+
+    monkeypatch.setattr(nk_cli, "_copy_remote_file", fake_copy)
+    monkeypatch.setattr(nk_cli, "run_runtime_replay_etl", fake_etl)
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="runtime-data",
+            source="edge",
+            remote_host="orangepi5",
+            remote_project="/home/ubuntu/projects/neurokernel-agi-seed",
+            remote_db="data/harness.db",
+            cache_db=str(cache_db),
+            db="data/harness.db",
+            out=str(replay),
+            limit=None,
+            min_rows=1,
+            allow_no_execution=False,
+        )
+    )
+
+    assert result["source"] == "edge"
+    assert captured["copy"] == ("orangepi5", "/home/ubuntu/projects/neurokernel-agi-seed/data/harness.db", cache_db)
+    assert captured["etl"].db_path == cache_db
+
+
+def test_nk_runtime_data_reports_missing_local_db(tmp_path):
+    missing = tmp_path / "missing.db"
+
+    try:
+        nk_cli._run_action(
+            argparse.Namespace(
+                action="runtime-data",
+                source="local",
+                db=str(missing),
+                out=str(tmp_path / "runtime_replay.jsonl"),
+                limit=None,
+                min_rows=1,
+                allow_no_execution=False,
+            )
+        )
+    except nk_cli.ModelReleaseError as exc:
+        assert "사용데이터 입력 실패" in str(exc)
+        assert str(missing) in str(exc)
+    else:
+        raise AssertionError("missing local db should fail explicitly")
+
+
+def test_nk_runtime_train_uses_runtime_action_model(tmp_path, monkeypatch):
+    features = tmp_path / "runtime_features.jsonl"
+    out = tmp_path / "runtime_action_model.pt"
+    captured = {}
+
+    def fake_train(feature_path, out_path, **kwargs):
+        captured["feature_path"] = Path(feature_path)
+        captured["out_path"] = Path(out_path)
+        captured["kwargs"] = kwargs
+        return {
+            "checkpoint": str(out_path),
+            "metrics": str(Path(out_path).with_suffix(".metrics.json")),
+            "device": "cpu",
+            "best_epoch": 2,
+            "train": {"success_accuracy": 1.0, "reward_mae": 0.1},
+            "test": {"success_accuracy": 0.9, "reward_mae": 0.2},
+        }
+
+    monkeypatch.setattr(nk_cli, "train_runtime_action_model", fake_train)
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="runtime-train",
+            features=str(features),
+            out=str(out),
+            epochs=5,
+            batch_size=8,
+            lr=0.001,
+            weight_decay=0.0001,
+            hidden_dim=16,
+            hidden_layers=1,
+            device="cpu",
+            patience=3,
+            min_rows=4,
+            min_actions=2,
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert captured["feature_path"] == features
+    assert captured["out_path"] == out
+    assert captured["kwargs"]["min_actions"] == 2
+    assert result["test"]["success_accuracy"] == 0.9
+
+
+def test_nk_deploy_runtime_activates_runtime_slot(tmp_path, monkeypatch):
+    model = tmp_path / "runtime_action_model.pt"
+    manifest = tmp_path / "runtime_action_model.manifest.json"
+    model.write_text("model", encoding="utf-8")
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema_version": "neurokernel-runtime-action-model-v1",
+                "model_slot": "runtime_action_model",
+                "data_origin": "runtime_experience_log",
+                "activation_status": "candidate",
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return Result()
+
+    monkeypatch.setattr(nk_cli.subprocess, "run", fake_run)
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="deploy-runtime",
+            model=str(model),
+            remote_host="orangepi5",
+            remote_project="/remote",
+            ssh_connect_timeout=10,
+        )
+    )
+
+    assert result["status"] == "deployed_and_activated"
+    assert result["remote_model"] == "/remote/artifacts/current_runtime_action_model.pt"
+    assert result["remote_manifest"] == "/remote/artifacts/current_runtime_action_model.manifest.json"
+    assert result["model_slots"]["runtime"]["status"] == "active"
+    assert any(call[0] == "scp" and str(model) in call for call in calls)
+    assert any(call[0] == "scp" and str(manifest) in call for call in calls)
+    assert any(call[0] == "ssh" and "current_runtime_action_model.pt" in call[-1] for call in calls)
 
 
 def test_nk_deploy_uses_existing_training_run(tmp_path, monkeypatch):
