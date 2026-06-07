@@ -67,7 +67,16 @@ class ActivationService:
         if self.config.require_clean_git:
             status = _git_output(self.runner, ["git", "status", "--porcelain"], cwd=project_root, commands=commands)
             if status.strip():
-                raise ActivationError("live repository has uncommitted changes; activation requires a clean tree")
+                payload = {
+                    "stage": "clean_git",
+                    "error": "live repository has uncommitted changes; activation requires a clean tree",
+                    "dirty_files": status.strip().splitlines()[:80],
+                    "commands": commands,
+                }
+                with HarnessMemory(self.config.db_path) as memory:
+                    memory.add_work_event(work_id, "activation_failed", actor=actor, payload=payload)
+                    _transition_if_possible(memory, work_id, "reviewing", actor=actor, payload=payload)
+                raise ActivationError(payload["error"])
 
         try:
             _run_checked(self.runner, ["git", "apply", "--check", "--whitespace=nowarn", str(patch_path)], cwd=project_root, timeout_seconds=60, commands=commands)

@@ -135,6 +135,13 @@ def test_activation_blocks_dirty_live_repo(tmp_path):
             )
         ).activate_work_item(work_id, actor="test")
 
+    work = service.work_item(work_id)["work_item"]
+    assert work["status"] == "reviewing"
+    events = service.work_item(work_id)["events"]
+    failure = [event for event in events if event["event_type"] == "activation_failed"][-1]
+    assert failure["payload_json"]["stage"] == "clean_git"
+    assert "README.md" in "\n".join(failure["payload_json"]["dirty_files"])
+
 
 def test_activation_rolls_back_when_tests_fail(tmp_path):
     project = _make_git_project(tmp_path)

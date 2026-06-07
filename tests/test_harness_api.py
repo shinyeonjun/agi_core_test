@@ -54,3 +54,25 @@ def test_core_api_memory_context_includes_preferences_and_recent_messages(tmp_pa
     payload = response.json()
     assert payload["user_preferences"]["response_length"] == "short"
     assert payload["recent_messages"][0]["content"] == "?꾧퉴 紐⑤뜽 遊먯쨾"
+
+
+@pytest.mark.skipif(importlib.util.find_spec("fastapi") is None, reason="fastapi not installed")
+def test_core_api_activation_error_returns_conflict_detail(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from neurokernel_seed.api.server import create_app
+    from neurokernel_seed.harness.activation import ActivationError
+    from neurokernel_seed.harness.service import HarnessService
+
+    def fail_activation(self, work_id, *, actor="api"):
+        raise ActivationError("live repository has uncommitted changes; activation requires a clean tree")
+
+    monkeypatch.setattr(HarnessService, "activate_work_item", fail_activation)
+    app = create_app(db_path=tmp_path / "harness.db", project_root=tmp_path)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    response = client.post("/work-items/work_1/activate", json={"actor": "test"})
+
+    assert response.status_code == 409
+    payload = response.json()
+    assert payload["detail"]["error_type"] == "activation_failed"
+    assert "clean tree" in payload["detail"]["message"]

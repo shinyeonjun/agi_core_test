@@ -35,7 +35,17 @@ class CoreClient:
                 body = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise CoreClientError(f"Core API HTTP {exc.code}: {detail}") from exc
+            try:
+                parsed = json.loads(detail)
+            except json.JSONDecodeError:
+                message = detail
+            else:
+                payload = parsed.get("detail") if isinstance(parsed, dict) else parsed
+                if isinstance(payload, dict):
+                    message = str(payload.get("message") or payload.get("error") or payload)
+                else:
+                    message = str(payload)
+            raise CoreClientError(f"Core API HTTP {exc.code}: {message}") from exc
         except urllib.error.URLError as exc:
             raise CoreClientError(f"Core API connection failed: {exc.reason}") from exc
         except TimeoutError as exc:

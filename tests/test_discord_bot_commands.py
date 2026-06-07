@@ -1,7 +1,11 @@
 import asyncio
 
+import io
+import urllib.error
+
 import pytest
 
+from neurokernel_seed.discord_bot.core_client import CoreClient, CoreClientError
 from neurokernel_seed.discord_bot.bot import (
     DiscordBotConfig,
     _build_work_status_payload,
@@ -120,6 +124,24 @@ def test_allowed_user_filter_allows_configured_user():
 def test_parse_user_ids_accepts_single_or_many_values():
     assert _parse_user_ids("1") == (1,)
     assert _parse_user_ids("1, 2;3") == (1, 2, 3)
+
+
+def test_core_client_extracts_structured_http_error_message(monkeypatch):
+    body = b'{"detail":{"error_type":"activation_failed","message":"activation requires a clean tree"}}'
+
+    def fail_urlopen(request, timeout):
+        raise urllib.error.HTTPError(
+            url="http://127.0.0.1/work-items/work_1/activate",
+            code=409,
+            msg="Conflict",
+            hdrs={},
+            fp=io.BytesIO(body),
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fail_urlopen)
+
+    with pytest.raises(CoreClientError, match="clean tree"):
+        CoreClient("http://127.0.0.1").post("/work-items/work_1/activate", {"actor": "test"})
 
 
 def test_empty_prefix_routes_unknown_text_to_conversation():

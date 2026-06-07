@@ -3,13 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from neurokernel_seed.harness.activation import ActivationError
 from neurokernel_seed.harness.service import HarnessService
 from neurokernel_seed.language.codex_harness import CodexLanguageHarness
 
 
 def create_app(*, db_path: str | Path = "data/harness.db", project_root: str | Path = "."):
     try:
-        from fastapi import FastAPI
+        from fastapi import FastAPI, HTTPException
     except ImportError as exc:
         raise RuntimeError("fastapi is required to serve the Core API. Install with: pip install fastapi uvicorn") from exc
 
@@ -88,7 +89,14 @@ def create_app(*, db_path: str | Path = "data/harness.db", project_root: str | P
     @app.post("/work-items/{work_id}/activate")
     def work_item_activate(work_id: str, payload: dict[str, Any] | None = None):
         payload = payload or {}
-        return service.activate_work_item(work_id, actor=str(payload.get("actor") or "api"))
+        try:
+            return service.activate_work_item(work_id, actor=str(payload.get("actor") or "api"))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": str(exc), "work_id": work_id}) from exc
+        except ActivationError as exc:
+            raise HTTPException(status_code=409, detail={"error_type": "activation_failed", "message": str(exc), "work_id": work_id}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error_type": "invalid_request", "message": str(exc), "work_id": work_id}) from exc
 
     @app.post("/work/route")
     def work_route(payload: dict[str, Any]):
