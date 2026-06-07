@@ -458,6 +458,34 @@ class HarnessMemory:
         row = self.conn.execute("SELECT * FROM conversation_messages WHERE id=?", (cur.lastrowid,)).fetchone()
         return _row(row)
 
+    def link_conversation_message_to_task(
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+        channel_id: str | None = None,
+        message_id: str | None = None,
+        role: str | None = None,
+    ) -> int:
+        clauses = ["user_id=?"]
+        params: list[Any] = [_required_text(user_id, "user_id")]
+        if channel_id:
+            clauses.append("channel_id=?")
+            params.append(channel_id)
+        if message_id:
+            clauses.append("message_id=?")
+            params.append(message_id)
+        if role:
+            clauses.append("role=?")
+            params.append(role)
+        where = " AND ".join(clauses)
+        row = self.conn.execute(f"SELECT id FROM conversation_messages WHERE {where} ORDER BY id DESC LIMIT 1", params).fetchone()
+        if row is None:
+            return 0
+        cur = self.conn.execute("UPDATE conversation_messages SET linked_task_id=? WHERE id=?", (_required_text(task_id, "task_id"), row["id"]))
+        self.conn.commit()
+        return int(cur.rowcount)
+
     def recent_conversation_messages(self, user_id: str, *, channel_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 300))
         if channel_id:
@@ -508,6 +536,83 @@ class HarnessMemory:
             (user_id, max(1, min(int(limit), 50))),
         ).fetchall()
         return [_row(row) for row in rows]
+
+    def add_interaction_outcome(
+        self,
+        *,
+        source: str = "discord",
+        user_id: str | None = None,
+        channel_id: str | None = None,
+        user_message_id: str | None = None,
+        assistant_message_id: str | None = None,
+        task_id: str | None = None,
+        request_text: str,
+        response_text: str = "",
+        required_outputs: list[str] | None = None,
+        answered_outputs: list[str] | None = None,
+        missing_outputs: list[str] | None = None,
+        answer_quality: str,
+        task_status: str | None = None,
+        action_id: str | None = None,
+        success: bool | None = None,
+    ) -> dict[str, Any]:
+        cur = self.conn.execute(
+            """
+            INSERT INTO interaction_outcomes(
+              source, user_id, channel_id, user_message_id, assistant_message_id,
+              task_id, request_text_redacted, response_text_redacted,
+              required_outputs_json, answered_outputs_json, missing_outputs_json,
+              answer_quality, task_status, action_id, success
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _required_text(source, "source"),
+                user_id,
+                channel_id,
+                user_message_id,
+                assistant_message_id,
+                task_id,
+                redact_text(str(request_text), max_chars=2_000),
+                redact_text(str(response_text), max_chars=2_000),
+                _json(required_outputs or []),
+                _json(answered_outputs or []),
+                _json(missing_outputs or []),
+                _required_text(answer_quality, "answer_quality"),
+                task_status,
+                action_id,
+                None if success is None else int(bool(success)),
+            ),
+        )
+        self._insert_agent_event(
+            event_type="interaction.outcome.recorded",
+            source="interaction_contract",
+            task_id=task_id,
+            actor_id=user_id,
+            payload={
+                "answer_quality": answer_quality,
+                "required_outputs": required_outputs or [],
+                "answered_outputs": answered_outputs or [],
+                "missing_outputs": missing_outputs or [],
+            },
+        )
+        self.conn.commit()
+        row = self.conn.execute("SELECT * FROM interaction_outcomes WHERE id=?", (cur.lastrowid,)).fetchone()
+        return _row(row)
+
+    def interaction_outcomes_for_tasks(self, task_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        if not task_ids:
+            return {}
+        placeholders = ",".join("?" for _ in task_ids)
+        rows = self.conn.execute(
+            f"SELECT * FROM interaction_outcomes WHERE task_id IN ({placeholders}) ORDER BY created_at, id",
+            task_ids,
+        ).fetchall()
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            item = _row(row)
+            grouped.setdefault(str(item.get("task_id")), []).append(item)
+        return grouped
 
     def create_work_item(
         self,

@@ -147,6 +147,7 @@ def _extract_runtime_rows(db: Path, *, limit: int | None = None) -> tuple[list[d
         executions = [_decode_row(row) for row in conn.execute("SELECT * FROM execution_results ORDER BY result_id")]
         traces = [_decode_row(row) for row in conn.execute("SELECT * FROM traces ORDER BY trace_id")]
         experiences, experience_candidates = _load_experience_rows(conn)
+        interactions = _load_interaction_rows(conn)
 
     execution_by_task = _group_executions(executions)
     traces_by_task = defaultdict(list)
@@ -154,6 +155,7 @@ def _extract_runtime_rows(db: Path, *, limit: int | None = None) -> tuple[list[d
         traces_by_task[str(trace["task_id"])].append(trace)
     experience_by_task = _group_experiences(experiences)
     candidates_by_experience = _group_experience_candidates(experience_candidates)
+    interactions_by_task = _group_by_task(interactions)
 
     rows = []
     skipped_missing_task = 0
@@ -168,7 +170,7 @@ def _extract_runtime_rows(db: Path, *, limit: int | None = None) -> tuple[list[d
         execution = _pick_execution(execution_by_task.get(task_id, []), action_id)
         task_traces = traces_by_task.get(task_id, [])
         experience = _pick_experience(experience_by_task.get(task_id, []), execution)
-        rows.append(_runtime_row(task, decision, execution, task_traces, experience, candidates_by_experience))
+        rows.append(_runtime_row(task, decision, execution, task_traces, experience, candidates_by_experience, interactions_by_task.get(task_id, [])))
         if limit is not None and len(rows) >= limit:
             break
     extraction = {
@@ -176,6 +178,7 @@ def _extract_runtime_rows(db: Path, *, limit: int | None = None) -> tuple[list[d
         "decisions_seen": len(decisions),
         "experiences_seen": len(experiences),
         "experience_candidates_seen": len(experience_candidates),
+        "interaction_outcomes_seen": len(interactions),
         "rows_exported": len(rows),
         "skipped_missing_task": skipped_missing_task,
         "limit": limit,
@@ -190,6 +193,7 @@ def _runtime_row(
     traces: list[dict[str, Any]],
     experience: dict[str, Any] | None = None,
     candidates_by_experience: dict[str, list[dict[str, Any]]] | None = None,
+    interactions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     task_spec = _dict_or_empty(task.get("task_spec_json"))
     chosen_action = _dict_or_none(decision.get("chosen_action_json"))
@@ -215,6 +219,7 @@ def _runtime_row(
             "trace_ids": [trace.get("trace_id") for trace in traces],
         },
         "experience": experience_payload,
+        "interaction": _interaction_payload(interactions or []),
         "task": {
             "task_id": task["task_id"],
             "created_at": task.get("created_at"),
@@ -256,6 +261,12 @@ def _load_experience_rows(conn: sqlite3.Connection) -> tuple[list[dict[str, Any]
     return experiences, candidates
 
 
+def _load_interaction_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    if not _table_exists(conn, "interaction_outcomes"):
+        return []
+    return [_decode_row(row) for row in conn.execute("SELECT * FROM interaction_outcomes ORDER BY created_at, id")]
+
+
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
     return row is not None
@@ -272,6 +283,15 @@ def _group_experience_candidates(rows: list[dict[str, Any]]) -> dict[str, list[d
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         grouped[str(row["experience_id"])].append(row)
+    return grouped
+
+
+def _group_by_task(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        task_id = row.get("task_id")
+        if task_id:
+            grouped[str(task_id)].append(row)
     return grouped
 
 
@@ -306,6 +326,26 @@ def _experience_payload(experience: dict[str, Any] | None) -> dict[str, Any]:
         "before_state": _bounded_json(experience.get("before_state_json")),
         "after_state": _bounded_json(experience.get("after_state_json")),
         "learning_masks": _bounded_json(experience.get("learning_masks_json")),
+    }
+
+
+def _interaction_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {"interaction_aligned": False}
+    latest = rows[-1]
+    return {
+        "interaction_aligned": True,
+        "interaction_count": len(rows),
+        "source": latest.get("source"),
+        "user_id_present": bool(latest.get("user_id")),
+        "channel_id_present": bool(latest.get("channel_id")),
+        "required_outputs": _list_or_empty(latest.get("required_outputs_json")),
+        "answered_outputs": _list_or_empty(latest.get("answered_outputs_json")),
+        "missing_outputs": _list_or_empty(latest.get("missing_outputs_json")),
+        "answer_quality": latest.get("answer_quality"),
+        "task_status": latest.get("task_status"),
+        "action_id": latest.get("action_id"),
+        "success": None if latest.get("success") is None else bool(latest.get("success")),
     }
 
 
@@ -450,7 +490,7 @@ def _load_rows(path: str | Path) -> list[dict[str, Any]]:
 
 
 def _source_snapshot(conn: sqlite3.Connection, db: Path) -> dict[str, Any]:
-    tables = ("tasks", "action_decisions", "execution_results", "traces", "work_items", "work_jobs", "agent_events")
+    tables = ("tasks", "action_decisions", "execution_results", "experiences", "experience_candidates", "interaction_outcomes", "conversation_messages", "traces", "work_items", "work_jobs", "agent_events")
     counts = {}
     for table in tables:
         try:

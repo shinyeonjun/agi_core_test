@@ -7,16 +7,17 @@ from .commands import build_preset_task, format_code_block
 from .core_client import CoreClient
 from .language_gateway import humanize, language_to_core, required_text
 from .memory_handlers import remember_task_reference
+from .models import BotResponse
 
 
-async def run_preset(name: str, core: CoreClient, *, user_id: str | None = None, channel_id: str | None = None) -> str:
+async def run_preset(name: str, core: CoreClient, *, user_id: str | None = None, channel_id: str | None = None) -> str | BotResponse:
     if not name:
         return "`uptime`, `disk`, `memory`, `temp`, `artifacts`, `trace` 중 하나를 붙여줘."
     task = build_preset_task(name)
     return await create_and_run(task, core, user_id=user_id, channel_id=channel_id)
 
 
-async def create_and_run(task: dict[str, Any], core: CoreClient, *, user_id: str | None = None, channel_id: str | None = None) -> str:
+async def create_and_run(task: dict[str, Any], core: CoreClient, *, user_id: str | None = None, channel_id: str | None = None) -> str | BotResponse:
     created = await _call(core.post, "/tasks", task)
     if not isinstance(created, dict):
         return format_code_block(created)
@@ -26,7 +27,8 @@ async def create_and_run(task: dict[str, Any], core: CoreClient, *, user_id: str
     payload = await _call(core.post, f"/tasks/{task_id}/run", {})
     if user_id:
         await remember_task_reference(core, user_id=user_id, task_id=str(task_id), task=task, payload=payload)
-    return await humanize(core, payload, user_id=user_id, channel_id=channel_id)
+    reply = await humanize(core, payload, user_id=user_id, channel_id=channel_id)
+    return BotResponse(reply, task_id=str(task_id), metadata={"task": task, "core_result": payload})
 
 
 async def handle_plan(rest: str, core: CoreClient, *, user_id: str | None = None, channel_id: str | None = None) -> str:
@@ -46,7 +48,7 @@ async def handle_plan(rest: str, core: CoreClient, *, user_id: str | None = None
     return f"{reply}\n다만 바로 실행하기엔 확인이 더 필요해."
 
 
-async def handle_do(rest: str, core: CoreClient, *, user_id: str | None = None, channel_id: str | None = None) -> str:
+async def handle_do(rest: str, core: CoreClient, *, user_id: str | None = None, channel_id: str | None = None) -> str | BotResponse:
     if not rest:
         return "무엇을 실행할지 뒤에 적어줘."
     payload = await language_to_core(core, rest, user_id=user_id, channel_id=channel_id)

@@ -11,6 +11,7 @@ from .capability_service import CapabilityProposalService
 from .executors.benchmark import BenchmarkExecutor
 from .executors.readonly_command import ReadOnlyCommandExecutor
 from .executors.readonly_system import ReadOnlyExecutor
+from .interaction_contract import interaction_contract_from_runtime
 from .memory import HarnessMemory
 from .preferences import preference_map
 from .runtime_policy import RuntimeActionPolicy
@@ -427,6 +428,17 @@ class HarnessService:
             )
         return {"saved": True, "message": message}
 
+    def link_message_to_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with HarnessMemory(self.db_path) as memory:
+            updated = memory.link_conversation_message_to_task(
+                user_id=str(payload.get("user_id") or "").strip(),
+                channel_id=str(payload.get("channel_id")).strip() if payload.get("channel_id") is not None else None,
+                message_id=str(payload.get("message_id")).strip() if payload.get("message_id") is not None else None,
+                role=str(payload.get("role")).strip() if payload.get("role") is not None else None,
+                task_id=str(payload.get("task_id") or "").strip(),
+            )
+        return {"updated": updated}
+
     def recent_conversation(self, user_id: str, *, channel_id: str | None = None, limit: int = 20) -> dict[str, Any]:
         with HarnessMemory(self.db_path) as memory:
             messages = memory.recent_conversation_messages(user_id, channel_id=channel_id, limit=limit)
@@ -443,6 +455,35 @@ class HarnessService:
                 result_summary=str(payload.get("result_summary") or ""),
             )
         return {"saved": True, "task_reference": ref}
+
+    def add_interaction_outcome(self, payload: dict[str, Any]) -> dict[str, Any]:
+        task = payload.get("task") if isinstance(payload.get("task"), dict) else None
+        core_result = payload.get("core_result") if isinstance(payload.get("core_result"), dict) else None
+        contract = interaction_contract_from_runtime(
+            request_text=str(payload.get("request_text") or ""),
+            response_text=str(payload.get("response_text") or ""),
+            task=task,
+            core_result=core_result,
+        )
+        with HarnessMemory(self.db_path) as memory:
+            outcome = memory.add_interaction_outcome(
+                source=str(payload.get("source") or "discord"),
+                user_id=str(payload.get("user_id")).strip() if payload.get("user_id") is not None else None,
+                channel_id=str(payload.get("channel_id")).strip() if payload.get("channel_id") is not None else None,
+                user_message_id=str(payload.get("user_message_id")).strip() if payload.get("user_message_id") is not None else None,
+                assistant_message_id=str(payload.get("assistant_message_id")).strip() if payload.get("assistant_message_id") is not None else None,
+                task_id=str(payload.get("task_id")).strip() if payload.get("task_id") is not None else None,
+                request_text=contract["request_text"],
+                response_text=contract["response_text"],
+                required_outputs=contract["required_outputs"],
+                answered_outputs=contract["answered_outputs"],
+                missing_outputs=contract["missing_outputs"],
+                answer_quality=contract["answer_quality"],
+                task_status=contract["task_status"],
+                action_id=contract["action_id"],
+                success=contract["success"],
+            )
+        return {"saved": True, "interaction_outcome": outcome}
 
     def memory_context(self, user_id: str, *, channel_id: str | None = None, message_limit: int = 12) -> dict[str, Any]:
         with HarnessMemory(self.db_path) as memory:

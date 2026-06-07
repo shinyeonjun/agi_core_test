@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import platform
+import sqlite3
 import subprocess
 import sys
 from collections import Counter
@@ -29,6 +30,7 @@ from neurokernel_seed.model.release import (
 from neurokernel_seed.model.runtime_action import eval_runtime_action_checkpoint, train_runtime_action_model
 from neurokernel_seed.nk_console import menu as nk_menu
 from neurokernel_seed.nk_console.dashboard import DashboardController
+from neurokernel_seed.replay.real_world_transitions import export_real_world_transitions
 from neurokernel_seed.replay.runtime_dataset import RuntimeReplayEtlConfig, run_runtime_replay_etl
 from neurokernel_seed.replay.runtime_features import check_runtime_feature_gates, export_runtime_features, validate_runtime_features
 from neurokernel_seed.replay.slot_dataset import check_slot_dataset_gates, validate_slot_features
@@ -116,6 +118,26 @@ def _build_parser() -> argparse.ArgumentParser:
         item.add_argument("--test-ratio", type=float, default=0.2)
         item.add_argument("--min-rows", type=int, default=10)
         item.add_argument("--min-actions", type=int, default=1)
+        item.add_argument("--json", action="store_true")
+
+    for name in ("data-audit", "audit-data"):
+        item = sub.add_parser(name)
+        item.add_argument("--source", choices=["edge", "local"], default=os.getenv("NEUROKERNEL_RUNTIME_DATA_SOURCE", "edge"))
+        item.add_argument("--db", default=os.getenv("NEUROKERNEL_HARNESS_DB", "data/harness.db"))
+        item.add_argument("--remote-db", default=os.getenv("NEUROKERNEL_EDGE_HARNESS_DB", "data/harness.db"))
+        item.add_argument("--cache-db", default=os.getenv("NEUROKERNEL_RUNTIME_DB_CACHE"))
+        _add_remote_options(item)
+        item.add_argument("--json", action="store_true")
+
+    for name in ("real-world-transitions", "world-real-data"):
+        item = sub.add_parser(name)
+        item.add_argument("--source", choices=["edge", "local"], default=os.getenv("NEUROKERNEL_RUNTIME_DATA_SOURCE", "edge"))
+        item.add_argument("--db", default=os.getenv("NEUROKERNEL_HARNESS_DB", "data/harness.db"))
+        item.add_argument("--remote-db", default=os.getenv("NEUROKERNEL_EDGE_HARNESS_DB", "data/harness.db"))
+        item.add_argument("--cache-db", default=os.getenv("NEUROKERNEL_RUNTIME_DB_CACHE"))
+        _add_remote_options(item)
+        item.add_argument("--out", default=os.getenv("NEUROKERNEL_REAL_WORLD_TRANSITIONS_OUT", "data/model_ready/real_world_transitions.jsonl"))
+        item.add_argument("--limit", type=int)
         item.add_argument("--json", action="store_true")
 
     for name in ("runtime-train", "사용학습", "현실학습", "학습만", "런타임학습만"):
@@ -472,6 +494,10 @@ def _run_action(args: argparse.Namespace) -> dict[str, Any]:
         return _run_runtime_data_action(args)
     if args.action == "runtime-features":
         return _run_runtime_features_action(args)
+    if args.action == "data-audit":
+        return _run_data_audit_action(args)
+    if args.action == "real-world-transitions":
+        return _run_real_world_transitions_action(args)
     if args.action == "runtime-train":
         return _run_runtime_training_action(args)
     if args.action == "runtime-bench":
@@ -1427,6 +1453,106 @@ def _run_runtime_features_action(args: argparse.Namespace) -> dict[str, Any]:
         "gates": gates,
         "ready_for_runtime_model_training": bool(gates["ready_for_runtime_model_training"]),
     }
+
+
+def _run_data_audit_action(args: argparse.Namespace) -> dict[str, Any]:
+    source = str(getattr(args, "source", None) or os.getenv("NEUROKERNEL_RUNTIME_DATA_SOURCE", "edge"))
+    db = _resolve_runtime_data_db(args, source=source)
+    if not db.exists():
+        raise ModelReleaseError(f"harness db not found: {db}")
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        table_counts = _audit_table_counts(conn)
+        linked_messages = _audit_count(conn, "conversation_messages", "linked_task_id IS NOT NULL")
+        total_messages = table_counts.get("conversation_messages") or 0
+        known_candidates = _audit_count(conn, "experience_candidates", "execution_result_known=1")
+        total_candidates = table_counts.get("experience_candidates") or 0
+        qualities = _audit_group_counts(conn, "interaction_outcomes", "answer_quality")
+        task_sources = _audit_group_counts(conn, "tasks", "source")
+        actions = _audit_group_counts(conn, "experience_candidates", "action_id")
+    return {
+        "status": "completed",
+        "source": source,
+        "db": str(db),
+        "currently_accumulated": table_counts,
+        "runtime_training_ready_sources": {
+            "tasks": table_counts.get("tasks", 0),
+            "action_decisions": table_counts.get("action_decisions", 0),
+            "execution_results": table_counts.get("execution_results", 0),
+            "experiences": table_counts.get("experiences", 0),
+            "experience_candidates": total_candidates,
+            "known_candidate_outcomes": known_candidates,
+        },
+        "new_contract_sources": {
+            "conversation_messages": total_messages,
+            "conversation_messages_linked_to_task": linked_messages,
+            "interaction_outcomes": table_counts.get("interaction_outcomes", 0),
+            "interaction_answer_quality": qualities,
+        },
+        "available_for_world_real_transitions": {
+            "known_candidate_transitions": known_candidates,
+            "interaction_aligned_transitions": table_counts.get("interaction_outcomes", 0),
+        },
+        "task_sources": task_sources,
+        "candidate_actions": actions,
+        "gaps": _audit_gaps(table_counts, total_messages, linked_messages, total_candidates, known_candidates),
+    }
+
+
+def _run_real_world_transitions_action(args: argparse.Namespace) -> dict[str, Any]:
+    source = str(getattr(args, "source", None) or os.getenv("NEUROKERNEL_RUNTIME_DATA_SOURCE", "edge"))
+    db = _resolve_runtime_data_db(args, source=source)
+    out = Path(getattr(args, "out", None) or os.getenv("NEUROKERNEL_REAL_WORLD_TRANSITIONS_OUT", "data/model_ready/real_world_transitions.jsonl"))
+    result = export_real_world_transitions(db, out, limit=getattr(args, "limit", None))
+    return {"status": "completed", "source": source, "db": str(db), **result}
+
+
+def _audit_table_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    tables = (
+        "tasks",
+        "action_decisions",
+        "execution_results",
+        "experiences",
+        "experience_candidates",
+        "conversation_messages",
+        "interaction_outcomes",
+        "task_references",
+        "work_items",
+        "work_jobs",
+        "agent_events",
+        "traces",
+    )
+    return {table: _audit_count(conn, table) for table in tables}
+
+
+def _audit_count(conn: sqlite3.Connection, table: str, where: str | None = None) -> int:
+    if not _audit_table_exists(conn, table):
+        return 0
+    sql = f"SELECT COUNT(*) FROM {table}" + (f" WHERE {where}" if where else "")
+    row = conn.execute(sql).fetchone()
+    return int(row[0]) if row else 0
+
+
+def _audit_group_counts(conn: sqlite3.Connection, table: str, column: str) -> dict[str, int]:
+    if not _audit_table_exists(conn, table):
+        return {}
+    rows = conn.execute(f"SELECT {column}, COUNT(*) FROM {table} GROUP BY {column} ORDER BY COUNT(*) DESC").fetchall()
+    return {str(row[0] or "unknown"): int(row[1]) for row in rows}
+
+
+def _audit_table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    return conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() is not None
+
+
+def _audit_gaps(table_counts: dict[str, int], total_messages: int, linked_messages: int, total_candidates: int, known_candidates: int) -> list[dict[str, Any]]:
+    gaps: list[dict[str, Any]] = []
+    if total_messages and linked_messages < total_messages:
+        gaps.append({"kind": "conversation_task_link_missing", "actual": linked_messages, "total": total_messages, "why_it_matters": "디코 원문 요청을 runtime/world 학습 라벨과 안정적으로 묶기 위해 필요"})
+    if table_counts.get("interaction_outcomes", 0) <= 0:
+        gaps.append({"kind": "interaction_outcomes_missing", "actual": 0, "why_it_matters": "required/answered/missing/answer_quality 학습 원천이 아직 없음"})
+    if total_candidates and known_candidates < total_candidates:
+        gaps.append({"kind": "unknown_candidate_outcomes", "actual": known_candidates, "total": total_candidates, "why_it_matters": "runtime top1/ranking 학습은 후보별 outcome이 많을수록 좋아짐"})
+    return gaps
 
 
 def _run_runtime_training_action(args: argparse.Namespace) -> dict[str, Any]:
@@ -2509,6 +2635,10 @@ def _print_result(action: str, result: dict[str, Any], *, json_mode: bool) -> No
         _print_runtime_data(result)
     elif action == "runtime-features":
         _print_runtime_features(result)
+    elif action == "data-audit":
+        _print_data_audit(result)
+    elif action == "real-world-transitions":
+        _print_real_world_transitions(result)
     elif action == "runtime-train":
         _print_runtime_train(result)
     elif action == "runtime-bench":
@@ -2710,6 +2840,34 @@ def _print_runtime_features(result: dict[str, Any]) -> None:
     warnings = gates.get("warnings") or []
     for warning in warnings[:3]:
         print(_kv("주의", warning.get("message") or warning.get("kind")))
+
+
+def _print_data_audit(result: dict[str, Any]) -> None:
+    print(_ok("데이터감사", result.get("status", "completed")))
+    print(_kv("출처", result.get("source")))
+    print(_kv("DB", result.get("db")))
+    accumulated = result.get("currently_accumulated") or {}
+    runtime = result.get("runtime_training_ready_sources") or {}
+    contract = result.get("new_contract_sources") or {}
+    world = result.get("available_for_world_real_transitions") or {}
+    print(_kv("tasks", accumulated.get("tasks")))
+    print(_kv("decisions", accumulated.get("action_decisions")))
+    print(_kv("executions", accumulated.get("execution_results")))
+    print(_kv("candidates", f"{runtime.get('known_candidate_outcomes')}/{runtime.get('experience_candidates')} known"))
+    print(_kv("messages", f"{contract.get('conversation_messages_linked_to_task')}/{contract.get('conversation_messages')} linked"))
+    print(_kv("interaction", contract.get("interaction_outcomes")))
+    print(_kv("world 후보", world.get("known_candidate_transitions")))
+    for gap in (result.get("gaps") or [])[:5]:
+        print(_kv("gap", f"{gap.get('kind')} actual={gap.get('actual')} total={gap.get('total')}"))
+
+
+def _print_real_world_transitions(result: dict[str, Any]) -> None:
+    print(_ok("실월드전이", result.get("status", "completed")))
+    print(_kv("출처", result.get("source")))
+    print(_kv("DB", result.get("db")))
+    print(_kv("파일", result.get("out")))
+    print(_kv("rows", result.get("rows")))
+    print(_kv("actions", ", ".join(result.get("actions") or [])))
 
 
 def _print_runtime_train(result: dict[str, Any]) -> None:

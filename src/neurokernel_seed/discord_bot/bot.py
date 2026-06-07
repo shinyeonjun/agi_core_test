@@ -28,7 +28,9 @@ from .config import required_env_defined as _required_env_defined
 from .core_client import CoreClient
 from .memory_handlers import handle_memory as _handle_memory
 from .memory_handlers import handle_prefs as _handle_prefs
+from .memory_handlers import link_message_to_task as _link_message_to_task
 from .memory_handlers import maybe_save_conversational_preferences as _maybe_save_conversational_preferences
+from .memory_handlers import record_interaction_outcome as _record_interaction_outcome
 from .memory_handlers import record_message as _record_message
 from .memory_handlers import remember_task_reference as _remember_task_reference
 from .models import BotResponse, DiscordBotConfig
@@ -95,7 +97,19 @@ def run_discord_bot(config: DiscordBotConfig) -> None:
         except Exception as exc:  # Discord handlers should never crash the bot.
             response = f"실행 실패: `{type(exc).__name__}: {exc}`"
         response_text = response.text if isinstance(response, BotResponse) else str(response)
-        await _record_message(core, message, role="assistant", content=response_text)
+        task_id = response.task_id if isinstance(response, BotResponse) else None
+        if task_id:
+            await _link_message_to_task(core, message, role="user", task_id=task_id)
+        await _record_message(core, message, role="assistant", content=response_text, linked_task_id=task_id)
+        if task_id:
+            await _record_interaction_outcome(
+                core,
+                message,
+                task_id=task_id,
+                request_text=content,
+                response_text=response_text,
+                metadata=response.metadata if isinstance(response, BotResponse) else None,
+            )
         await _reply(message, response_text, view=response.view if isinstance(response, BotResponse) else None)
 
     client.run(config.token)

@@ -105,9 +105,9 @@ async def handle_memory(rest: str, core: CoreClient, *, user_id: str | None, cha
     return "`memory recent` 또는 `memory context`로 말해줘."
 
 
-async def record_message(core: CoreClient, message: Any, *, role: str, content: str) -> None:
+async def record_message(core: CoreClient, message: Any, *, role: str, content: str, linked_task_id: str | None = None) -> dict[str, Any] | None:
     try:
-        await _call(
+        payload = await _call(
             core.post,
             "/memory/messages",
             {
@@ -116,6 +116,55 @@ async def record_message(core: CoreClient, message: Any, *, role: str, content: 
                 "message_id": str(getattr(message, "id", "")) or None,
                 "role": role,
                 "content": content,
+                "linked_task_id": linked_task_id,
+            },
+        )
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+async def link_message_to_task(core: CoreClient, message: Any, *, role: str, task_id: str) -> None:
+    try:
+        await _call(
+            core.post,
+            "/memory/messages/link-task",
+            {
+                "user_id": _discord_user_id(message),
+                "channel_id": _discord_channel_id(message),
+                "message_id": str(getattr(message, "id", "")) or None,
+                "role": role,
+                "task_id": task_id,
+            },
+        )
+    except Exception:
+        return
+
+
+async def record_interaction_outcome(
+    core: CoreClient,
+    message: Any,
+    *,
+    task_id: str,
+    request_text: str,
+    response_text: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    try:
+        metadata = metadata or {}
+        await _call(
+            core.post,
+            "/memory/interaction-outcomes",
+            {
+                "source": "discord",
+                "user_id": _discord_user_id(message),
+                "channel_id": _discord_channel_id(message),
+                "user_message_id": str(getattr(message, "id", "")) or None,
+                "task_id": task_id,
+                "request_text": request_text,
+                "response_text": response_text,
+                "task": metadata.get("task"),
+                "core_result": metadata.get("core_result"),
             },
         )
     except Exception:

@@ -22,3 +22,5 @@ class DiscordBotConfig:
 class BotResponse:
     text: str
     view: Any | None = None
+    task_id: str | None = None
+    metadata: dict[str, Any] | None = None

@@ -244,6 +244,10 @@ def create_app(*, db_path: str | Path = "data/harness.db", project_root: str | P
     def memory_add_message(payload: dict[str, Any]):
         return service.add_conversation_message(payload)
 
+    @app.post("/memory/messages/link-task")
+    def memory_link_message_to_task(payload: dict[str, Any]):
+        return service.link_message_to_task(payload)
+
     @app.get("/memory/recent")
     def memory_recent(user_id: str, channel_id: str | None = None, limit: int = 20):
         return service.recent_conversation(user_id, channel_id=channel_id, limit=limit)
@@ -251,6 +255,10 @@ def create_app(*, db_path: str | Path = "data/harness.db", project_root: str | P
     @app.post("/memory/task-references")
     def memory_add_task_reference(payload: dict[str, Any]):
         return service.add_task_reference(payload)
+
+    @app.post("/memory/interaction-outcomes")
+    def memory_add_interaction_outcome(payload: dict[str, Any]):
+        return service.add_interaction_outcome(payload)
 
     @app.get("/memory/context")
     def memory_context(user_id: str, channel_id: str | None = None, message_limit: int = 12):

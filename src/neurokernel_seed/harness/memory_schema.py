@@ -165,6 +165,27 @@ CREATE TABLE IF NOT EXISTS task_references (
   result_summary TEXT NOT NULL DEFAULT '',
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS interaction_outcomes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  source TEXT NOT NULL DEFAULT 'discord',
+  user_id TEXT,
+  channel_id TEXT,
+  user_message_id TEXT,
+  assistant_message_id TEXT,
+  task_id TEXT REFERENCES tasks(task_id) ON DELETE SET NULL,
+  request_text_redacted TEXT NOT NULL,
+  response_text_redacted TEXT NOT NULL DEFAULT '',
+  required_outputs_json TEXT NOT NULL DEFAULT '[]',
+  answered_outputs_json TEXT NOT NULL DEFAULT '[]',
+  missing_outputs_json TEXT NOT NULL DEFAULT '[]',
+  answer_quality TEXT NOT NULL,
+  task_status TEXT,
+  action_id TEXT,
+  success INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_interaction_outcomes_task_id ON interaction_outcomes(task_id);
+CREATE INDEX IF NOT EXISTS idx_interaction_outcomes_created_at ON interaction_outcomes(created_at);
 CREATE TABLE IF NOT EXISTS work_items (
   work_id TEXT PRIMARY KEY,
   type TEXT NOT NULL,
