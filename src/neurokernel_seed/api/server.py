@@ -85,6 +85,10 @@ def create_app(*, db_path: str | Path = "data/harness.db", project_root: str | P
             target_runtime_top1=target_runtime_top1,
         )
 
+    @app.get("/model-usage")
+    def model_usage():
+        return service.model_usage()
+
     @app.post("/model-improvements/propose")
     def model_improvements_propose(payload: dict[str, Any] | None = None):
         payload = payload or {}

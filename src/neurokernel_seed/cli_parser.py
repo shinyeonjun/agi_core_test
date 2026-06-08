@@ -339,6 +339,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", default="data/harness.db")
     p.add_argument("--project-root", default=".")
 
+    p = sub.add_parser("harness-model-usage")
+    p.add_argument("--db", default="data/harness.db")
+    p.add_argument("--project-root", default=".")
+
     p = sub.add_parser("harness-create-task")
     p.add_argument("--task-json")
     p.add_argument("--task-file")

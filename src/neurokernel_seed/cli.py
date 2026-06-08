@@ -388,6 +388,10 @@ def main(argv: list[str] | None = None) -> int:
         service = _make_harness_service(args.db, args.project_root)
         print(json.dumps(service.status(), ensure_ascii=False, indent=2, sort_keys=True))
         return 0
+    if args.cmd == "harness-model-usage":
+        service = _make_harness_service(args.db, args.project_root)
+        print(json.dumps(service.model_usage(), ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
     if args.cmd == "harness-create-task":
         service = _make_harness_service(args.db, args.project_root)
         result = service.create_task(_load_json_arg(args.task_json, args.task_file), source="cli")

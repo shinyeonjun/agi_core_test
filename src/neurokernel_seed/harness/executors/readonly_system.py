@@ -48,6 +48,8 @@ class ReadOnlyExecutor:
                 return timer.finish(action_id, success=True, result=self._inspect_code_structure(params))
             if action_id == "inspect_work_pipeline":
                 return timer.finish(action_id, success=True, result=self._inspect_work_pipeline(params))
+            if action_id == "inspect_model_usage":
+                return timer.finish(action_id, success=True, result=self._inspect_model_usage())
             return timer.finish(action_id, success=False, result={}, error_type="unsupported_action")
         except Exception as exc:
             return timer.finish(action_id, success=False, result={"error": str(exc)}, stderr=redact_text(str(exc)), error_type=exc.__class__.__name__)
@@ -274,6 +276,11 @@ class ReadOnlyExecutor:
             limit=int(params.get("limit") or 20),
             stale_after_seconds=int(params.get("stale_after_seconds") or 300),
         )
+
+    def _inspect_model_usage(self) -> dict[str, Any]:
+        from neurokernel_seed.harness.model_usage import inspect_model_usage
+
+        return inspect_model_usage(project_root=self.project_root, db_path=self.memory_path)
 
     def _resolve_project_path(self, path: str) -> Path:
         target = (self.project_root / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()

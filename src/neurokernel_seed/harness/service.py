@@ -14,10 +14,11 @@ from .executors.readonly_system import ReadOnlyExecutor
 from .improvement import ImprovementService
 from .interaction_contract import interaction_contract_from_runtime
 from .memory import HarnessMemory
+from .model_usage import inspect_model_usage
 from .model_improvement import ModelImprovementService
 from .preferences import preference_map
+from .runtime_planner import RuntimeActionPlanner, RuntimePlan, decision_policy_name, policy_decision_summary
 from .runtime_policy import RuntimeActionPolicy
-from .safety_gate import check_action_safety
 from .self_improvement import SelfImprovementService
 from .task_spec import TaskSpec, task_spec_from_dict
 from .trace import failure_trace, redact_text
@@ -46,6 +47,7 @@ class HarnessService:
         self.project_root = Path(project_root)
         self.catalog = catalog or build_action_catalog()
         self.runtime_policy = runtime_policy or RuntimeActionPolicy.from_env(self.project_root)
+        self.runtime_planner = RuntimeActionPlanner(catalog=self.catalog, runtime_policy=self.runtime_policy)
         self.readonly_executor = ReadOnlyExecutor(project_root=self.project_root, memory_path=self.db_path)
         self.readonly_command_executor = ReadOnlyCommandExecutor(project_root=self.project_root)
         self.benchmark_executor = BenchmarkExecutor(project_root=self.project_root)
@@ -74,6 +76,7 @@ class HarnessService:
                 "recent_tasks": memory.list_tasks(10),
                 "recent_traces": memory.recent_traces(5),
                 "recent_work": memory.list_work_items(limit=5),
+                "model_usage": self.model_usage()["summary"],
             }
 
     def queue_health(self) -> dict[str, Any]:
@@ -192,6 +195,9 @@ class HarnessService:
             target_runtime_top1=target_runtime_top1,
         )
 
+    def model_usage(self) -> dict[str, Any]:
+        return inspect_model_usage(project_root=self.project_root, db_path=self.db_path)
+
     def propose_model_improvements(
         self,
         *,
@@ -260,7 +266,8 @@ class HarnessService:
     def dry_run(self, task_id: str) -> dict[str, Any]:
         task = self._load_task_spec(task_id)
         candidates = self._candidate_actions(task)
-        decisions, chosen, policy = self._evaluate_candidates(task, candidates)
+        plan = self._evaluate_candidates(task, candidates)
+        decisions, chosen, policy = plan.decisions, plan.chosen, plan.policy
         with HarnessMemory(self.db_path) as memory:
             memory.add_action_decision(
                 task_id,
@@ -268,14 +275,14 @@ class HarnessService:
                 [{"action_id": item["action_id"]} for item in decisions],
                 {"action_id": chosen["action_id"]} if chosen else None,
                 chosen["safety"] if chosen else {"decision": "deny", "reason": "no candidate"},
-                model_score=_policy_decision_summary(policy),
+                model_score=policy_decision_summary(policy),
                 gate_trace={"runtime_policy": policy},
             )
             memory.record_experience(
                 task_id=task_id,
                 phase="dry_run",
                 status="completed",
-                decision_policy=_decision_policy_name(policy),
+                decision_policy=decision_policy_name(policy),
                 model_used=bool(policy.get("model_used")),
                 model_unavailable_reason=None if policy.get("model_used") else str(policy.get("reason") or "runtime_policy_unavailable"),
                 before_state=self._experience_before_state(task, candidates, "dry_run"),
@@ -285,7 +292,7 @@ class HarnessService:
                 candidates=self._experience_candidates(task, decisions, chosen["action_id"] if chosen else None),
             )
             memory.add_event(task_id, "dry_run", {"decisions": decisions, "chosen": chosen})
-        return {"task_id": task_id, "mode": "dry_run", "candidate_decisions": decisions, "chosen": chosen}
+        return {"task_id": task_id, "mode": "dry_run", "candidate_decisions": decisions, "chosen": chosen, "planner": policy_decision_summary(policy)}
 
     def run(self, task_id: str) -> dict[str, Any]:
         task = self._load_task_spec(task_id)
@@ -302,7 +309,8 @@ class HarnessService:
             memory.transition_task(task_id, "running", {})
             memory.transition_task(task_id, "deciding", {})
 
-        decisions, chosen, policy = self._evaluate_candidates(task, candidates)
+        plan = self._evaluate_candidates(task, candidates)
+        decisions, chosen, policy = plan.decisions, plan.chosen, plan.policy
         chosen_action = chosen["action_id"] if chosen else None
         safety_payload = chosen["safety"] if chosen else None
         with HarnessMemory(self.db_path) as memory:
@@ -312,7 +320,7 @@ class HarnessService:
                 [{"action_id": action_id} for action_id in candidates],
                 {"action_id": chosen_action} if chosen_action else None,
                 safety_payload if safety_payload else {"decision": "deny"},
-                model_score=_policy_decision_summary(policy),
+                model_score=policy_decision_summary(policy),
                 gate_trace={"runtime_policy": policy},
             )
         if chosen_action is None or safety_payload is None:
@@ -321,7 +329,7 @@ class HarnessService:
                     task_id=task_id,
                     phase="run",
                     status="failed",
-                    decision_policy=_decision_policy_name(policy),
+                    decision_policy=decision_policy_name(policy),
                     model_used=bool(policy.get("model_used")),
                     model_unavailable_reason=None if policy.get("model_used") else str(policy.get("reason") or "runtime_policy_unavailable"),
                     before_state=self._experience_before_state(task, candidates, "deciding"),
@@ -338,7 +346,7 @@ class HarnessService:
                     task_id=task_id,
                     phase="run",
                     status="waiting_approval",
-                    decision_policy=_decision_policy_name(policy),
+                    decision_policy=decision_policy_name(policy),
                     model_used=bool(policy.get("model_used")),
                     model_unavailable_reason=None if policy.get("model_used") else str(policy.get("reason") or "runtime_policy_unavailable"),
                     before_state=self._experience_before_state(task, candidates, "deciding"),
@@ -355,7 +363,7 @@ class HarnessService:
                     task_id=task_id,
                     phase="run",
                     status="completed",
-                    decision_policy=_decision_policy_name(policy),
+                    decision_policy=decision_policy_name(policy),
                     model_used=bool(policy.get("model_used")),
                     model_unavailable_reason=None if policy.get("model_used") else str(policy.get("reason") or "runtime_policy_unavailable"),
                     before_state=self._experience_before_state(task, candidates, "deciding"),
@@ -376,7 +384,7 @@ class HarnessService:
                 task_id=task_id,
                 phase="run",
                 status=final_status,
-                decision_policy=_decision_policy_name(policy),
+                decision_policy=decision_policy_name(policy),
                 model_used=bool(policy.get("model_used")),
                 model_unavailable_reason=None if policy.get("model_used") else str(policy.get("reason") or "runtime_policy_unavailable"),
                 before_state=self._experience_before_state(task, candidates, "executing"),
@@ -385,7 +393,7 @@ class HarnessService:
                 learning_masks={"candidate_outcomes_known": True, "safety_known": True, "selection_known": True},
                 candidates=self._experience_candidates(task, decisions, chosen_action, executed_action=chosen_action, result=result),
             )
-        return {"task_id": task_id, "status": final_status, "action": chosen_action, "safety": safety_payload, "execution_result": result}
+        return {"task_id": task_id, "status": final_status, "action": chosen_action, "safety": safety_payload, "execution_result": result, "planner": policy_decision_summary(policy)}
 
     def probe_counterfactual_candidates(self, task_id: str, *, max_candidates: int = 4) -> dict[str, Any]:
         task = self._load_task_spec(task_id)
@@ -393,7 +401,8 @@ class HarnessService:
         if not candidates:
             return self._fail_task(task_id, "no_candidate_actions", {"reason": "allowed_actions is empty"})
 
-        decisions, chosen, policy = self._evaluate_candidates(task, candidates)
+        plan = self._evaluate_candidates(task, candidates)
+        decisions, chosen, policy = plan.decisions, plan.chosen, plan.policy
         probe_results: dict[str, dict[str, Any]] = {}
         skipped: list[dict[str, Any]] = []
         limit = max(1, int(max_candidates))
@@ -425,7 +434,7 @@ class HarnessService:
                 [{"action_id": action_id} for action_id in candidates],
                 {"action_id": chosen_action} if chosen_action else None,
                 chosen.get("safety") if chosen else {"decision": "deny", "reason": "no probeable candidate"},
-                model_score=_policy_decision_summary(policy),
+                model_score=policy_decision_summary(policy),
                 gate_trace={"runtime_policy": policy, "counterfactual_probe": {"max_candidates": limit}},
             )
             memory.record_experience(
@@ -458,6 +467,7 @@ class HarnessService:
             "probed_actions": list(probe_results),
             "known_candidate_count": len(probe_results),
             "skipped": skipped,
+            "planner": policy_decision_summary(policy),
         }
 
     def approve(self, task_id: str, *, approved_by: str = "user", reason: str | None = None) -> dict[str, Any]:
@@ -625,42 +635,8 @@ class HarnessService:
     def _candidate_actions(self, task: TaskSpec) -> list[str]:
         return [action_id for action_id in task.allowed_actions if action_id not in task.blocked_actions]
 
-    def _evaluate_candidates(self, task: TaskSpec, candidates: list[str]) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict[str, Any]]:
-        decisions = []
-        chosen_requires_approval = None
-        deterministic_chosen = None
-        for action_id in candidates:
-            safety = check_action_safety(task, action_id, catalog=self.catalog)
-            item = {"action_id": action_id, "safety": safety.as_dict()}
-            decisions.append(item)
-            if deterministic_chosen is None and safety.decision in {"allow", "dry_run_only"}:
-                deterministic_chosen = item
-            if safety.decision == "requires_approval" and chosen_requires_approval is None:
-                chosen_requires_approval = item
-        policy = self.runtime_policy.rank(task=task, decisions=decisions)
-        for item in decisions:
-            action_id = str(item["action_id"])
-            item["model_score"] = (policy.get("scores") or {}).get(action_id, {"model_used": False, "reason": policy.get("reason")})
-        if policy.get("model_used"):
-            by_action = {str(item["action_id"]): item for item in decisions}
-            for action_id in policy.get("ranked_actions") or []:
-                item = by_action.get(str(action_id))
-                safety = item.get("safety") if item else {}
-                if isinstance(safety, dict) and safety.get("decision") in {"allow", "dry_run_only"}:
-                    return decisions, item, policy
-        return decisions, deterministic_chosen or chosen_requires_approval, policy
-
-    def _choose_first_allowed(self, task: TaskSpec, candidates: list[str]):
-        chosen_requires_approval = None
-        for action_id in candidates:
-            safety = check_action_safety(task, action_id, catalog=self.catalog)
-            if safety.decision in {"allow", "dry_run_only"}:
-                return action_id, safety
-            if safety.decision == "requires_approval" and chosen_requires_approval is None:
-                chosen_requires_approval = (action_id, safety)
-        if chosen_requires_approval:
-            return chosen_requires_approval
-        return None, None
+    def _evaluate_candidates(self, task: TaskSpec, candidates: list[str]) -> RuntimePlan:
+        return self.runtime_planner.plan(task=task, candidates=candidates)
 
     def _execute(self, action_id: str, task: TaskSpec) -> dict[str, Any]:
         params = task.context.get("params", {}) if isinstance(task.context.get("params", {}), dict) else {}
@@ -797,17 +773,6 @@ def _resolve_work_queue(work_queue: WorkQueue | None) -> tuple[WorkQueue | None,
         return build_work_queue_from_env(), None
     except WorkQueueError as exc:
         return None, str(exc)
-
-
-def _decision_policy_name(policy: dict[str, Any]) -> str:
-    if policy.get("model_used"):
-        return "runtime_model_ranked_safety_gated"
-    return "deterministic_safety_first"
-
-
-def _policy_decision_summary(policy: dict[str, Any]) -> dict[str, Any]:
-    keys = ("model_used", "reason", "detail", "model_path", "schema_version", "top_action", "ranked_actions")
-    return {key: policy.get(key) for key in keys if key in policy}
 
 
 def _duration_seconds(started_at: Any, ended_at: Any) -> float:
