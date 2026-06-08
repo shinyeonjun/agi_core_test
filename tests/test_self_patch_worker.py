@@ -155,6 +155,57 @@ def test_self_patch_worker_writes_test_failure_analysis(tmp_path):
     assert Path(result["run_dir"], "failure_analysis.json").exists()
 
 
+def test_self_patch_worker_injects_structured_retry_plan(tmp_path):
+    project = _make_git_project(tmp_path)
+    previous_patch = tmp_path / "previous.patch"
+    previous_patch.write_text("diff --git a/src/demo.py b/src/demo.py\n+VALUE = 3\n", encoding="utf-8")
+    runner = FakeSelfPatchRunner()
+    worker = CodexSelfPatchWorker(
+        SelfPatchConfig(
+            project_root=project,
+            run_root=tmp_path / "runs",
+            codex_bin="codex",
+            test_command=("python", "-m", "pytest", "-q"),
+            isolation_mode="worktree",
+        ),
+        runner=runner,
+    )
+
+    result = worker.run(
+        job_id="job_retry_plan",
+        work={"work_id": "work_cpu_usage", "type": "self_patch", "title": "CPU usage", "goal": "Add CPU usage"},
+        payload={
+            "job_id": "job_retry_plan",
+            "work_id": "work_cpu_usage",
+            "retry": {
+                "requested_by": "discord:1",
+                "previous_status": "reviewing",
+                "previous_result": {
+                    "status": "test_failed",
+                    "job_id": "job_previous",
+                    "patch_path": str(previous_patch),
+                    "changed_files": ["src/demo.py"],
+                    "test": {"returncode": 1, "stdout_tail": "FAILED tests/test_demo.py::test_demo - AssertionError"},
+                    "failure_analysis": {
+                        "primary_failure": "test_failed",
+                        "summary": "Patch exists, but the verification command failed.",
+                        "next_step": "inspect_test_tail_and_fix_patch",
+                    },
+                },
+            },
+        },
+    )
+
+    assert result["status"] == "patch_ready"
+    assert result["retry_plan"]["previous_job_id"] == "job_previous"
+    assert result["retry_plan"]["failing_tests"] == ["tests/test_demo.py::test_demo"]
+    assert "VALUE = 3" in result["retry_plan"]["previous_patch_excerpt"]
+    assert Path(result["run_dir"], "retry_plan.md").exists()
+    assert Path(result["run_dir"], "retry_plan.json").exists()
+    assert "Retry Plan:" in runner.codex_prompts[-1]
+    assert "tests/test_demo.py::test_demo" in runner.codex_prompts[-1]
+
+
 def test_run_command_returns_timeout_result(tmp_path):
     started = time.monotonic()
 
@@ -214,6 +265,7 @@ class FakeSelfPatchRunner:
         self.trailing_whitespace = trailing_whitespace
         self.codex_returncode = codex_returncode
         self.test_returncode = test_returncode
+        self.codex_prompts = []
 
     def __call__(
         self,
@@ -232,6 +284,7 @@ class FakeSelfPatchRunner:
         if cmd[0] == "git":
             return subprocess.run(cmd, cwd=cwd, text=True, encoding="utf-8", capture_output=True, check=False)
         if "codex" in cmd:
+            self.codex_prompts.append(input_text or "")
             target = Path(cwd) / "src" / "demo.py"
             target.write_text("VALUE = 2  \n" if self.trailing_whitespace else "VALUE = 2\n", encoding="utf-8")
             stderr = "Command timed out after 420 seconds." if self.codex_returncode else ""

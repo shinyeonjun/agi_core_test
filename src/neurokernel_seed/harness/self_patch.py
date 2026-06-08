@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from .self_patch_retry import build_retry_plan, retry_plan_markdown
 from .trace import redact_text
 
 
@@ -97,7 +98,11 @@ class CodexSelfPatchWorker:
             ignore_names=set(self.config.ignore_names),
         )
 
-        prompt = _self_patch_prompt(work=work, payload=payload)
+        retry_plan = build_retry_plan(payload)
+        _write_text(run_dir / "retry_plan.md", retry_plan_markdown(retry_plan))
+        _write_text(run_dir / "retry_plan.json", _json_dump(retry_plan or {}))
+
+        prompt = _self_patch_prompt(work=work, payload=payload, retry_plan=retry_plan)
         codex_cmd = _codex_command(self.config, workspace)
         codex_result = self.runner(
             codex_cmd,
@@ -182,6 +187,7 @@ class CodexSelfPatchWorker:
             "test": _public_command_result(test_result),
             "diff_check": _public_command_result(diff_check_result),
             "failure_analysis": failure_analysis,
+            "retry_plan": retry_plan,
             "commands": commands,
             "next_required_action": _next_required_action(status),
             "created_at_epoch": time.time(),
@@ -297,7 +303,7 @@ def _codex_command_prefix(codex_bin: str) -> list[str]:
     return [codex_bin]
 
 
-def _self_patch_prompt(*, work: dict[str, Any], payload: dict[str, Any]) -> str:
+def _self_patch_prompt(*, work: dict[str, Any], payload: dict[str, Any], retry_plan: dict[str, Any] | None = None) -> str:
     return "\n".join(
         [
             "You are the development worker for NeuroKernel AGI Seed.",
@@ -314,12 +320,17 @@ def _self_patch_prompt(*, work: dict[str, Any], payload: dict[str, Any]) -> str:
             "- For clean-code or refactor work, split by responsibility around existing module boundaries, keep compatibility shims only when existing callers require them, and avoid speculative abstractions.",
             "- For clean-code or refactor work, prefer a focused structural improvement plus regression tests over a broad rewrite.",
             "- If Queue payload JSON contains retry.previous_result, treat it as the failed prior attempt: inspect the listed changed files and failing test tails, then fix the underlying issue instead of repeating the same patch.",
+            "- If Retry Plan is present, follow it before making any edits. It is the authoritative failure context for this retry.",
+            "- A retry must reduce uncertainty: either make the tests pass, or leave a smaller patch with a clearer blocker artifact.",
             "",
             "Work item JSON:",
             _json_dump(work),
             "",
             "Queue payload JSON:",
             _json_dump(payload),
+            "",
+            "Retry Plan:",
+            retry_plan_markdown(retry_plan),
             "",
             "Expected output:",
             "- Modify the repository files in this workspace.",
@@ -492,6 +503,7 @@ def _write_evidence(run_dir: Path, result: dict[str, Any], *, work: dict[str, An
             "diff_check_returncode": (result.get("diff_check") or {}).get("returncode"),
         },
         "failure_analysis": result.get("failure_analysis"),
+        "retry_plan": result.get("retry_plan"),
         "work_title": work.get("title"),
         "work_goal": work.get("goal"),
         "queue_payload": payload,
@@ -514,6 +526,7 @@ def _write_summary_markdown(run_dir: Path, result: dict[str, Any]) -> None:
         f"- codex_completed: `{result.get('codex_completed')}`",
         f"- next_required_action: `{result.get('next_required_action')}`",
         f"- primary_failure: `{(result.get('failure_analysis') or {}).get('primary_failure')}`",
+        f"- retry_plan: `{'present' if result.get('retry_plan') else 'none'}`",
         "",
         "## Changed Files",
         "",
