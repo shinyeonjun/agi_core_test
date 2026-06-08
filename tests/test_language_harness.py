@@ -90,10 +90,12 @@ def test_scope_of_agency_is_injected_into_language_prompts():
     ]
 
     for prompt in prompts:
+        assert "Audience: human_current_state" in prompt
         assert "# Scope of Agency" in prompt
         assert "Do not describe a planned external work item as active implementation." in prompt
         assert "promote it to a self-patch development work item" in prompt
         assert "Prefer human-facing words" in prompt
+        assert "Audience: worker_instruction" not in prompt
 
 
 def test_language_to_human_fails_when_codex_is_unavailable(tmp_path):

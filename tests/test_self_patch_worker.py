@@ -204,6 +204,8 @@ def test_self_patch_worker_injects_structured_retry_plan(tmp_path):
     assert Path(result["run_dir"], "retry_plan.json").exists()
     assert "Retry Plan:" in runner.codex_prompts[-1]
     assert "tests/test_demo.py::test_demo" in runner.codex_prompts[-1]
+    assert "Audience: worker_instruction" in runner.codex_prompts[-1]
+    assert "Audience: human_current_state" not in runner.codex_prompts[-1]
 
 
 def test_run_command_returns_timeout_result(tmp_path):

@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from neurokernel_seed.language.prompt_pipelines import worker_instruction_pipeline_prompt
+
 from .self_patch_retry import build_retry_plan, retry_plan_markdown
 from .trace import redact_text
 
@@ -306,6 +308,8 @@ def _codex_command_prefix(codex_bin: str) -> list[str]:
 def _self_patch_prompt(*, work: dict[str, Any], payload: dict[str, Any], retry_plan: dict[str, Any] | None = None) -> str:
     return "\n".join(
         [
+            worker_instruction_pipeline_prompt(mode="self_patch"),
+            "",
             "You are the development worker for NeuroKernel AGI Seed.",
             "Implement only the approved self-patch work item in this isolated workspace.",
             "",
