@@ -12,11 +12,9 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
 
 from neurokernel_seed.eval.gate_ablation import GateAblationConfig, run_gate_ablation
 from neurokernel_seed.harness.service import HarnessService
-from neurokernel_seed.harness.training_worker import TrainingWorkerError, normalize_training_command
 from neurokernel_seed.harness.runtime_policy import RuntimeActionPolicy, RuntimePolicyConfig
 from neurokernel_seed.model.pipeline import TrainingPipelineConfig, run_training_pipeline
 from neurokernel_seed.model.release import (
@@ -32,6 +30,7 @@ from neurokernel_seed.model.release import (
 from neurokernel_seed.model.runtime_action import eval_runtime_action_checkpoint, train_runtime_action_model
 from neurokernel_seed.nk_console import menu as nk_menu
 from neurokernel_seed.nk_console.dashboard import DashboardController
+from neurokernel_seed.nk_training_handoff import TrainingRunCallbacks, run_training_pending_action, run_training_run_action
 from neurokernel_seed.replay.real_world_transitions import export_real_world_transitions
 from neurokernel_seed.replay.runtime_dataset import RuntimeReplayEtlConfig, run_runtime_replay_etl
 from neurokernel_seed.replay.runtime_features import check_runtime_feature_gates, export_runtime_features, validate_runtime_features
@@ -525,9 +524,16 @@ def _run_action(args: argparse.Namespace) -> dict[str, Any]:
     if args.action == "data-audit":
         return _run_data_audit_action(args)
     if args.action == "training-pending":
-        return _run_training_pending_action(args)
+        return run_training_pending_action(args)
     if args.action == "training-run":
-        return _run_training_run_action(args)
+        return run_training_run_action(
+            args,
+            TrainingRunCallbacks(
+                parse_args=lambda argv: _build_parser().parse_args(argv),
+                normalize_action=_normalize_action,
+                run_action=_run_action,
+            ),
+        )
     if args.action == "real-world-transitions":
         return _run_real_world_transitions_action(args)
     if args.action == "runtime-train":
@@ -1531,169 +1537,6 @@ def _run_data_audit_action(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-OPEN_TRAINING_WORK_STATUSES = {"proposed", "accepted", "planned", "reviewing", "blocked", "failed"}
-
-
-def _run_training_pending_action(args: argparse.Namespace) -> dict[str, Any]:
-    items = _fetch_training_work_items(args)
-    return {
-        "status": "completed",
-        "source": "edge-core",
-        "remote": _remote_training_target(args),
-        "count": len(items),
-        "items": [_summarize_training_work_item(item, index=index) for index, item in enumerate(items, start=1)],
-    }
-
-
-def _run_training_run_action(args: argparse.Namespace) -> dict[str, Any]:
-    items = _fetch_training_work_items(args)
-    selected = _select_training_work_item(items, work_id=getattr(args, "work_id", None), index=int(getattr(args, "index", 1) or 1))
-    work_id = str(selected.get("work_id") or "")
-    detail = _remote_core_request(args, "GET", f"/work-items/{work_id}")
-    work = detail.get("work_item") if isinstance(detail.get("work_item"), dict) else selected
-    command_spec = _training_command_spec(work)
-    action, command_args = normalize_training_command(command_spec)
-    if getattr(args, "device", None):
-        command_args = _replace_cli_option(command_args, "--device", str(args.device))
-    command_preview = [action, *command_args]
-
-    report_dir = Path(os.getenv("NEUROKERNEL_MANUAL_TRAINING_JOB_DIR", "artifacts/training_jobs"))
-    report_dir.mkdir(parents=True, exist_ok=True)
-    report_path = report_dir / f"manual_{_safe_file_stem(work_id)}_{_utc_stamp()}.json"
-
-    if bool(getattr(args, "dry_run", False)):
-        report = {
-            "status": "dry_run",
-            "work_id": work_id,
-            "title": work.get("title"),
-            "remote": _remote_training_target(args),
-            "command": command_preview,
-            "report": str(report_path),
-        }
-        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-        return report
-
-    if str(work.get("status") or "") != "running":
-        _transition_remote_work(args, work_id, "running", reason="manual laptop training started by nk")
-    started_at = datetime.now(timezone.utc).isoformat()
-    try:
-        parsed_args = _build_parser().parse_args(command_preview)
-        parsed_args.action = _normalize_action(parsed_args.action)
-        result = _run_action(parsed_args)
-    except (Exception, SystemExit) as exc:
-        failure = {
-            "status": "failed",
-            "work_id": work_id,
-            "title": work.get("title"),
-            "remote": _remote_training_target(args),
-            "command": command_preview,
-            "started_at": started_at,
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-            "error": str(exc),
-            "report": str(report_path),
-        }
-        report_path.write_text(json.dumps(failure, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-        _add_remote_training_note(args, work_id, f"노트북 수동 학습 실패: report={report_path} error={str(exc)[:500]}")
-        _transition_remote_work(args, work_id, "reviewing", reason="manual laptop training failed; inspect local report")
-        return failure
-
-    report = {
-        "status": "completed",
-        "work_id": work_id,
-        "title": work.get("title"),
-        "remote": _remote_training_target(args),
-        "command": command_preview,
-        "started_at": started_at,
-        "finished_at": datetime.now(timezone.utc).isoformat(),
-        "nk_result": result,
-        "report": str(report_path),
-    }
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-    _add_remote_training_note(args, work_id, f"노트북 수동 학습 완료: report={report_path} status={result.get('status')}")
-    _transition_remote_work(args, work_id, "completed", reason="manual laptop training completed")
-    return report
-
-
-def _fetch_training_work_items(args: argparse.Namespace) -> list[dict[str, Any]]:
-    payload = _remote_core_request(
-        args,
-        "GET",
-        "/work-items",
-        query={"work_type": "training_pipeline", "limit": max(1, int(getattr(args, "limit", 10) or 10))},
-    )
-    raw_items = payload.get("items") or payload.get("work_items") or []
-    items = [item for item in raw_items if isinstance(item, dict)]
-    allowed_statuses = set(getattr(args, "include_status", None) or OPEN_TRAINING_WORK_STATUSES)
-    return [item for item in items if str(item.get("status") or "") in allowed_statuses]
-
-
-def _select_training_work_item(items: list[dict[str, Any]], *, work_id: str | None, index: int) -> dict[str, Any]:
-    if work_id:
-        for item in items:
-            if str(item.get("work_id") or "") == work_id:
-                return item
-        raise ModelReleaseError(f"training work item not found: {work_id}")
-    if not items:
-        raise ModelReleaseError("실행 가능한 training_pipeline 후보가 없습니다. OrangePi watchdog 제안을 기다리거나 nk 학습대기를 확인하세요.")
-    if index < 1 or index > len(items):
-        raise ModelReleaseError(f"training work index out of range: {index} / {len(items)}")
-    return items[index - 1]
-
-
-def _training_command_spec(work: dict[str, Any]) -> dict[str, Any]:
-    metadata = work.get("metadata_json") if isinstance(work.get("metadata_json"), dict) else {}
-    command_spec = metadata.get("nk_command") if isinstance(metadata.get("nk_command"), dict) else {}
-    if not command_spec:
-        raise ModelReleaseError(f"training work item has no nk_command: {work.get('work_id')}")
-    return command_spec
-
-
-def _summarize_training_work_item(item: dict[str, Any], *, index: int) -> dict[str, Any]:
-    try:
-        command_spec = _training_command_spec(item) if isinstance(item.get("metadata_json"), dict) else {}
-        action, command_args = normalize_training_command(command_spec)
-        command = [action, *command_args]
-    except (TrainingWorkerError, ModelReleaseError) as exc:
-        command = [f"invalid: {exc}"]
-    metadata = item.get("metadata_json") if isinstance(item.get("metadata_json"), dict) else {}
-    slot = metadata.get("slot") or metadata.get("model_slot") or "unknown"
-    return {
-        "index": index,
-        "work_id": item.get("work_id"),
-        "status": item.get("status"),
-        "slot": slot,
-        "title": item.get("title"),
-        "priority": item.get("priority"),
-        "risk_level": item.get("risk_level"),
-        "command": command,
-        "created_at": item.get("created_at"),
-        "updated_at": item.get("updated_at"),
-    }
-
-
-def _replace_cli_option(args: list[str], option: str, value: str) -> list[str]:
-    updated: list[str] = []
-    skip_next = False
-    replaced = False
-    for current in args:
-        if skip_next:
-            skip_next = False
-            continue
-        if current == option:
-            updated.extend([option, value])
-            skip_next = True
-            replaced = True
-            continue
-        if current.startswith(f"{option}="):
-            updated.append(f"{option}={value}")
-            replaced = True
-            continue
-        updated.append(current)
-    if not replaced:
-        updated.extend([option, value])
-    return updated
-
-
 def _run_real_world_transitions_action(args: argparse.Namespace) -> dict[str, Any]:
     source = str(getattr(args, "source", None) or os.getenv("NEUROKERNEL_RUNTIME_DATA_SOURCE", "edge"))
     db = _resolve_runtime_data_db(args, source=source)
@@ -2528,80 +2371,6 @@ def _runtime_model_slot(config: ModelReleaseRemoteConfig) -> dict[str, Any]:
 
 def _sh_quote(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
-
-
-def _remote_training_target(args: argparse.Namespace) -> dict[str, Any]:
-    return {
-        "remote_host": getattr(args, "remote_host", None) or os.getenv("NEUROKERNEL_EDGE_HOST", "orangepi5"),
-        "remote_project": (getattr(args, "remote_project", None) or os.getenv("NEUROKERNEL_EDGE_PROJECT", "/home/ubuntu/projects/neurokernel-agi-seed")).rstrip("/"),
-        "remote_core_url": str(getattr(args, "remote_core_url", None) or os.getenv("NEUROKERNEL_EDGE_CORE_URL", "http://127.0.0.1:8765")).rstrip("/"),
-        "ssh_connect_timeout": int(getattr(args, "ssh_connect_timeout", 10)),
-    }
-
-
-def _remote_core_request(
-    args: argparse.Namespace,
-    method: str,
-    path: str,
-    *,
-    query: dict[str, Any] | None = None,
-    payload: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    target = _remote_training_target(args)
-    url = f"{target['remote_core_url']}{path}"
-    if query:
-        compact = {key: value for key, value in query.items() if value is not None}
-        if compact:
-            url = f"{url}?{urlencode(compact)}"
-    command_parts = ["cd", _sh_quote(str(target["remote_project"])), "&&", "curl", "-fsS"]
-    method = method.upper()
-    if method != "GET":
-        command_parts.extend(["-X", method, "-H", _sh_quote("Content-Type: application/json")])
-        command_parts.extend(["--data-binary", _sh_quote(json.dumps(payload or {}, ensure_ascii=False))])
-    command_parts.append(_sh_quote(url))
-    remote_command = " ".join(command_parts)
-    ssh_options = ["-o", "BatchMode=yes", "-o", f"ConnectTimeout={int(target['ssh_connect_timeout'])}"]
-    completed = subprocess.run(
-        ["ssh", *ssh_options, str(target["remote_host"]), remote_command],
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        capture_output=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "").strip()
-        raise ModelReleaseError(f"OrangePi Core API request failed: {method} {path}: {detail}")
-    try:
-        result = json.loads(completed.stdout or "{}")
-    except json.JSONDecodeError as exc:
-        raise ModelReleaseError(f"OrangePi Core API returned invalid json: {(completed.stdout or '').strip()[:500]}") from exc
-    if not isinstance(result, dict):
-        raise ModelReleaseError(f"OrangePi Core API returned non-object json: {method} {path}")
-    return result
-
-
-def _transition_remote_work(args: argparse.Namespace, work_id: str, status: str, *, reason: str) -> dict[str, Any]:
-    return _remote_core_request(
-        args,
-        "POST",
-        f"/work-items/{work_id}/status",
-        payload={"status": status, "actor": "nk-manual-training", "reason": reason},
-    )
-
-
-def _add_remote_training_note(args: argparse.Namespace, work_id: str, note: str) -> dict[str, Any]:
-    return _remote_core_request(
-        args,
-        "POST",
-        f"/work-items/{work_id}/note",
-        payload={"actor": "nk-manual-training", "note": note},
-    )
-
-
-def _safe_file_stem(value: str) -> str:
-    safe = "".join(char if char.isalnum() or char in {"_", "-", "."} else "_" for char in str(value)).strip("._")
-    return safe or "training_work"
 
 
 def _run_compare(args: argparse.Namespace) -> dict[str, Any]:

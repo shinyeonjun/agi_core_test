@@ -2,7 +2,7 @@ import argparse
 import json
 from pathlib import Path
 
-from neurokernel_seed import nk_cli
+from neurokernel_seed import nk_cli, nk_training_handoff
 from neurokernel_seed.nk_console import menu as nk_menu
 
 
@@ -1420,7 +1420,7 @@ def test_nk_training_pending_lists_remote_training_work(monkeypatch):
         assert query["work_type"] == "training_pipeline"
         return {"items": [work]}
 
-    monkeypatch.setattr(nk_cli, "_remote_core_request", fake_remote_request)
+    monkeypatch.setattr(nk_training_handoff, "remote_core_request", fake_remote_request)
 
     result = nk_cli._run_action(
         argparse.Namespace(
@@ -1468,10 +1468,9 @@ def test_nk_training_run_executes_allowed_command_and_records_work(monkeypatch, 
         return {"status": "deployed", "artifacts": {"model": "artifacts/runtime_action_model.pt"}}
 
     monkeypatch.setenv("NEUROKERNEL_MANUAL_TRAINING_JOB_DIR", str(tmp_path))
-    monkeypatch.setattr(nk_cli, "_remote_core_request", fake_remote_request)
-    monkeypatch.setattr(nk_cli, "_run_action", fake_run_action)
+    monkeypatch.setattr(nk_training_handoff, "remote_core_request", fake_remote_request)
 
-    result = nk_cli._run_training_run_action(
+    result = nk_training_handoff.run_training_run_action(
         argparse.Namespace(
             action="training-run",
             remote_host="orangepi5",
@@ -1485,7 +1484,12 @@ def test_nk_training_run_executes_allowed_command_and_records_work(monkeypatch, 
             device="cuda",
             dry_run=False,
             json=False,
-        )
+        ),
+        nk_training_handoff.TrainingRunCallbacks(
+            parse_args=lambda argv: nk_cli._build_parser().parse_args(argv),
+            normalize_action=nk_cli._normalize_action,
+            run_action=fake_run_action,
+        ),
     )
 
     assert result["status"] == "completed"
@@ -1502,6 +1506,68 @@ def test_nk_training_run_executes_allowed_command_and_records_work(monkeypatch, 
         {"status": "completed", "actor": "nk-manual-training", "reason": "manual laptop training completed"},
     )
     assert Path(result["report"]).exists()
+
+
+def test_nk_training_run_keeps_gated_result_in_review(monkeypatch, tmp_path):
+    work = {
+        "work_id": "work_runtime_training_1",
+        "type": "training_pipeline",
+        "status": "proposed",
+        "title": "runtime_action 모델 재학습 후보",
+        "metadata_json": {
+            "slot": "runtime_action",
+            "nk_command": {"action": "runtime-pipeline", "args": ["--source", "edge", "--device", "cpu"]},
+        },
+    }
+    remote_calls = []
+
+    def fake_remote_request(args, method, path, *, query=None, payload=None):
+        remote_calls.append((method, path, payload))
+        if method == "GET" and path == "/work-items":
+            return {"items": [work]}
+        if method == "GET" and path == "/work-items/work_runtime_training_1":
+            return {"work_item": work}
+        return {"work_item": {**work, "status": (payload or {}).get("status", work["status"])}}
+
+    def fake_run_action(args):
+        return {"status": "blocked_by_quality_gate", "report": "artifacts/runtime_pipeline/report.json"}
+
+    monkeypatch.setenv("NEUROKERNEL_MANUAL_TRAINING_JOB_DIR", str(tmp_path))
+    monkeypatch.setattr(nk_training_handoff, "remote_core_request", fake_remote_request)
+
+    result = nk_training_handoff.run_training_run_action(
+        argparse.Namespace(
+            action="training-run",
+            remote_host="orangepi5",
+            remote_project="/remote",
+            remote_core_url="http://127.0.0.1:8765",
+            ssh_connect_timeout=10,
+            limit=10,
+            include_status=None,
+            work_id=None,
+            index=1,
+            device="cuda",
+            dry_run=False,
+            json=False,
+        ),
+        nk_training_handoff.TrainingRunCallbacks(
+            parse_args=lambda argv: nk_cli._build_parser().parse_args(argv),
+            normalize_action=nk_cli._normalize_action,
+            run_action=fake_run_action,
+        ),
+    )
+
+    assert result["status"] == "blocked_by_quality_gate"
+    assert result["remote_status"] == "reviewing"
+    assert remote_calls[-1] == (
+        "POST",
+        "/work-items/work_runtime_training_1/status",
+        {
+            "status": "reviewing",
+            "actor": "nk-manual-training",
+            "reason": "manual laptop training finished but deployment was gated: blocked_by_quality_gate",
+        },
+    )
 
 
 def test_nk_training_run_records_unexpected_training_failure(monkeypatch, tmp_path):
@@ -1529,10 +1595,9 @@ def test_nk_training_run_records_unexpected_training_failure(monkeypatch, tmp_pa
         raise RuntimeError("torch missing")
 
     monkeypatch.setenv("NEUROKERNEL_MANUAL_TRAINING_JOB_DIR", str(tmp_path))
-    monkeypatch.setattr(nk_cli, "_remote_core_request", fake_remote_request)
-    monkeypatch.setattr(nk_cli, "_run_action", fail_run_action)
+    monkeypatch.setattr(nk_training_handoff, "remote_core_request", fake_remote_request)
 
-    result = nk_cli._run_training_run_action(
+    result = nk_training_handoff.run_training_run_action(
         argparse.Namespace(
             action="training-run",
             remote_host="orangepi5",
@@ -1546,7 +1611,12 @@ def test_nk_training_run_records_unexpected_training_failure(monkeypatch, tmp_pa
             device="cuda",
             dry_run=False,
             json=False,
-        )
+        ),
+        nk_training_handoff.TrainingRunCallbacks(
+            parse_args=lambda argv: nk_cli._build_parser().parse_args(argv),
+            normalize_action=nk_cli._normalize_action,
+            run_action=fail_run_action,
+        ),
     )
 
     assert result["status"] == "failed"
