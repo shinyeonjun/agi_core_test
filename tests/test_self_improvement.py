@@ -24,6 +24,15 @@ def test_self_improvement_analyzes_missing_model_and_code_deficits(tmp_path):
     assert result["status"] == "completed"
     assert {"missing_output", "world_training_connection", "code_structure"} <= kinds
     assert result["autonomy_boundary"]["develop"] == "requires user approval on proposed work"
+    readiness = result["signals"]["readiness"]
+    assert readiness["schema_version"] == "neurokernel-self-improvement-readiness-v1"
+    assert {item["id"] for item in readiness["criteria"]} >= {
+        "deficit_detection",
+        "approval_boundary",
+        "work_queue_available",
+        "runtime_learning_data",
+        "conversation_task_linking",
+    }
 
 
 def test_self_improvement_proposes_approval_gated_self_patch_and_deduplicates(tmp_path):
@@ -38,6 +47,17 @@ def test_self_improvement_proposes_approval_gated_self_patch_and_deduplicates(tm
     assert any(item["type"] == "self_patch" for item in created_work)
     assert all(item["status"] == "proposed" for item in created_work)
     assert any(item.get("kind") == "duplicate" for item in second["skipped"])
+
+
+def test_self_improvement_readiness_flags_unavailable_queue(tmp_path):
+    project = _project_with_large_module(tmp_path)
+    service = HarnessService(db_path=tmp_path / "harness.db", project_root=project)
+
+    result = service.analyze_self_improvement(max_code_candidates=1, min_code_score=60)
+
+    assert any(item["deficit_id"] == "work_pipeline:queue_unavailable" for item in result["deficits"])
+    queue_check = next(item for item in result["signals"]["readiness"]["criteria"] if item["id"] == "work_queue_available")
+    assert queue_check["passed"] is False
 
 
 def test_self_improvement_api_endpoints(tmp_path):

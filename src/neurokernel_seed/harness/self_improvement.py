@@ -66,6 +66,7 @@ class SelfImprovementService:
         missing = self.improvements.analyze(min_gap_count=min_gap_count, lookback=lookback)
         model = self.model_improvements.analyze()
         pipeline = self.work_items.pipeline_status(limit=20, stale_after_seconds=300)
+        memory = _memory_snapshot(self.db_path)
         code = inspect_code_structure(
             self.project_root,
             paths=list(code_paths),
@@ -77,6 +78,13 @@ class SelfImprovementService:
         deficits.extend(_model_deficits(model))
         deficits.extend(_pipeline_deficits(pipeline))
         deficits.extend(_code_structure_deficits(code, min_score=max(1, int(min_code_score))))
+        readiness = _self_improvement_readiness(
+            missing_outputs=missing,
+            model_improvements=model,
+            work_pipeline=pipeline,
+            memory=memory,
+        )
+        deficits.extend(_readiness_deficits(readiness))
         deficits = _rank_deficits(deficits)
         return {
             "status": "completed",
@@ -99,6 +107,8 @@ class SelfImprovementService:
                 "model_improvements": model,
                 "work_pipeline": pipeline,
                 "code_structure": code,
+                "memory": memory,
+                "readiness": readiness,
             },
         }
 
@@ -293,23 +303,148 @@ def _model_deficits(analysis: dict[str, Any]) -> list[dict[str, Any]]:
 def _pipeline_deficits(status: dict[str, Any]) -> list[dict[str, Any]]:
     summary = status.get("summary") if isinstance(status.get("summary"), dict) else {}
     attention = [str(item) for item in summary.get("attention") or []]
-    if not attention:
-        return []
-    return [
-        {
-            "kind": "work_pipeline_health",
-            "deficit_id": "work_pipeline:attention",
-            "title": "자가개선 작업 파이프라인 복구",
-            "goal": "stale/dead-letter/enqueue-failed 작업을 감지하고 재시도/보류/리뷰 경로를 명확히 하는 파이프라인 복구 기능을 보강한다.",
-            "reason": ",".join(attention),
-            "severity": "medium",
-            "priority": "medium",
-            "risk_level": "low",
-            "confidence": 0.74,
-            "evidence": status,
-            "score": 70 + len(attention),
-        }
+    queue = status.get("queue") if isinstance(status.get("queue"), dict) else {}
+    deficits = []
+    if queue.get("available") is False:
+        deficits.append(
+            {
+                "kind": "work_pipeline_health",
+                "deficit_id": "work_pipeline:queue_unavailable",
+                "title": "자가개선 작업 큐 연결",
+                "goal": "self_patch/external_work/training 작업이 승인 후 worker에 전달되도록 work queue 연결 상태를 진단하고 복구한다.",
+                "reason": str(queue.get("reason") or "queue_unavailable"),
+                "severity": "high",
+                "priority": "high",
+                "risk_level": "medium",
+                "confidence": 0.8,
+                "evidence": status,
+                "score": 86,
+            }
+        )
+    if attention:
+        deficits.append(
+            {
+                "kind": "work_pipeline_health",
+                "deficit_id": "work_pipeline:attention",
+                "title": "자가개선 작업 파이프라인 복구",
+                "goal": "stale/dead-letter/enqueue-failed 작업을 감지하고 재시도/보류/리뷰 경로를 명확히 하는 파이프라인 복구 기능을 보강한다.",
+                "reason": ",".join(attention),
+                "severity": "medium",
+                "priority": "medium",
+                "risk_level": "low",
+                "confidence": 0.74,
+                "evidence": status,
+                "score": 70 + len(attention),
+            }
+        )
+    return deficits
+
+
+def _memory_snapshot(db_path: Path) -> dict[str, Any]:
+    with HarnessMemory(db_path) as memory:
+        messages = _count(memory, "SELECT COUNT(*) FROM conversation_messages")
+        linked_messages = _count(memory, "SELECT COUNT(*) FROM conversation_messages WHERE linked_task_id IS NOT NULL AND linked_task_id != ''")
+        interactions = _count(memory, "SELECT COUNT(*) FROM interaction_outcomes")
+        known_candidates = _count(memory, "SELECT COUNT(*) FROM experience_candidates WHERE execution_result_known=1")
+        total_candidates = _count(memory, "SELECT COUNT(*) FROM experience_candidates")
+    return {
+        "conversation_messages": messages,
+        "linked_conversation_messages": linked_messages,
+        "conversation_task_link_rate": round(linked_messages / messages, 4) if messages else 0.0,
+        "interaction_outcomes": interactions,
+        "known_candidate_outcomes": known_candidates,
+        "candidate_rows": total_candidates,
+    }
+
+
+def _self_improvement_readiness(
+    *,
+    missing_outputs: dict[str, Any],
+    model_improvements: dict[str, Any],
+    work_pipeline: dict[str, Any],
+    memory: dict[str, Any],
+) -> dict[str, Any]:
+    queue = work_pipeline.get("queue") if isinstance(work_pipeline.get("queue"), dict) else {}
+    runtime = model_improvements.get("runtime_action") if isinstance(model_improvements.get("runtime_action"), dict) else {}
+    runtime_snapshot = runtime.get("snapshot") if isinstance(runtime.get("snapshot"), dict) else {}
+    criteria = [
+        _criterion("deficit_detection", True, "자가 부족 분석 엔진이 응답했습니다.", {}),
+        _criterion("approval_boundary", True, "개발/장착/학습은 승인 경계 뒤에 있습니다.", {}),
+        _criterion("work_queue_available", bool(queue.get("available")), "승인된 작업을 worker 큐로 넘길 수 있어야 합니다.", queue),
+        _criterion(
+            "runtime_learning_data",
+            int(runtime_snapshot.get("known_candidate_outcomes") or memory.get("known_candidate_outcomes") or 0) >= 100,
+            "runtime_action 학습에 쓸 실제 후보 outcome이 충분히 쌓여야 합니다.",
+            {"threshold": 100, "runtime_snapshot": runtime_snapshot, "memory": memory},
+        ),
+        _criterion(
+            "conversation_task_linking",
+            int(memory.get("conversation_messages") or 0) == 0 or float(memory.get("conversation_task_link_rate") or 0.0) >= 0.25,
+            "Discord 대화가 task/outcome과 충분히 연결되어야 학습 데이터가 됩니다.",
+            {"threshold": 0.25, "memory": memory},
+        ),
+        _criterion(
+            "missing_output_feedback",
+            missing_outputs.get("status") == "completed",
+            "답변 누락/부분 실패가 capability gap으로 환류되어야 합니다.",
+            missing_outputs,
+        ),
+        _criterion(
+            "model_training_boundary",
+            "runtime_action" in model_improvements and "world" in model_improvements,
+            "모델 개선 판단은 runtime/world 슬롯을 구분해야 합니다.",
+            model_improvements,
+        ),
     ]
+    passed = sum(1 for item in criteria if item["passed"])
+    return {
+        "schema_version": "neurokernel-self-improvement-readiness-v1",
+        "score": round(passed / len(criteria), 4) if criteria else 0.0,
+        "passed": passed,
+        "total": len(criteria),
+        "criteria": criteria,
+    }
+
+
+def _readiness_deficits(readiness: dict[str, Any]) -> list[dict[str, Any]]:
+    deficits = []
+    for item in readiness.get("criteria") or []:
+        if not isinstance(item, dict) or item.get("passed"):
+            continue
+        criterion_id = str(item.get("id") or "unknown")
+        if criterion_id == "work_queue_available":
+            continue
+        deficits.append(
+            {
+                "kind": "self_improvement_readiness",
+                "deficit_id": f"readiness:{criterion_id}",
+                "title": f"자가개선 readiness 보강: {criterion_id}",
+                "goal": str(item.get("description") or "자가개선 readiness 실패 기준을 해결한다."),
+                "reason": "readiness_criterion_failed",
+                "severity": "high" if criterion_id in {"runtime_learning_data", "conversation_task_linking"} else "medium",
+                "priority": "high" if criterion_id in {"runtime_learning_data", "conversation_task_linking"} else "medium",
+                "risk_level": "low",
+                "confidence": 0.76,
+                "evidence": item,
+                "score": 82,
+                "deliverables": ["readiness_fix", "tests", "measured_before_after"],
+            }
+        )
+    return deficits
+
+
+def _criterion(criterion_id: str, passed: bool, description: str, evidence: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": criterion_id,
+        "passed": bool(passed),
+        "description": description,
+        "evidence": evidence,
+    }
+
+
+def _count(memory: HarnessMemory, query: str) -> int:
+    row = memory.conn.execute(query).fetchone()
+    return int(row[0] if row is not None else 0)
 
 
 def _code_structure_deficits(report: dict[str, Any], *, min_score: int) -> list[dict[str, Any]]:
