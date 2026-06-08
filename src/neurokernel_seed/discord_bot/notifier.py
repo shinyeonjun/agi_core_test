@@ -60,7 +60,9 @@ async def notify_work_changes(
         signature = (status, updated_at)
         previous = seen.get(work_id)
         seen[work_id] = signature
-        if first_poll or previous == signature or not is_notifiable_work_status(status):
+        if previous == signature or not is_notifiable_work_status(status):
+            continue
+        if first_poll and not is_autonomous_proposal(item):
             continue
         detail = await _call(core.get, f"/work-items/{quote(work_id)}")
         if not isinstance(detail, dict):
@@ -89,6 +91,16 @@ async def notify_work_changes(
 
 def is_notifiable_work_status(status: str) -> bool:
     return status in {"proposed", "planned", "waiting_approval", "reviewing", "blocked", "failed", "completed"}
+
+
+def is_autonomous_proposal(item: dict[str, Any]) -> bool:
+    if str(item.get("status") or "") != "proposed":
+        return False
+    linked = str(item.get("linked_entity_type") or "")
+    if linked in {"model_improvement", "capability_gap"}:
+        return True
+    metadata = item.get("metadata_json") if isinstance(item.get("metadata_json"), dict) else {}
+    return str(metadata.get("execution_kind") or "") in {"training_pipeline", "mcp_plugin_skill"}
 
 
 async def resolve_notification_channel(client: Any, item: dict[str, Any], config: DiscordBotConfig) -> Any | None:
