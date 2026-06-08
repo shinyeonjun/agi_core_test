@@ -410,6 +410,37 @@ def test_work_status_payload_hides_promotion_when_external_work_has_self_patch_c
     assert parent["promotion_possible"] is False
 
 
+def test_work_show_proposed_item_attaches_work_review_view():
+    class Core:
+        def get(self, path):
+            assert path == "/work-items/work1"
+            return {
+                "work_item": {
+                    "work_id": "work1",
+                    "type": "self_patch",
+                    "title": "world 모델 실사용 전이 학습 연결",
+                    "status": "proposed",
+                    "priority": "high",
+                    "risk_level": "medium",
+                },
+                "events": [],
+            }
+
+    response = asyncio.run(
+        _handle_command(
+            "work show work1",
+            Core(),
+            _bot_config(),
+            user_id="u1",
+            channel_id="c1",
+            work_view_factory=lambda work_id: f"work-view:{work_id}",
+        )
+    )
+
+    assert response.view == "work-view:work1"
+    assert "world 모델 실사용 전이 학습 연결" in response.text
+
+
 def test_format_work_notification_offers_promote_for_planned_external_work():
     text, view_kind = _format_work_notification(
         {

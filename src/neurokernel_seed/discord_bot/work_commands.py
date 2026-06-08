@@ -18,6 +18,7 @@ async def handle_work(
     *,
     user_id: str | None = None,
     channel_id: str | None = None,
+    work_view_factory: Any | None = None,
     activation_view_factory: Any | None = None,
     retry_view_factory: Any | None = None,
     promote_view_factory: Any | None = None,
@@ -28,7 +29,14 @@ async def handle_work(
     if command in {"list", "ls"}:
         return await list_work(core, user_id=user_id, channel_id=channel_id, promote_view_factory=promote_view_factory)
     if command in {"show", "get"}:
-        return await show_work(tail, core, activation_view_factory=activation_view_factory, retry_view_factory=retry_view_factory, promote_view_factory=promote_view_factory)
+        return await show_work(
+            tail,
+            core,
+            work_view_factory=work_view_factory,
+            activation_view_factory=activation_view_factory,
+            retry_view_factory=retry_view_factory,
+            promote_view_factory=promote_view_factory,
+        )
     if command == "promote":
         return await promote_work(tail, core)
     if command == "retry":
@@ -55,6 +63,7 @@ async def show_work(
     raw_work_id: str,
     core: CoreClient,
     *,
+    work_view_factory: Any | None,
     activation_view_factory: Any | None,
     retry_view_factory: Any | None,
     promote_view_factory: Any | None,
@@ -67,6 +76,8 @@ async def show_work(
     if not item:
         return "그 작업을 못 찾았어."
     text = _format_work_item_response(item, payload if isinstance(payload, dict) else {})
+    if item.get("status") == "proposed" and work_view_factory:
+        return BotResponse(text, view=work_view_factory(str(item.get("work_id"))))
     if item.get("type") == "external_work" and item.get("status") == "planned" and promote_view_factory:
         return BotResponse(text, view=promote_view_factory(str(item.get("work_id"))))
     if item.get("status") == "waiting_approval" and activation_view_factory:

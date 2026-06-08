@@ -54,7 +54,16 @@ async def handle_command(
     if command == "memory":
         return await handle_memory(rest, core, user_id=user_id, channel_id=channel_id)
     if command == "work":
-        return await handle_work(rest, core, user_id=user_id, channel_id=channel_id, activation_view_factory=activation_view_factory, retry_view_factory=retry_view_factory, promote_view_factory=promote_view_factory)
+        return await handle_work(
+            rest,
+            core,
+            user_id=user_id,
+            channel_id=channel_id,
+            work_view_factory=work_view_factory,
+            activation_view_factory=activation_view_factory,
+            retry_view_factory=retry_view_factory,
+            promote_view_factory=promote_view_factory,
+        )
     if command in {"improve", "self-improve", "self_improve", "자가개선"}:
         return await handle_self_improvement(rest, core)
     if command == "run":
@@ -268,7 +277,16 @@ async def maybe_route_work(
         return None
     route = str(payload.get("route") or payload.get("route_decision", {}).get("route") or "clarify")
     if route == "work_status":
-        response = await handle_work("list", core, user_id=user_id, channel_id=channel_id, activation_view_factory=activation_view_factory, retry_view_factory=retry_view_factory, promote_view_factory=promote_view_factory)
+        response = await handle_work(
+            "list",
+            core,
+            user_id=user_id,
+            channel_id=channel_id,
+            work_view_factory=work_view_factory,
+            activation_view_factory=activation_view_factory,
+            retry_view_factory=retry_view_factory,
+            promote_view_factory=promote_view_factory,
+        )
         return response if isinstance(response, BotResponse) else BotResponse(response)
     if route == "runtime_task":
         return None
