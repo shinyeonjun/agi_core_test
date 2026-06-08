@@ -118,6 +118,9 @@ class HarnessService:
     def add_work_note(self, work_id: str, *, actor: str = "api", note: str) -> dict[str, Any]:
         return self.work_items_service.add_note(work_id, actor=actor, note=note)
 
+    def mark_work_discord_notified(self, work_id: str, *, actor: str = "discord-work-notifier", payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self.work_items_service.mark_discord_notified(work_id, actor=actor, payload=payload)
+
     def transition_work_item(self, work_id: str, next_status: str, *, actor: str = "api", reason: str | None = None) -> dict[str, Any]:
         return self.work_items_service.transition(work_id, next_status, actor=actor, reason=reason)
 

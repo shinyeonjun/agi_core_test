@@ -119,6 +119,13 @@ def create_app(*, db_path: str | Path = "data/harness.db", project_root: str | P
     def work_item_note(work_id: str, payload: dict[str, Any]):
         return service.add_work_note(work_id, actor=str(payload.get("actor") or "api"), note=str(payload.get("note") or ""))
 
+    @app.post("/work-items/{work_id}/discord-notified")
+    def work_item_discord_notified(work_id: str, payload: dict[str, Any] | None = None):
+        payload = payload or {}
+        actor = str(payload.get("actor") or "discord-work-notifier")
+        event_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+        return service.mark_work_discord_notified(work_id, actor=actor, payload=event_payload)
+
     @app.post("/work-items/{work_id}/status")
     def work_item_status(work_id: str, payload: dict[str, Any]):
         return service.transition_work_item(

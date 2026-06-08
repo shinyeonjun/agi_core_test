@@ -154,3 +154,39 @@ def test_core_api_improvement_analysis_and_proposal(tmp_path):
     assert analyzed["candidate_gaps"][0]["output_key"] == "active_model_status"
     assert proposed["created_count"] == 1
     assert proposed["created"][0]["proposal"]["action_id"] == "get_active_model_status"
+
+
+@pytest.mark.skipif(importlib.util.find_spec("fastapi") is None, reason="fastapi not installed")
+def test_core_api_persists_discord_notification_mark(tmp_path):
+    from fastapi.testclient import TestClient
+    from neurokernel_seed.api.server import create_app
+    from neurokernel_seed.harness.memory import HarnessMemory
+
+    db = tmp_path / "harness.db"
+    with HarnessMemory(db) as memory:
+        memory.create_work_item(
+            work_id="work_runtime_training",
+            work_type="training_pipeline",
+            title="runtime_action 모델 재학습 후보",
+            goal="runtime_action 재학습",
+            status="proposed",
+            linked_entity_type="model_improvement",
+            metadata={"execution_kind": "training_pipeline"},
+        )
+
+    app = create_app(db_path=db, project_root=tmp_path)
+    client = TestClient(app)
+    response = client.post(
+        "/work-items/work_runtime_training/discord-notified",
+        json={
+            "actor": "test",
+            "payload": {"status": "proposed", "updated_at": "2026-06-08 00:21:41", "view_kind": "work"},
+        },
+    )
+
+    assert response.status_code == 200
+    with HarnessMemory(db) as memory:
+        events = memory.work_events("work_runtime_training")
+    marks = [event for event in events if event["event_type"] == "discord_notified"]
+    assert len(marks) == 1
+    assert marks[0]["payload_json"]["view_kind"] == "work"

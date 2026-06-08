@@ -67,6 +67,8 @@ async def notify_work_changes(
         detail = await _call(core.get, f"/work-items/{quote(work_id)}")
         if not isinstance(detail, dict):
             continue
+        if was_discord_notified(detail, status=status, updated_at=updated_at):
+            continue
         text, view_kind = format_work_notification(detail)
         channel = await resolve_notification_channel(client, item, config)
         if channel is None:
@@ -87,6 +89,7 @@ async def notify_work_changes(
                 view = proposal_view_factory(proposal_id)
         for index, chunk in enumerate(_discord_chunks(text)):
             await channel.send(chunk, view=view if index == 0 else None)
+        await mark_discord_notified(core, work_id, status=status, updated_at=updated_at, view_kind=view_kind)
 
 
 def is_notifiable_work_status(status: str) -> bool:
@@ -101,6 +104,32 @@ def is_autonomous_proposal(item: dict[str, Any]) -> bool:
         return True
     metadata = item.get("metadata_json") if isinstance(item.get("metadata_json"), dict) else {}
     return str(metadata.get("execution_kind") or "") in {"training_pipeline", "mcp_plugin_skill"}
+
+
+def was_discord_notified(detail: dict[str, Any], *, status: str, updated_at: str) -> bool:
+    events = detail.get("events") if isinstance(detail.get("events"), list) else []
+    for event in events:
+        if not isinstance(event, dict) or str(event.get("event_type") or "") != "discord_notified":
+            continue
+        payload = event.get("payload_json") if isinstance(event.get("payload_json"), dict) else {}
+        if str(payload.get("status") or "") == status and str(payload.get("updated_at") or "") == updated_at:
+            return True
+    return False
+
+
+async def mark_discord_notified(core: CoreClient, work_id: str, *, status: str, updated_at: str, view_kind: str | None) -> None:
+    payload = {
+        "actor": "discord-work-notifier",
+        "payload": {
+            "status": status,
+            "updated_at": updated_at,
+            "view_kind": view_kind,
+        },
+    }
+    try:
+        await _call(core.post, f"/work-items/{quote(work_id)}/discord-notified", payload)
+    except Exception as exc:
+        print(f"[discord-work-notifier] mark failed for work_id={work_id}: {type(exc).__name__}: {exc}", flush=True)
 
 
 async def resolve_notification_channel(client: Any, item: dict[str, Any], config: DiscordBotConfig) -> Any | None:

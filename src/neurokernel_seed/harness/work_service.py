@@ -71,6 +71,19 @@ class WorkItemService:
             item = memory.get_work_item(work_id)
         return {"work_item": item, "note": note_row}
 
+    def mark_discord_notified(self, work_id: str, *, actor: str = "discord-work-notifier", payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        with HarnessMemory(self.db_path) as memory:
+            item = memory.get_work_item(work_id)
+            event_payload = {
+                "status": item.get("status"),
+                "updated_at": item.get("updated_at"),
+                **(payload or {}),
+            }
+            memory.add_work_event(work_id, "discord_notified", actor=actor, payload=event_payload)
+            memory.conn.commit()
+            events = memory.work_events(work_id)
+        return {"work_item": item, "events": events, "notified": True}
+
     def transition(self, work_id: str, next_status: str, *, actor: str = "api", reason: str | None = None) -> dict[str, Any]:
         with HarnessMemory(self.db_path) as memory:
             item = memory.transition_work_item(work_id, next_status, actor=actor, payload={"reason": reason})
