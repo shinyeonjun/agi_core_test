@@ -342,15 +342,12 @@ def _pipeline_deficits(status: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _memory_snapshot(db_path: Path) -> dict[str, Any]:
     with HarnessMemory(db_path) as memory:
-        messages = _count(memory, "SELECT COUNT(*) FROM conversation_messages")
-        linked_messages = _count(memory, "SELECT COUNT(*) FROM conversation_messages WHERE linked_task_id IS NOT NULL AND linked_task_id != ''")
+        link_audit = memory.audit_conversation_task_links()
         interactions = _count(memory, "SELECT COUNT(*) FROM interaction_outcomes")
         known_candidates = _count(memory, "SELECT COUNT(*) FROM experience_candidates WHERE execution_result_known=1")
         total_candidates = _count(memory, "SELECT COUNT(*) FROM experience_candidates")
     return {
-        "conversation_messages": messages,
-        "linked_conversation_messages": linked_messages,
-        "conversation_task_link_rate": round(linked_messages / messages, 4) if messages else 0.0,
+        **link_audit,
         "interaction_outcomes": interactions,
         "known_candidate_outcomes": known_candidates,
         "candidate_rows": total_candidates,
@@ -379,9 +376,9 @@ def _self_improvement_readiness(
         ),
         _criterion(
             "conversation_task_linking",
-            int(memory.get("conversation_messages") or 0) == 0 or float(memory.get("conversation_task_link_rate") or 0.0) >= 0.25,
+            int(memory.get("task_linkable_messages") or 0) == 0 or float(memory.get("task_link_coverage") or 0.0) >= 0.8,
             "Discord 대화가 task/outcome과 충분히 연결되어야 학습 데이터가 됩니다.",
-            {"threshold": 0.25, "memory": memory},
+            {"threshold": 0.8, "memory": memory},
         ),
         _criterion(
             "missing_output_feedback",

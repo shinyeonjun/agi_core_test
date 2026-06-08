@@ -92,21 +92,29 @@ async def handle_command(
             return format_code_block(created)
         task_id = created.get("task", {}).get("task_id")
         dry_run = await _call(core.post, f"/tasks/{task_id}/dry-run", {})
-        return "작업을 만들고 미리 검사했어.\n" + format_code_block(dry_run)
+        return BotResponse(
+            "작업을 만들고 미리 검사했어.\n" + format_code_block(dry_run),
+            task_id=str(task_id) if task_id else None,
+            metadata={"task": task, "core_result": dry_run},
+        )
     if command in {"run-task", "runtask"}:
         task_id = rest.split()[0] if rest else ""
         if not task_id:
             return "task_id가 필요해."
         payload = await _call(core.post, f"/tasks/{task_id}/run", {})
-        return await humanize(core, payload, user_id=user_id, channel_id=channel_id)
+        return BotResponse(
+            await humanize(core, payload, user_id=user_id, channel_id=channel_id),
+            task_id=task_id,
+            metadata={"core_result": payload},
+        )
     if command == "approve":
         task_id, reason = _split_id_reason(rest)
-        await _call(core.post, f"/tasks/{task_id}/approve", {"approved_by": "discord", "reason": reason})
-        return "승인 처리했어."
+        payload = await _call(core.post, f"/tasks/{task_id}/approve", {"approved_by": "discord", "reason": reason})
+        return BotResponse("승인 처리했어.", task_id=task_id, metadata={"core_result": payload})
     if command == "reject":
         task_id, reason = _split_id_reason(rest)
-        await _call(core.post, f"/tasks/{task_id}/reject", {"rejected_by": "discord", "reason": reason})
-        return "거절 처리했어."
+        payload = await _call(core.post, f"/tasks/{task_id}/reject", {"rejected_by": "discord", "reason": reason})
+        return BotResponse("거절 처리했어.", task_id=task_id, metadata={"core_result": payload})
     if command == "trace":
         limit = _parse_int(rest, default=5, minimum=1, maximum=20)
         payload = await _call(core.get, f"/trace/recent?limit={limit}")

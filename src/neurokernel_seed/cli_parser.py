@@ -369,6 +369,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", default="data/harness.db")
     p.add_argument("--project-root", default=".")
 
+    p = sub.add_parser("harness-conversation-links")
+    p.add_argument("--db", default="data/harness.db")
+    p.add_argument("--project-root", default=".")
+    p.add_argument("--repair", action="store_true")
+    p.add_argument("--limit", type=int, default=500)
+
     p = sub.add_parser("activate-work-item")
     p.add_argument("work_id")
     p.add_argument("--actor", default="cli")

@@ -486,6 +486,141 @@ class HarnessMemory:
         self.conn.commit()
         return int(cur.rowcount)
 
+    def audit_conversation_task_links(self) -> dict[str, Any]:
+        messages = _scalar(self.conn, "SELECT COUNT(*) FROM conversation_messages")
+        linked_messages = _scalar(
+            self.conn,
+            "SELECT COUNT(*) FROM conversation_messages WHERE linked_task_id IS NOT NULL AND linked_task_id != ''",
+        )
+        linkable_messages = _scalar(
+            self.conn,
+            """
+            SELECT COUNT(DISTINCT cm.id)
+            FROM conversation_messages cm
+            JOIN interaction_outcomes io
+              ON io.user_id = cm.user_id
+             AND COALESCE(io.channel_id, '') = COALESCE(cm.channel_id, '')
+             AND io.user_message_id = cm.message_id
+             AND io.task_id IS NOT NULL
+             AND io.task_id != ''
+            WHERE cm.role = 'user'
+            """,
+        )
+        linked_linkable_messages = _scalar(
+            self.conn,
+            """
+            SELECT COUNT(DISTINCT cm.id)
+            FROM conversation_messages cm
+            JOIN interaction_outcomes io
+              ON io.user_id = cm.user_id
+             AND COALESCE(io.channel_id, '') = COALESCE(cm.channel_id, '')
+             AND io.user_message_id = cm.message_id
+             AND io.task_id IS NOT NULL
+             AND io.task_id != ''
+            WHERE cm.role = 'user'
+              AND cm.linked_task_id IS NOT NULL
+              AND cm.linked_task_id != ''
+            """,
+        )
+        repairable_messages = _scalar(
+            self.conn,
+            """
+            SELECT COUNT(DISTINCT cm.id)
+            FROM conversation_messages cm
+            JOIN interaction_outcomes io
+              ON io.user_id = cm.user_id
+             AND COALESCE(io.channel_id, '') = COALESCE(cm.channel_id, '')
+             AND io.user_message_id = cm.message_id
+             AND io.task_id IS NOT NULL
+             AND io.task_id != ''
+            WHERE cm.role = 'user'
+              AND (cm.linked_task_id IS NULL OR cm.linked_task_id = '')
+            """,
+        )
+        outcomes = _scalar(self.conn, "SELECT COUNT(*) FROM interaction_outcomes")
+        task_outcomes = _scalar(
+            self.conn,
+            "SELECT COUNT(*) FROM interaction_outcomes WHERE task_id IS NOT NULL AND task_id != ''",
+        )
+        return {
+            "conversation_messages": messages,
+            "linked_conversation_messages": linked_messages,
+            "conversation_task_link_rate": round(linked_messages / messages, 4) if messages else 0.0,
+            "task_linkable_messages": linkable_messages,
+            "linked_task_linkable_messages": linked_linkable_messages,
+            "task_link_coverage": round(linked_linkable_messages / linkable_messages, 4) if linkable_messages else 1.0,
+            "repairable_task_messages": repairable_messages,
+            "interaction_outcomes": outcomes,
+            "task_interaction_outcomes": task_outcomes,
+        }
+
+    def backfill_conversation_task_links(self, *, limit: int = 500) -> dict[str, Any]:
+        limit = max(1, min(int(limit), 5_000))
+        rows = self.conn.execute(
+            """
+            SELECT id, user_id, channel_id, user_message_id, assistant_message_id, task_id
+            FROM interaction_outcomes
+            WHERE task_id IS NOT NULL
+              AND task_id != ''
+              AND user_id IS NOT NULL
+              AND user_message_id IS NOT NULL
+              AND user_message_id != ''
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        user_updates = 0
+        assistant_updates = 0
+        for row in rows:
+            task_id = str(row["task_id"])
+            user_updates += self._link_message_from_outcome(
+                user_id=str(row["user_id"]),
+                channel_id=row["channel_id"],
+                message_id=str(row["user_message_id"]),
+                role="user",
+                task_id=task_id,
+            )
+            assistant_message_id = str(row["assistant_message_id"] or row["user_message_id"])
+            assistant_updates += self._link_message_from_outcome(
+                user_id=str(row["user_id"]),
+                channel_id=row["channel_id"],
+                message_id=assistant_message_id,
+                role="assistant",
+                task_id=task_id,
+            )
+        self.conn.commit()
+        return {
+            "scanned_outcomes": len(rows),
+            "linked_user_messages": user_updates,
+            "linked_assistant_messages": assistant_updates,
+            "total_updated": user_updates + assistant_updates,
+            "audit": self.audit_conversation_task_links(),
+        }
+
+    def _link_message_from_outcome(
+        self,
+        *,
+        user_id: str,
+        channel_id: str | None,
+        message_id: str,
+        role: str,
+        task_id: str,
+    ) -> int:
+        cur = self.conn.execute(
+            """
+            UPDATE conversation_messages
+            SET linked_task_id=?
+            WHERE user_id=?
+              AND COALESCE(channel_id, '') = COALESCE(?, '')
+              AND message_id=?
+              AND role=?
+              AND (linked_task_id IS NULL OR linked_task_id='')
+            """,
+            (_required_text(task_id, "task_id"), _required_text(user_id, "user_id"), channel_id, message_id, role),
+        )
+        return int(cur.rowcount)
+
     def recent_conversation_messages(self, user_id: str, *, channel_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 300))
         if channel_id:
@@ -1083,3 +1218,8 @@ def _experience_candidate_row(row: sqlite3.Row) -> dict[str, Any]:
     for key in ("selected", "executed", "execution_result_known"):
         payload[key] = bool(payload.get(key))
     return payload
+
+
+def _scalar(conn: sqlite3.Connection, query: str) -> int:
+    row = conn.execute(query).fetchone()
+    return int(row[0] if row is not None else 0)

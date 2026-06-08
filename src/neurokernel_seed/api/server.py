@@ -319,6 +319,15 @@ def create_app(*, db_path: str | Path = "data/harness.db", project_root: str | P
     def memory_link_message_to_task(payload: dict[str, Any]):
         return service.link_message_to_task(payload)
 
+    @app.get("/memory/conversation-links/audit")
+    def memory_conversation_links_audit():
+        return service.audit_conversation_task_links()
+
+    @app.post("/memory/conversation-links/backfill")
+    def memory_conversation_links_backfill(payload: dict[str, Any] | None = None):
+        payload = payload or {}
+        return service.backfill_conversation_task_links(limit=int(payload.get("limit") or 500))
+
     @app.get("/memory/recent")
     def memory_recent(user_id: str, channel_id: str | None = None, limit: int = 20):
         return service.recent_conversation(user_id, channel_id=channel_id, limit=limit)

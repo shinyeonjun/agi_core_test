@@ -88,6 +88,42 @@ def test_interaction_outcome_and_message_task_link_are_recorded(tmp_path):
     assert grouped[spec.task_id][0]["answer_quality"] == "complete"
 
 
+def test_conversation_task_link_audit_and_backfill_use_recorded_outcomes(tmp_path):
+    db = tmp_path / "harness.db"
+    spec = task_spec_from_dict({"goal": "디스크 확인", "target": "orangepi5", "allowed_actions": ["get_disk_usage"]})
+    with HarnessMemory(db) as memory:
+        memory.create_task(spec)
+        memory.add_conversation_message(user_id="discord:1", channel_id="chan", message_id="m1", role="user", content="디스크 알려줘")
+        memory.add_conversation_message(user_id="discord:1", channel_id="chan", message_id="m1", role="assistant", content="디스크 확인 완료")
+        memory.add_conversation_message(user_id="discord:1", channel_id="chan", message_id="m2", role="user", content="그냥 잡담")
+        memory.add_interaction_outcome(
+            user_id="discord:1",
+            channel_id="chan",
+            user_message_id="m1",
+            task_id=spec.task_id,
+            request_text="디스크 알려줘",
+            response_text="디스크 확인 완료",
+            required_outputs=["disk_usage"],
+            answered_outputs=["disk_usage"],
+            missing_outputs=[],
+            answer_quality="complete",
+            task_status="completed",
+            action_id="get_disk_usage",
+            success=True,
+        )
+        before = memory.audit_conversation_task_links()
+        repaired = memory.backfill_conversation_task_links()
+        after = memory.audit_conversation_task_links()
+
+    assert before["conversation_messages"] == 3
+    assert before["task_linkable_messages"] == 1
+    assert before["repairable_task_messages"] == 1
+    assert repaired["linked_user_messages"] == 1
+    assert repaired["linked_assistant_messages"] == 1
+    assert after["task_link_coverage"] == 1.0
+    assert after["conversation_task_link_rate"] < 1.0
+
+
 def test_agent_event_log_is_append_only_and_idempotent(tmp_path):
     db = tmp_path / "harness.db"
     with HarnessMemory(db) as memory:

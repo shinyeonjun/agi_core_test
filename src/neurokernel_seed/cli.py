@@ -413,6 +413,14 @@ def main(argv: list[str] | None = None) -> int:
         result = service.reject(args.task_id, rejected_by=args.rejected_by, reason=args.reason)
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
+    if args.cmd == "harness-conversation-links":
+        service = _make_harness_service(args.db, args.project_root)
+        if args.repair:
+            result = service.backfill_conversation_task_links(limit=args.limit)
+        else:
+            result = service.audit_conversation_task_links()
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
     if args.cmd == "activate-work-item":
         service = _make_harness_service(args.db, args.project_root)
         result = service.activate_work_item(args.work_id, actor=args.actor)

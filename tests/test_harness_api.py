@@ -99,6 +99,50 @@ def test_core_api_records_interaction_outcome(tmp_path):
 
 
 @pytest.mark.skipif(importlib.util.find_spec("fastapi") is None, reason="fastapi not installed")
+def test_core_api_audits_and_repairs_conversation_task_links(tmp_path):
+    from fastapi.testclient import TestClient
+    from neurokernel_seed.api.server import create_app
+
+    app = create_app(db_path=tmp_path / "harness.db", project_root=tmp_path)
+    client = TestClient(app)
+    created = client.post(
+        "/tasks",
+        json={
+            "goal": "디스크 확인",
+            "target": "orangepi5",
+            "allowed_actions": ["get_disk_usage"],
+            "risk_level": "low",
+            "requires_approval": False,
+            "mode": "readonly",
+        },
+    ).json()
+    task_id = created["task"]["task_id"]
+    client.post("/memory/messages", json={"user_id": "discord:1", "channel_id": "chan", "message_id": "m1", "role": "user", "content": "디스크 알려줘"})
+    client.post("/memory/messages", json={"user_id": "discord:1", "channel_id": "chan", "message_id": "m1", "role": "assistant", "content": "디스크 확인 완료"})
+    client.post(
+        "/memory/interaction-outcomes",
+        json={
+            "source": "discord",
+            "user_id": "discord:1",
+            "channel_id": "chan",
+            "user_message_id": "m1",
+            "task_id": task_id,
+            "request_text": "디스크 알려줘",
+            "response_text": "디스크 확인 완료",
+            "task": {"allowed_actions": ["get_disk_usage"]},
+            "core_result": {"status": "completed", "action": "get_disk_usage", "execution_result": {"success": True, "action_id": "get_disk_usage", "result": {}}},
+        },
+    )
+
+    before = client.get("/memory/conversation-links/audit").json()["audit"]
+    repaired = client.post("/memory/conversation-links/backfill", json={"limit": 20}).json()
+
+    assert before["task_link_coverage"] == 0.0
+    assert repaired["total_updated"] == 2
+    assert repaired["audit"]["task_link_coverage"] == 1.0
+
+
+@pytest.mark.skipif(importlib.util.find_spec("fastapi") is None, reason="fastapi not installed")
 def test_core_api_activation_error_returns_conflict_detail(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
     from neurokernel_seed.api.server import create_app

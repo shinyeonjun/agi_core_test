@@ -33,3 +33,14 @@ def test_inspect_code_structure_blocks_path_escape(tmp_path):
         assert "escapes project root" in str(exc)
     else:
         raise AssertionError("path escape should be rejected")
+
+
+def test_inspect_code_structure_accepts_utf8_bom_python_files(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "bom_module.py").write_text("\ufeffdef ok():\n    return True\n", encoding="utf-8")
+
+    report = inspect_code_structure(tmp_path)
+
+    assert report["parse_errors"] == []
+    assert report["scanned_files"] == 1

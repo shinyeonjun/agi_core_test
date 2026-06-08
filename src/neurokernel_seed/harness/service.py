@@ -536,6 +536,16 @@ class HarnessService:
             )
         return {"updated": updated}
 
+    def audit_conversation_task_links(self) -> dict[str, Any]:
+        with HarnessMemory(self.db_path) as memory:
+            audit = memory.audit_conversation_task_links()
+        return {"status": "completed", "schema_version": "neurokernel-conversation-task-link-audit-v1", "audit": audit}
+
+    def backfill_conversation_task_links(self, *, limit: int = 500) -> dict[str, Any]:
+        with HarnessMemory(self.db_path) as memory:
+            result = memory.backfill_conversation_task_links(limit=limit)
+        return {"status": "completed", "schema_version": "neurokernel-conversation-task-link-backfill-v1", **result}
+
     def recent_conversation(self, user_id: str, *, channel_id: str | None = None, limit: int = 20) -> dict[str, Any]:
         with HarnessMemory(self.db_path) as memory:
             messages = memory.recent_conversation_messages(user_id, channel_id=channel_id, limit=limit)

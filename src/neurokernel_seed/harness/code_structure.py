@@ -122,7 +122,7 @@ def _is_ignored(root: Path, path: Path) -> bool:
 
 
 def _inspect_python_file(root: Path, file_path: Path, thresholds: CodeStructureThresholds) -> dict[str, Any]:
-    text = file_path.read_text(encoding="utf-8", errors="replace")
+    text = file_path.read_text(encoding="utf-8-sig", errors="replace")
     lines = text.splitlines()
     tree = ast.parse(text, filename=str(file_path))
     functions = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]

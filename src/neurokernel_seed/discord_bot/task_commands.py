@@ -31,7 +31,7 @@ async def create_and_run(task: dict[str, Any], core: CoreClient, *, user_id: str
     return BotResponse(reply, task_id=str(task_id), metadata={"task": task, "core_result": payload})
 
 
-async def handle_plan(rest: str, core: CoreClient, *, user_id: str | None = None, channel_id: str | None = None) -> str:
+async def handle_plan(rest: str, core: CoreClient, *, user_id: str | None = None, channel_id: str | None = None) -> str | BotResponse:
     if not rest:
         return "어떤 일을 계획할지 뒤에 적어줘."
     payload = await language_to_core(core, rest, user_id=user_id, channel_id=channel_id)
@@ -44,8 +44,10 @@ async def handle_plan(rest: str, core: CoreClient, *, user_id: str | None = None
     chosen = dry_run.get("chosen", {}).get("safety", {}).get("decision") if isinstance(dry_run, dict) else None
     reply = required_text(payload.get("reply"), "language reply")
     if chosen in {"allow", "dry_run_only"}:
-        return f"{reply}\n안전 검사까지 통과했어. 실행하려면 `do {rest}`라고 말해줘."
-    return f"{reply}\n다만 바로 실행하기엔 확인이 더 필요해."
+        text = f"{reply}\n안전 검사까지 통과했어. 실행하려면 `do {rest}`라고 말해줘."
+    else:
+        text = f"{reply}\n다만 바로 실행하기엔 확인이 더 필요해."
+    return BotResponse(text, task_id=str(task_id) if task_id else None, metadata={"task": task, "core_result": dry_run})
 
 
 async def handle_do(rest: str, core: CoreClient, *, user_id: str | None = None, channel_id: str | None = None) -> str | BotResponse:

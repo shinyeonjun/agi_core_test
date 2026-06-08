@@ -229,6 +229,29 @@ def test_discord_improve_propose_command_creates_approval_candidates():
     assert core.calls[0][1] == "/self-improvement/propose"
 
 
+def test_run_task_command_returns_task_id_for_memory_linking():
+    class FakeCore:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, path):
+            raise AssertionError(f"unexpected GET {path}")
+
+        def post(self, path, payload=None):
+            self.calls.append(("POST", path, payload))
+            if path == "/tasks/task_1/run":
+                return {"task_id": "task_1", "status": "completed", "action": "get_disk_usage"}
+            if path == "/language/to-human":
+                return {"reply": "디스크 확인 완료"}
+            raise AssertionError(f"unexpected POST {path}")
+
+    response = asyncio.run(_handle_command("run-task task_1", FakeCore(), _bot_config(), user_id="u1", channel_id="c1"))
+
+    assert response.task_id == "task_1"
+    assert response.metadata["core_result"]["status"] == "completed"
+    assert response.text == "디스크 확인 완료"
+
+
 def test_nonempty_prefix_keeps_prefixed_command_mode():
     config = _bot_config(prefix="!nk", reply_without_prefix=False)
     assert _command_line_from_content("ㅎㅎㅎㅎ", config) is None
