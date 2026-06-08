@@ -160,7 +160,10 @@ class ImprovementWatchdog:
 
     def run_forever(self) -> None:
         while True:
-            self.run_once()
+            try:
+                self.run_once()
+            except Exception as exc:
+                print(f"[improvement-watchdog] error={type(exc).__name__}: {exc}", flush=True)
             if self.config.once:
                 return
             time.sleep(max(1.0, self.config.interval_seconds))

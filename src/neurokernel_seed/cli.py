@@ -463,6 +463,42 @@ def main(argv: list[str] | None = None) -> int:
         )
         watcher.run_forever()
         return 0
+    if args.cmd == "harness-model-improvements":
+        service = _make_harness_service(args.db, args.project_root)
+        if args.propose:
+            result = service.propose_model_improvements(
+                min_known_runtime_candidates=args.min_known_runtime_candidates,
+                min_new_known_runtime_candidates=args.min_new_known_runtime_candidates,
+                min_runtime_ranking_groups=args.min_runtime_ranking_groups,
+                target_runtime_top1=args.target_runtime_top1,
+                actor="cli",
+            )
+        else:
+            result = service.analyze_model_improvements(
+                min_known_runtime_candidates=args.min_known_runtime_candidates,
+                min_new_known_runtime_candidates=args.min_new_known_runtime_candidates,
+                min_runtime_ranking_groups=args.min_runtime_ranking_groups,
+                target_runtime_top1=args.target_runtime_top1,
+            )
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    if args.cmd == "serve-model-watchdog":
+        service = _make_harness_service(args.db, args.project_root)
+        from neurokernel_seed.harness.model_improvement import ModelImprovementConfig, ModelImprovementWatchdog
+        watcher = ModelImprovementWatchdog(
+            config=ModelImprovementConfig(
+                db_path=Path(args.db),
+                interval_seconds=args.interval_seconds,
+                min_known_runtime_candidates=args.min_known_runtime_candidates,
+                min_new_known_runtime_candidates=args.min_new_known_runtime_candidates,
+                min_runtime_ranking_groups=args.min_runtime_ranking_groups,
+                target_runtime_top1=args.target_runtime_top1,
+                once=args.once,
+            ),
+            service=service.model_improvement_service,
+        )
+        watcher.run_forever()
+        return 0
     if args.cmd == "language-to-core":
         from neurokernel_seed.language.codex_harness import CodexLanguageHarness, config_from_env
         config = config_from_env()

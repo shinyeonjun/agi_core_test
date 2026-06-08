@@ -115,8 +115,8 @@ class WorkItemService:
     def retry(self, work_id: str, *, actor: str = "api", max_attempts: int = 3) -> dict[str, Any]:
         with HarnessMemory(self.db_path) as memory:
             work = memory.get_work_item(work_id)
-            if str(work.get("type") or "") != "self_patch":
-                raise ValueError("only self_patch work items can be retried")
+            if str(work.get("type") or "") not in {"self_patch", "mcp_plugin_skill", "training_pipeline"}:
+                raise ValueError("only patch or training work items can be retried")
             status = str(work.get("status") or "")
             if status not in {"reviewing", "blocked", "failed"}:
                 raise ValueError(f"work item is not retryable from status: {status}")

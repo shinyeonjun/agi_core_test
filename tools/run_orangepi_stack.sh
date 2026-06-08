@@ -74,6 +74,7 @@ core_pid=""
 bot_pid=""
 worker_pid=""
 improvement_pid=""
+model_watchdog_pid=""
 
 stop_children() {
   if [[ -n "$worker_pid" ]] && kill -0 "$worker_pid" 2>/dev/null; then
@@ -81,6 +82,9 @@ stop_children() {
   fi
   if [[ -n "$improvement_pid" ]] && kill -0 "$improvement_pid" 2>/dev/null; then
     kill "$improvement_pid" 2>/dev/null || true
+  fi
+  if [[ -n "$model_watchdog_pid" ]] && kill -0 "$model_watchdog_pid" 2>/dev/null; then
+    kill "$model_watchdog_pid" 2>/dev/null || true
   fi
   if [[ -n "$bot_pid" ]] && kill -0 "$bot_pid" 2>/dev/null; then
     kill "$bot_pid" 2>/dev/null || true
@@ -150,7 +154,21 @@ if [[ "${NEUROKERNEL_IMPROVEMENT_ENABLED:-false}" =~ ^(1|true|yes|y)$ ]]; then
   improvement_pid="$!"
 fi
 
-echo "[stack] running. core_pid=${core_pid} bot_pid=${bot_pid} worker_pid=${worker_pid:-disabled} improvement_pid=${improvement_pid:-disabled}"
+if [[ "${NEUROKERNEL_MODEL_WATCHDOG_ENABLED:-false}" =~ ^(1|true|yes|y)$ ]]; then
+  echo "[stack] starting Model Improvement Watchdog"
+  python -m neurokernel_seed.cli serve-model-watchdog \
+    --db "$HARNESS_DB" \
+    --project-root "$PROJECT_ROOT" \
+    --interval-seconds "${NEUROKERNEL_MODEL_WATCHDOG_INTERVAL_SECONDS:-300}" \
+    --min-known-runtime-candidates "${NEUROKERNEL_MODEL_WATCHDOG_MIN_KNOWN_RUNTIME_CANDIDATES:-100}" \
+    --min-new-known-runtime-candidates "${NEUROKERNEL_MODEL_WATCHDOG_MIN_NEW_KNOWN_RUNTIME_CANDIDATES:-50}" \
+    --min-runtime-ranking-groups "${NEUROKERNEL_MODEL_WATCHDOG_MIN_RUNTIME_RANKING_GROUPS:-10}" \
+    --target-runtime-top1 "${NEUROKERNEL_MODEL_WATCHDOG_TARGET_RUNTIME_TOP1:-0.65}" \
+    >> "$LOG_DIR/model_improvement_watchdog.log" 2>&1 &
+  model_watchdog_pid="$!"
+fi
+
+echo "[stack] running. core_pid=${core_pid} bot_pid=${bot_pid} worker_pid=${worker_pid:-disabled} improvement_pid=${improvement_pid:-disabled} model_watchdog_pid=${model_watchdog_pid:-disabled}"
 set +e
 wait -n "$core_pid" "$bot_pid"
 exit_code="$?"

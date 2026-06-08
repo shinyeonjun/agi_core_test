@@ -23,6 +23,20 @@ def format_work_notification(payload: dict[str, Any]) -> tuple[str, str | None]:
             f"새 자기개선 후보가 올라왔어: {title}\n승인하면 개발 worker가 구현/테스트를 시작하고, 장착은 다시 승인받아.",
             view_kind,
         )
+    if status == "proposed" and str(item.get("type") or "") == "training_pipeline":
+        metadata = item.get("metadata_json") if isinstance(item.get("metadata_json"), dict) else {}
+        slot = str(metadata.get("model_slot") or "model")
+        return (
+            f"모델 학습 후보가 올라왔어: {title}\n슬롯: `{slot}`\n승인하면 학습 큐로 들어가고, 노트북 training worker가 NK 벤치/배포 파이프라인을 실행해.",
+            "work",
+        )
+    if status == "proposed" and str(item.get("type") or "") == "mcp_plugin_skill":
+        return (
+            f"MCP/플러그인/스킬 작업 후보가 올라왔어: {title}\n승인하면 격리된 개발 worker가 구현/테스트 패치를 만든 뒤 다시 승인받아.",
+            "work",
+        )
+    if status == "proposed":
+        return f"작업 후보가 올라왔어: {title}\n승인하면 큐에 들어가고 worker가 다음 단계를 진행해.", "work"
     child_summary = external_work_child_summary(children)
     if status == "planned" and str(item.get("type") or "") == "external_work" and child_summary:
         return child_summary, None
@@ -132,6 +146,10 @@ def work_progress(item: dict[str, Any], jobs: list[dict[str, Any]], *, child_ite
     user_action_required = status in {"proposed", "reviewing", "waiting_approval", "blocked", "failed"} or child_status in {"waiting_approval", "reviewing", "blocked", "failed"}
     if work_type == "self_patch":
         stage = self_patch_stage(status, latest_job_status)
+    elif work_type == "mcp_plugin_skill":
+        stage = self_patch_stage(status, latest_job_status)
+    elif work_type == "training_pipeline":
+        stage = training_pipeline_stage(status, latest_job_status)
     elif work_type == "external_work":
         stage = external_work_stage(status, latest_job_status, child_status=child_status)
     else:
@@ -153,7 +171,7 @@ def work_progress(item: dict[str, Any], jobs: list[dict[str, Any]], *, child_ite
         "worker_action_required": status in {"accepted", "running"} or (status == "planned" and work_type == "external_work" and active_child is None),
         "activation_possible": status == "waiting_approval" or child_status == "waiting_approval",
         "promotion_possible": promotion_possible,
-        "retry_possible": status in {"reviewing", "blocked", "failed"} and work_type == "self_patch",
+        "retry_possible": status in {"reviewing", "blocked", "failed"} and work_type in {"self_patch", "mcp_plugin_skill", "training_pipeline"},
     }
 
 
@@ -206,6 +224,24 @@ def external_work_stage(status: str, latest_job_status: str | None, *, child_sta
         return "work_completed"
     if status in {"blocked", "failed"}:
         return "work_blocked_or_failed"
+    return "not_active"
+
+
+def training_pipeline_stage(status: str, latest_job_status: str | None) -> str:
+    if status == "proposed":
+        return "waiting_for_user_to_accept_training"
+    if status == "accepted":
+        return "accepted_and_waiting_for_training_worker"
+    if status == "running" or latest_job_status == "running":
+        return "training_worker_running"
+    if status == "reviewing":
+        return "training_attempt_finished_needs_review"
+    if status == "blocked":
+        return "waiting_for_laptop_training_worker_or_manual_review"
+    if status == "completed":
+        return "training_pipeline_completed"
+    if status == "failed":
+        return "training_pipeline_failed"
     return "not_active"
 
 

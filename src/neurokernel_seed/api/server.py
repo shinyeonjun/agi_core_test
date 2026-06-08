@@ -71,6 +71,31 @@ def create_app(*, db_path: str | Path = "data/harness.db", project_root: str | P
             actor=str(payload.get("actor") or "api"),
         )
 
+    @app.get("/model-improvements/analyze")
+    def model_improvements_analyze(
+        min_known_runtime_candidates: int = 100,
+        min_new_known_runtime_candidates: int = 50,
+        min_runtime_ranking_groups: int = 10,
+        target_runtime_top1: float = 0.65,
+    ):
+        return service.analyze_model_improvements(
+            min_known_runtime_candidates=min_known_runtime_candidates,
+            min_new_known_runtime_candidates=min_new_known_runtime_candidates,
+            min_runtime_ranking_groups=min_runtime_ranking_groups,
+            target_runtime_top1=target_runtime_top1,
+        )
+
+    @app.post("/model-improvements/propose")
+    def model_improvements_propose(payload: dict[str, Any] | None = None):
+        payload = payload or {}
+        return service.propose_model_improvements(
+            min_known_runtime_candidates=int(payload.get("min_known_runtime_candidates") or 100),
+            min_new_known_runtime_candidates=int(payload.get("min_new_known_runtime_candidates") or 50),
+            min_runtime_ranking_groups=int(payload.get("min_runtime_ranking_groups") or 10),
+            target_runtime_top1=float(payload.get("target_runtime_top1") or 0.65),
+            actor=str(payload.get("actor") or "api"),
+        )
+
     @app.get("/queue/health")
     def queue_health():
         return service.queue_health()

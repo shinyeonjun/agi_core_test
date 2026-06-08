@@ -183,6 +183,8 @@ def queue_name_for_work_type(work_type: str) -> str:
         "self_patch": "self_patch",
         "external_work": "external_work",
         "runtime_task": "runtime_task",
+        "training_pipeline": "training_pipeline",
+        "mcp_plugin_skill": "self_patch",
     }
     return mapping.get(str(work_type or "").strip(), "external_work")
 

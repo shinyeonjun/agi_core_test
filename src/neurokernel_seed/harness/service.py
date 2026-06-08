@@ -14,6 +14,7 @@ from .executors.readonly_system import ReadOnlyExecutor
 from .improvement import ImprovementService
 from .interaction_contract import interaction_contract_from_runtime
 from .memory import HarnessMemory
+from .model_improvement import ModelImprovementService
 from .preferences import preference_map
 from .runtime_policy import RuntimeActionPolicy
 from .safety_gate import check_action_safety
@@ -51,6 +52,7 @@ class HarnessService:
         self.work_items_service = WorkItemService(db_path=self.db_path, work_queue=self.work_queue, queue_error=self.queue_error)
         self.capability_service = CapabilityProposalService(db_path=self.db_path, catalog=self.catalog, work_items=self.work_items_service)
         self.improvement_service = ImprovementService(db_path=self.db_path, catalog=self.catalog, work_items=self.work_items_service)
+        self.model_improvement_service = ModelImprovementService(db_path=self.db_path, work_items=self.work_items_service)
         self.activation_service = ActivationService(build_activation_config_from_env(db_path=self.db_path, project_root=self.project_root))
 
     def health(self) -> dict[str, Any]:
@@ -161,6 +163,38 @@ class HarnessService:
         return self.improvement_service.propose_missing_output_gaps(
             min_gap_count=min_gap_count,
             lookback=lookback,
+            actor=actor,
+        )
+
+    def analyze_model_improvements(
+        self,
+        *,
+        min_known_runtime_candidates: int = 100,
+        min_new_known_runtime_candidates: int = 50,
+        min_runtime_ranking_groups: int = 10,
+        target_runtime_top1: float = 0.65,
+    ) -> dict[str, Any]:
+        return self.model_improvement_service.analyze(
+            min_known_runtime_candidates=min_known_runtime_candidates,
+            min_new_known_runtime_candidates=min_new_known_runtime_candidates,
+            min_runtime_ranking_groups=min_runtime_ranking_groups,
+            target_runtime_top1=target_runtime_top1,
+        )
+
+    def propose_model_improvements(
+        self,
+        *,
+        min_known_runtime_candidates: int = 100,
+        min_new_known_runtime_candidates: int = 50,
+        min_runtime_ranking_groups: int = 10,
+        target_runtime_top1: float = 0.65,
+        actor: str = "model_improvement_watchdog",
+    ) -> dict[str, Any]:
+        return self.model_improvement_service.propose_training_work(
+            min_known_runtime_candidates=min_known_runtime_candidates,
+            min_new_known_runtime_candidates=min_new_known_runtime_candidates,
+            min_runtime_ranking_groups=min_runtime_ranking_groups,
+            target_runtime_top1=target_runtime_top1,
             actor=actor,
         )
 

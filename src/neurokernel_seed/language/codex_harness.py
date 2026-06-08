@@ -627,7 +627,7 @@ def _work_route_prompt(user_text: str, context: dict[str, Any]) -> str:
             "- runtime_task: the active action catalog can already satisfy the request, usually a read-only status/check/run.",
             "- work_status: the user asks about queued work, work item state, development job progress, or current pending work.",
             "- self_patch: the user wants a small concrete capability that the agent does not have yet, and it could be implemented, tested, and attached to this agent later.",
-            "- external_work: broad research, project building, paper collection, dataset/training, larger coding work, planning, or multi-step work that should become a queued work item.",
+            "- external_work: broad research, project building, paper collection, dataset/training, MCP/plugin/skill work, larger coding work, planning, or multi-step work that should become a queued work item.",
             "- unsafe: secret extraction, permission bypass, destructive action, unapproved deployment, credential handling, or clearly forbidden work.",
             "- clarify: the request is too vague to route responsibly.",
             "",

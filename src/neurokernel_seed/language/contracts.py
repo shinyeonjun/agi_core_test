@@ -132,7 +132,7 @@ ALLOWED_GAP_TYPES = {
 ALLOWED_CAPABILITY_RISK_LEVELS = {"none", "low", "medium", "high", "forbidden"}
 ALLOWED_CAPABILITY_TARGETS = {"local", "orangepi5"}
 ALLOWED_WORK_ROUTES = {"runtime_task", "work_status", "self_patch", "external_work", "unsafe", "clarify"}
-ALLOWED_WORK_TYPES = {"runtime_task", "self_patch", "external_work"}
+ALLOWED_WORK_TYPES = {"runtime_task", "self_patch", "external_work", "training_pipeline", "mcp_plugin_skill"}
 ALLOWED_WORK_PRIORITIES = {"low", "medium", "high"}
 ALLOWED_WORK_RISK_LEVELS = {"none", "low", "medium", "high", "forbidden"}
 
@@ -273,9 +273,10 @@ def validate_work_route_decision(data: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(work_item, dict):
             raise LanguageContractError(f"{route} requires work_item")
         checked_work_item = _validate_work_item(work_item)
-        expected_type = "self_patch" if route == "self_patch" else "external_work"
-        if checked_work_item["type"] != expected_type:
-            raise LanguageContractError(f"{route} requires work_item.type={expected_type}")
+        if route == "self_patch" and checked_work_item["type"] != "self_patch":
+            raise LanguageContractError("self_patch requires work_item.type=self_patch")
+        if route == "external_work" and checked_work_item["type"] not in {"external_work", "training_pipeline", "mcp_plugin_skill"}:
+            raise LanguageContractError("external_work requires an external, training, or harness extension work type")
     elif work_item is None:
         checked_work_item = None
     elif isinstance(work_item, dict):

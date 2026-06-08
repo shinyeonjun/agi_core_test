@@ -10,10 +10,19 @@ from typing import Any, Protocol
 
 from .memory import HarnessMemory
 from .self_patch import CodexSelfPatchWorker, build_self_patch_config_from_env
+from .training_worker import TrainingPipelineWorker, build_training_worker_config_from_env
 from .work_queue import WorkQueue, build_work_queue_from_env
 
 
+PATCH_WORK_TYPES = {"self_patch", "mcp_plugin_skill"}
+
+
 class SelfPatchRunner(Protocol):
+    def run(self, *, job_id: str, work: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+        ...
+
+
+class TrainingRunner(Protocol):
     def run(self, *, job_id: str, work: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         ...
 
@@ -31,13 +40,23 @@ class WorkDispatcherConfig:
 
 
 class WorkDispatcher:
-    def __init__(self, *, config: WorkDispatcherConfig, work_queue: WorkQueue | None = None, self_patch_runner: SelfPatchRunner | None = None):
+    def __init__(
+        self,
+        *,
+        config: WorkDispatcherConfig,
+        work_queue: WorkQueue | None = None,
+        self_patch_runner: SelfPatchRunner | None = None,
+        training_runner: TrainingRunner | None = None,
+    ):
         self.config = config
         self.work_queue = work_queue or build_work_queue_from_env()
         if self.work_queue is None:
             raise RuntimeError("work queue is not configured")
         self.self_patch_runner = self_patch_runner or CodexSelfPatchWorker(
             build_self_patch_config_from_env(project_root=self.config.project_root)
+        )
+        self.training_runner = training_runner or TrainingPipelineWorker(
+            build_training_worker_config_from_env(project_root=self.config.project_root)
         )
 
     def run_forever(self) -> None:
@@ -90,9 +109,9 @@ class WorkDispatcher:
         except Exception as exc:
             with HarnessMemory(self.config.db_path) as memory:
                 try:
-                    is_self_patch = str(payload.get("work_type") or "") == "self_patch"
-                    job = memory.mark_work_job_failed(job_id, error=str(exc), actor=self.config.worker_id, retryable=not is_self_patch)
-                    if is_self_patch:
+                    patch_like = str(payload.get("work_type") or "") in PATCH_WORK_TYPES
+                    job = memory.mark_work_job_failed(job_id, error=str(exc), actor=self.config.worker_id, retryable=not patch_like)
+                    if patch_like:
                         result = {
                             "status": "codex_failed",
                             "job_id": job_id,
@@ -103,6 +122,17 @@ class WorkDispatcher:
                         memory.add_work_event(work_id, "self_patch_failed", actor=self.config.worker_id, payload={"job_id": job_id, "result": result})
                         memory.add_work_note(work_id, actor=self.config.worker_id, note=_result_note("self_patch", job_id, result))
                         _transition_if_allowed(memory, work_id, "reviewing", actor=self.config.worker_id, payload={"job_id": job_id, "result": result})
+                    elif str(payload.get("work_type") or "") == "training_pipeline":
+                        result = {
+                            "status": "training_failed",
+                            "job_id": job_id,
+                            "work_id": work_id,
+                            "error": str(exc),
+                            "next_required_action": "inspect_training_worker_error",
+                        }
+                        memory.add_work_event(work_id, "training_failed", actor=self.config.worker_id, payload={"job_id": job_id, "result": result})
+                        memory.add_work_note(work_id, actor=self.config.worker_id, note=_result_note("training_pipeline", job_id, result))
+                        _transition_if_allowed(memory, work_id, "reviewing", actor=self.config.worker_id, payload={"job_id": job_id, "result": result})
                     if job.get("status") == "dead_letter":
                         self.work_queue.dead_letter({"job_id": job_id, "work_id": work_id, "queue_name": queue_name, "error": str(exc), "payload": payload})
                         self.work_queue.ack(queue_name, message_id)
@@ -112,8 +142,10 @@ class WorkDispatcher:
 
     def _run_work(self, *, job_id: str, queue_name: str, work: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         work_type = str(work.get("type") or "")
-        if work_type == "self_patch":
+        if work_type in PATCH_WORK_TYPES:
             return self.self_patch_runner.run(job_id=job_id, work=work, payload=payload)
+        if work_type == "training_pipeline":
+            return self.training_runner.run(job_id=job_id, work=work, payload=payload)
         return {"status": "dispatched", "queue_name": queue_name, "note": _dispatch_note(work_type, job_id)}
 
 
@@ -133,7 +165,16 @@ def _mark_runnable_work_started(memory: HarnessMemory, work: dict[str, Any], *, 
     work_id = str(work.get("work_id") or "")
     work_type = str(work.get("type") or "")
     status = str(work.get("status") or "")
-    if work_type != "self_patch":
+    if work_type == "training_pipeline":
+        if status in {"accepted", "planned"}:
+            memory.transition_work_item(work_id, "running", actor=actor, payload={"job_id": job_id, "queue_name": queue_name})
+            return True
+        if status == "running":
+            memory.add_work_event(work_id, "worker_resumed_running_work", actor=actor, payload={"job_id": job_id, "queue_name": queue_name})
+            return True
+        memory.add_work_event(work_id, "worker_observed_non_runnable_status", actor=actor, payload={"job_id": job_id, "status": status})
+        return False
+    if work_type not in PATCH_WORK_TYPES:
         if status == "accepted":
             memory.transition_work_item(work_id, "planned", actor=actor, payload={"job_id": job_id, "queue_name": queue_name})
             return True
@@ -155,7 +196,17 @@ def _mark_runnable_work_started(memory: HarnessMemory, work: dict[str, Any], *, 
 def _record_work_result(memory: HarnessMemory, *, work_id: str, work_type: str, job_id: str, result: dict[str, Any], actor: str) -> None:
     status = str(result.get("status") or "unknown")
     memory.add_work_note(work_id, actor=actor, note=_result_note(work_type, job_id, result))
-    if work_type != "self_patch":
+    if work_type == "training_pipeline":
+        if status == "training_completed":
+            _transition_if_allowed(memory, work_id, "completed", actor=actor, payload={"job_id": job_id, "result": result})
+        elif status == "waiting_for_training_node":
+            _transition_if_allowed(memory, work_id, "blocked", actor=actor, payload={"job_id": job_id, "result": result})
+        elif status == "training_failed":
+            _transition_if_allowed(memory, work_id, "reviewing", actor=actor, payload={"job_id": job_id, "result": result})
+        else:
+            _transition_if_allowed(memory, work_id, "blocked", actor=actor, payload={"job_id": job_id, "result": result})
+        return
+    if work_type not in PATCH_WORK_TYPES:
         return
     if status == "patch_ready":
         _transition_if_allowed(memory, work_id, "waiting_approval", actor=actor, payload={"job_id": job_id, "result": result})
@@ -176,7 +227,7 @@ def _transition_if_allowed(memory: HarnessMemory, work_id: str, next_status: str
 
 def _result_note(work_type: str, job_id: str, result: dict[str, Any]) -> str:
     status = str(result.get("status") or "unknown")
-    if work_type == "self_patch":
+    if work_type in PATCH_WORK_TYPES:
         patch_path = result.get("patch_path") or ""
         changed = ", ".join(result.get("changed_files") or [])
         analysis = result.get("failure_analysis") if isinstance(result.get("failure_analysis"), dict) else {}
@@ -185,6 +236,12 @@ def _result_note(work_type: str, job_id: str, result: dict[str, Any]) -> str:
         failure = f" primary_failure={primary_failure}." if primary_failure else ""
         summary_text = f" summary={summary}" if summary else ""
         return f"Self-patch job {job_id} finished with status={status}.{failure} patch={patch_path}. changed_files={changed or 'none'}.{summary_text}"
+    if work_type == "training_pipeline":
+        command = " ".join(str(part) for part in (result.get("command") or []))
+        report = result.get("run_dir") or result.get("report") or ""
+        error = result.get("error") or result.get("stderr_tail") or ""
+        detail = f" error={str(error)[:500]}" if error else ""
+        return f"Training job {job_id} finished with status={status}. run_dir={report}. command={command}.{detail}"
     return str(result.get("note") or _dispatch_note(work_type, job_id))
 
 
