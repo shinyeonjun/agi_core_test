@@ -26,6 +26,22 @@ class TrainingWorkerError(RuntimeError):
     pass
 
 
+def normalize_training_command(command_spec: dict[str, Any]) -> tuple[str, list[str]]:
+    action = str(command_spec.get("action") or "").strip()
+    args = command_spec.get("args") if isinstance(command_spec.get("args"), list) else []
+    if action not in ALLOWED_NK_ACTIONS:
+        raise TrainingWorkerError(f"nk action is not allowed for training worker: {action}")
+    return action, [str(value) for value in args]
+
+
+def build_training_command(command_spec: dict[str, Any], *, python_executable: str | None = None) -> list[str]:
+    action, args = normalize_training_command(command_spec)
+    command = [python_executable or sys.executable, "-m", "neurokernel_seed.nk_cli", action, *args]
+    if "--json" not in args:
+        command.append("--json")
+    return command
+
+
 class TrainingCommandRunner(Protocol):
     def __call__(self, cmd: list[str], *, cwd: Path, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
         ...
@@ -47,14 +63,7 @@ class TrainingPipelineWorker:
     def run(self, *, job_id: str, work: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         metadata = work.get("metadata_json") if isinstance(work.get("metadata_json"), dict) else {}
         command_spec = metadata.get("nk_command") if isinstance(metadata.get("nk_command"), dict) else {}
-        action = str(command_spec.get("action") or "").strip()
-        args = command_spec.get("args") if isinstance(command_spec.get("args"), list) else []
-        if action not in ALLOWED_NK_ACTIONS:
-            raise TrainingWorkerError(f"nk action is not allowed for training worker: {action}")
-        safe_args = [str(value) for value in args]
-        command = [sys.executable, "-m", "neurokernel_seed.nk_cli", action, *safe_args]
-        if "--json" not in safe_args:
-            command.append("--json")
+        command = build_training_command(command_spec)
 
         project_root = self.config.project_root.resolve()
         run_dir = (project_root / self.config.run_root / _safe_name(job_id)).resolve()

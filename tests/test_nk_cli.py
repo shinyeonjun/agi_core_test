@@ -1388,3 +1388,117 @@ def test_nk_bench_writes_top_comparable_result(tmp_path, monkeypatch):
 
     assert result["interpretation"]["verdict"] == "hybrid_adds_value"
     assert (tmp_path / "baseline" / "gate_ablation_result.json").exists()
+
+
+def test_nk_training_aliases_are_known():
+    assert nk_menu.normalize_action("학습대기") == "training-pending"
+    assert nk_menu.normalize_action("학습실행") == "training-run"
+    assert nk_menu.dashboard_action("학습대기") == "training-pending"
+    assert nk_menu.dashboard_action("학습실행") == "training-run"
+    parser = nk_cli._build_parser()
+    assert nk_menu.normalize_action(parser.parse_args(["학습대기"]).action) == "training-pending"
+    assert nk_menu.normalize_action(parser.parse_args(["학습실행"]).action) == "training-run"
+
+
+def test_nk_training_pending_lists_remote_training_work(monkeypatch):
+    work = {
+        "work_id": "work_runtime_training_1",
+        "type": "training_pipeline",
+        "status": "proposed",
+        "title": "runtime_action 모델 재학습 후보",
+        "priority": "medium",
+        "risk_level": "medium",
+        "metadata_json": {
+            "slot": "runtime_action",
+            "nk_command": {"action": "runtime-pipeline", "args": ["--source", "edge", "--device", "cuda"]},
+        },
+    }
+
+    def fake_remote_request(args, method, path, *, query=None, payload=None):
+        assert method == "GET"
+        assert path == "/work-items"
+        assert query["work_type"] == "training_pipeline"
+        return {"items": [work]}
+
+    monkeypatch.setattr(nk_cli, "_remote_core_request", fake_remote_request)
+
+    result = nk_cli._run_action(
+        argparse.Namespace(
+            action="training-pending",
+            remote_host="orangepi5",
+            remote_project="/remote",
+            remote_core_url="http://127.0.0.1:8765",
+            ssh_connect_timeout=10,
+            limit=10,
+            include_status=None,
+            json=False,
+        )
+    )
+
+    assert result["count"] == 1
+    assert result["items"][0]["work_id"] == "work_runtime_training_1"
+    assert result["items"][0]["command"][:2] == ["runtime-pipeline", "--source"]
+
+
+def test_nk_training_run_executes_allowed_command_and_records_work(monkeypatch, tmp_path):
+    work = {
+        "work_id": "work_runtime_training_1",
+        "type": "training_pipeline",
+        "status": "proposed",
+        "title": "runtime_action 모델 재학습 후보",
+        "metadata_json": {
+            "slot": "runtime_action",
+            "nk_command": {"action": "runtime-pipeline", "args": ["--source", "edge", "--device", "cpu"]},
+        },
+    }
+    remote_calls = []
+
+    def fake_remote_request(args, method, path, *, query=None, payload=None):
+        remote_calls.append((method, path, payload))
+        if method == "GET" and path == "/work-items":
+            return {"items": [work]}
+        if method == "GET" and path == "/work-items/work_runtime_training_1":
+            return {"work_item": work}
+        return {"work_item": {**work, "status": (payload or {}).get("status", work["status"])}}
+
+    executed = []
+
+    def fake_run_action(args):
+        executed.append(vars(args).copy())
+        return {"status": "deployed", "artifacts": {"model": "artifacts/runtime_action_model.pt"}}
+
+    monkeypatch.setenv("NEUROKERNEL_MANUAL_TRAINING_JOB_DIR", str(tmp_path))
+    monkeypatch.setattr(nk_cli, "_remote_core_request", fake_remote_request)
+    monkeypatch.setattr(nk_cli, "_run_action", fake_run_action)
+
+    result = nk_cli._run_training_run_action(
+        argparse.Namespace(
+            action="training-run",
+            remote_host="orangepi5",
+            remote_project="/remote",
+            remote_core_url="http://127.0.0.1:8765",
+            ssh_connect_timeout=10,
+            limit=10,
+            include_status=None,
+            work_id=None,
+            index=1,
+            device="cuda",
+            dry_run=False,
+            json=False,
+        )
+    )
+
+    assert result["status"] == "completed"
+    assert executed[0]["action"] == "runtime-pipeline"
+    assert executed[0]["device"] == "cuda"
+    assert (
+        "POST",
+        "/work-items/work_runtime_training_1/status",
+        {"status": "running", "actor": "nk-manual-training", "reason": "manual laptop training started by nk"},
+    ) in remote_calls
+    assert remote_calls[-1] == (
+        "POST",
+        "/work-items/work_runtime_training_1/status",
+        {"status": "completed", "actor": "nk-manual-training", "reason": "manual laptop training completed"},
+    )
+    assert Path(result["report"]).exists()
