@@ -28,6 +28,15 @@ def build_view_factories(
     allowed_user_ids: tuple[int, ...],
     activation_verify_note: ActivationVerifyNote,
 ) -> DiscordViewFactories:
+    def _button(view: Any, *, label: str, style: Any, custom_id: str, callback: Callable[[Any, Any], Any]) -> None:
+        item = discord.ui.Button(label=label, style=style, custom_id=custom_id)
+
+        async def dispatch(interaction: Any) -> None:
+            await callback(interaction, item)
+
+        item.callback = dispatch
+        view.add_item(item)
+
     class AllowedInteractionMixin:
         async def _allowed(self, interaction: Any) -> bool:
             user_id = int(getattr(getattr(interaction, "user", None), "id", 0) or 0)
@@ -52,8 +61,11 @@ def build_view_factories(
 
     class ProposalReviewView(AllowedInteractionMixin, discord.ui.View):
         def __init__(self, proposal_id: str):
-            super().__init__(timeout=60 * 60 * 24)
+            super().__init__(timeout=None)
             self.proposal_id = proposal_id
+            _button(self, label="개발 후보 승인", style=discord.ButtonStyle.success, custom_id=f"nk:proposal:{proposal_id}:approve-dev", callback=self.approve_dev)
+            _button(self, label="보류", style=discord.ButtonStyle.secondary, custom_id=f"nk:proposal:{proposal_id}:defer", callback=self.defer)
+            _button(self, label="거절", style=discord.ButtonStyle.danger, custom_id=f"nk:proposal:{proposal_id}:reject", callback=self.reject)
 
         async def _transition(self, interaction: Any, status: str, path: str, label: str) -> None:
             if not await self._allowed(interaction):
@@ -67,22 +79,22 @@ def build_view_factories(
             except Exception as exc:
                 await self._send_error(interaction, "처리 실패", exc)
 
-        @discord.ui.button(label="개발 후보 승인", style=discord.ButtonStyle.success)
         async def approve_dev(self, interaction: Any, button: Any) -> None:
             await self._transition(interaction, "approved_for_dev", "approve-dev", "좋아, 개발 후보로 올려뒀어")
 
-        @discord.ui.button(label="보류", style=discord.ButtonStyle.secondary)
         async def defer(self, interaction: Any, button: Any) -> None:
             await self._transition(interaction, "deferred", "defer", "일단 보류해둘게")
 
-        @discord.ui.button(label="거절", style=discord.ButtonStyle.danger)
         async def reject(self, interaction: Any, button: Any) -> None:
             await self._transition(interaction, "rejected", "reject", "후보를 거절 처리했어")
 
     class WorkReviewView(AllowedInteractionMixin, discord.ui.View):
         def __init__(self, work_id: str):
-            super().__init__(timeout=60 * 60 * 24)
+            super().__init__(timeout=None)
             self.work_id = work_id
+            _button(self, label="작업 승인", style=discord.ButtonStyle.success, custom_id=f"nk:work:{work_id}:accepted", callback=self.accept_work)
+            _button(self, label="보류", style=discord.ButtonStyle.secondary, custom_id=f"nk:work:{work_id}:deferred", callback=self.defer_work)
+            _button(self, label="거절", style=discord.ButtonStyle.danger, custom_id=f"nk:work:{work_id}:rejected", callback=self.reject_work)
 
         async def _transition(self, interaction: Any, status: str, label: str) -> None:
             if not await self._allowed(interaction):
@@ -96,24 +108,22 @@ def build_view_factories(
             except Exception as exc:
                 await self._send_error(interaction, "처리 실패", exc)
 
-        @discord.ui.button(label="작업 승인", style=discord.ButtonStyle.success)
         async def accept_work(self, interaction: Any, button: Any) -> None:
             await self._transition(interaction, "accepted", "작업을 승인했어")
 
-        @discord.ui.button(label="보류", style=discord.ButtonStyle.secondary)
         async def defer_work(self, interaction: Any, button: Any) -> None:
             await self._transition(interaction, "deferred", "작업을 보류했어")
 
-        @discord.ui.button(label="거절", style=discord.ButtonStyle.danger)
         async def reject_work(self, interaction: Any, button: Any) -> None:
             await self._transition(interaction, "rejected", "작업을 거절했어")
 
     class ActivationReviewView(AllowedInteractionMixin, discord.ui.View):
         def __init__(self, work_id: str):
-            super().__init__(timeout=60 * 60 * 24)
+            super().__init__(timeout=None)
             self.work_id = work_id
+            _button(self, label="패치 장착 승인", style=discord.ButtonStyle.success, custom_id=f"nk:activation:{work_id}:activate", callback=self.activate)
+            _button(self, label="수정 필요", style=discord.ButtonStyle.secondary, custom_id=f"nk:activation:{work_id}:reviewing", callback=self.needs_review)
 
-        @discord.ui.button(label="패치 장착 승인", style=discord.ButtonStyle.success)
         async def activate(self, interaction: Any, button: Any) -> None:
             if not await self._allowed(interaction):
                 return
@@ -127,7 +137,6 @@ def build_view_factories(
             except Exception as exc:
                 await self._send_error(interaction, "장착 실패", exc)
 
-        @discord.ui.button(label="수정 필요", style=discord.ButtonStyle.secondary)
         async def needs_review(self, interaction: Any, button: Any) -> None:
             if not await self._allowed(interaction):
                 return
@@ -140,10 +149,10 @@ def build_view_factories(
 
     class WorkRetryView(AllowedInteractionMixin, discord.ui.View):
         def __init__(self, work_id: str):
-            super().__init__(timeout=60 * 60 * 24)
+            super().__init__(timeout=None)
             self.work_id = work_id
+            _button(self, label="수정 재시도", style=discord.ButtonStyle.primary, custom_id=f"nk:retry:{work_id}:retry", callback=self.retry)
 
-        @discord.ui.button(label="수정 재시도", style=discord.ButtonStyle.primary)
         async def retry(self, interaction: Any, button: Any) -> None:
             if not await self._allowed(interaction):
                 return
@@ -161,10 +170,10 @@ def build_view_factories(
 
     class WorkPromoteView(AllowedInteractionMixin, discord.ui.View):
         def __init__(self, work_id: str):
-            super().__init__(timeout=60 * 60 * 24)
+            super().__init__(timeout=None)
             self.work_id = work_id
+            _button(self, label="개발 작업으로 전환", style=discord.ButtonStyle.primary, custom_id=f"nk:promote:{work_id}:promote", callback=self.promote)
 
-        @discord.ui.button(label="개발 작업으로 전환", style=discord.ButtonStyle.primary)
         async def promote(self, interaction: Any, button: Any) -> None:
             if not await self._allowed(interaction):
                 return

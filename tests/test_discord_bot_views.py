@@ -13,10 +13,23 @@ class FakeButtonStyle:
 class FakeView:
     def __init__(self, timeout=None):
         self.timeout = timeout
+        self.children = []
+
+    def add_item(self, item):
+        self.children.append(item)
+
+
+class FakeButton:
+    def __init__(self, *, label, style, custom_id):
+        self.label = label
+        self.style = style
+        self.custom_id = custom_id
+        self.callback = None
 
 
 class FakeUi:
     View = FakeView
+    Button = FakeButton
 
     @staticmethod
     def button(**kwargs):
@@ -89,6 +102,35 @@ def test_work_button_acknowledges_before_core_transition():
     interaction = FakeInteraction(events)
 
     asyncio.run(view.accept_work(interaction, None))
+
+    assert events[0] == "defer"
+    assert events[1][0] == "post"
+    assert events[2][0] == "edit_original"
+
+
+def test_work_view_uses_persistent_custom_ids():
+    view = _factories(object()).work("work1")
+
+    assert view.timeout is None
+    assert [item.custom_id for item in view.children] == [
+        "nk:work:work1:accepted",
+        "nk:work:work1:deferred",
+        "nk:work:work1:rejected",
+    ]
+
+
+def test_programmatic_button_callback_dispatches_to_work_transition():
+    events = []
+
+    class Core:
+        def post(self, path, payload):
+            events.append(("post", path, payload))
+            return {"work_item": {"title": "테스트 작업"}}
+
+    view = _factories(Core()).work("work1")
+    interaction = FakeInteraction(events)
+
+    asyncio.run(view.children[0].callback(interaction))
 
     assert events[0] == "defer"
     assert events[1][0] == "post"
