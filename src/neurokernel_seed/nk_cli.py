@@ -1580,7 +1580,7 @@ def _run_training_run_action(args: argparse.Namespace) -> dict[str, Any]:
         parsed_args = _build_parser().parse_args(command_preview)
         parsed_args.action = _normalize_action(parsed_args.action)
         result = _run_action(parsed_args)
-    except (ModelReleaseError, TrainingWorkerError, SystemExit) as exc:
+    except (Exception, SystemExit) as exc:
         failure = {
             "status": "failed",
             "work_id": work_id,

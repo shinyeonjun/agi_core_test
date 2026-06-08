@@ -1502,3 +1502,57 @@ def test_nk_training_run_executes_allowed_command_and_records_work(monkeypatch, 
         {"status": "completed", "actor": "nk-manual-training", "reason": "manual laptop training completed"},
     )
     assert Path(result["report"]).exists()
+
+
+def test_nk_training_run_records_unexpected_training_failure(monkeypatch, tmp_path):
+    work = {
+        "work_id": "work_runtime_training_1",
+        "type": "training_pipeline",
+        "status": "reviewing",
+        "title": "runtime_action 모델 재학습 후보",
+        "metadata_json": {
+            "slot": "runtime_action",
+            "nk_command": {"action": "runtime-pipeline", "args": ["--source", "edge", "--device", "cuda"]},
+        },
+    }
+    remote_calls = []
+
+    def fake_remote_request(args, method, path, *, query=None, payload=None):
+        remote_calls.append((method, path, payload))
+        if method == "GET" and path == "/work-items":
+            return {"items": [work]}
+        if method == "GET" and path == "/work-items/work_runtime_training_1":
+            return {"work_item": work}
+        return {"work_item": {**work, "status": (payload or {}).get("status", work["status"])}}
+
+    def fail_run_action(args):
+        raise RuntimeError("torch missing")
+
+    monkeypatch.setenv("NEUROKERNEL_MANUAL_TRAINING_JOB_DIR", str(tmp_path))
+    monkeypatch.setattr(nk_cli, "_remote_core_request", fake_remote_request)
+    monkeypatch.setattr(nk_cli, "_run_action", fail_run_action)
+
+    result = nk_cli._run_training_run_action(
+        argparse.Namespace(
+            action="training-run",
+            remote_host="orangepi5",
+            remote_project="/remote",
+            remote_core_url="http://127.0.0.1:8765",
+            ssh_connect_timeout=10,
+            limit=10,
+            include_status=None,
+            work_id=None,
+            index=1,
+            device="cuda",
+            dry_run=False,
+            json=False,
+        )
+    )
+
+    assert result["status"] == "failed"
+    assert result["error"] == "torch missing"
+    assert (
+        "POST",
+        "/work-items/work_runtime_training_1/status",
+        {"status": "reviewing", "actor": "nk-manual-training", "reason": "manual laptop training failed; inspect local report"},
+    ) in remote_calls
