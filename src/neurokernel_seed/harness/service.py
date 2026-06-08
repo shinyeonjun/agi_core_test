@@ -18,6 +18,7 @@ from .model_improvement import ModelImprovementService
 from .preferences import preference_map
 from .runtime_policy import RuntimeActionPolicy
 from .safety_gate import check_action_safety
+from .self_improvement import SelfImprovementService
 from .task_spec import TaskSpec, task_spec_from_dict
 from .trace import failure_trace, redact_text
 from .work_queue import WorkQueue, WorkQueueError, build_work_queue_from_env
@@ -53,6 +54,13 @@ class HarnessService:
         self.capability_service = CapabilityProposalService(db_path=self.db_path, catalog=self.catalog, work_items=self.work_items_service)
         self.improvement_service = ImprovementService(db_path=self.db_path, catalog=self.catalog, work_items=self.work_items_service)
         self.model_improvement_service = ModelImprovementService(db_path=self.db_path, work_items=self.work_items_service)
+        self.self_improvement_service = SelfImprovementService(
+            db_path=self.db_path,
+            project_root=self.project_root,
+            improvements=self.improvement_service,
+            model_improvements=self.model_improvement_service,
+            work_items=self.work_items_service,
+        )
         self.activation_service = ActivationService(build_activation_config_from_env(db_path=self.db_path, project_root=self.project_root))
 
     def health(self) -> dict[str, Any]:
@@ -198,6 +206,40 @@ class HarnessService:
             min_new_known_runtime_candidates=min_new_known_runtime_candidates,
             min_runtime_ranking_groups=min_runtime_ranking_groups,
             target_runtime_top1=target_runtime_top1,
+            actor=actor,
+        )
+
+    def analyze_self_improvement(
+        self,
+        *,
+        min_gap_count: int = 2,
+        lookback: int = 200,
+        max_code_candidates: int = 5,
+        min_code_score: int = 60,
+    ) -> dict[str, Any]:
+        return self.self_improvement_service.analyze(
+            min_gap_count=min_gap_count,
+            lookback=lookback,
+            max_code_candidates=max_code_candidates,
+            min_code_score=min_code_score,
+        )
+
+    def propose_self_improvement(
+        self,
+        *,
+        min_gap_count: int = 2,
+        lookback: int = 200,
+        max_code_candidates: int = 5,
+        min_code_score: int = 60,
+        max_proposals_per_cycle: int = 3,
+        actor: str = "self_improvement_watchdog",
+    ) -> dict[str, Any]:
+        return self.self_improvement_service.propose(
+            min_gap_count=min_gap_count,
+            lookback=lookback,
+            max_code_candidates=max_code_candidates,
+            min_code_score=min_code_score,
+            max_proposals_per_cycle=max_proposals_per_cycle,
             actor=actor,
         )
 

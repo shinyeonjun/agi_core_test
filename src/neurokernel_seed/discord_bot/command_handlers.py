@@ -55,6 +55,8 @@ async def handle_command(
         return await handle_memory(rest, core, user_id=user_id, channel_id=channel_id)
     if command == "work":
         return await handle_work(rest, core, user_id=user_id, channel_id=channel_id, activation_view_factory=activation_view_factory, retry_view_factory=retry_view_factory, promote_view_factory=promote_view_factory)
+    if command in {"improve", "self-improve", "self_improve", "자가개선"}:
+        return await handle_self_improvement(rest, core)
     if command == "run":
         return await run_preset(rest, core, user_id=user_id, channel_id=channel_id)
     if command == "benchmark":
@@ -110,6 +112,51 @@ async def handle_command(
         payload = await _call(core.get, f"/trace/recent?limit={limit}")
         return "최근 trace\n" + format_code_block(payload)
     return f"모르는 명령이야. `help`로 목록을 볼 수 있어."
+
+
+async def handle_self_improvement(rest: str, core: CoreClient) -> str:
+    command = rest.strip().split(maxsplit=1)[0].lower() if rest.strip() else "analyze"
+    if command in {"propose", "제안", "올려", "실행"}:
+        payload = await _call(core.post, "/self-improvement/propose", {"actor": "discord:self-improvement"})
+        return _format_self_improvement_proposal(payload if isinstance(payload, dict) else {})
+    payload = await _call(core.get, "/self-improvement/analyze")
+    return _format_self_improvement_analysis(payload if isinstance(payload, dict) else {})
+
+
+def _format_self_improvement_analysis(payload: dict[str, Any]) -> str:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    deficits = payload.get("deficits") if isinstance(payload.get("deficits"), list) else []
+    lines = [
+        "자가개선 분석",
+        f"부족 항목 {summary.get('deficit_count', len(deficits))}개",
+    ]
+    for item in deficits[:5]:
+        if not isinstance(item, dict):
+            continue
+        lines.append(f"- {item.get('title')} / 우선순위={item.get('priority')} / 위험={item.get('risk_level')}")
+    recommended = summary.get("recommended_next")
+    if recommended:
+        lines.append(f"다음: {recommended}")
+    return "\n".join(lines)
+
+
+def _format_self_improvement_proposal(payload: dict[str, Any]) -> str:
+    created = payload.get("created") if isinstance(payload.get("created"), list) else []
+    skipped = payload.get("skipped") if isinstance(payload.get("skipped"), list) else []
+    lines = [
+        "자가개선 제안 완료",
+        f"새 후보 {payload.get('created_count', len(created))}개 / 보류 {payload.get('skipped_count', len(skipped))}개",
+    ]
+    for item in created[:5]:
+        if not isinstance(item, dict):
+            continue
+        work = item.get("work_item") if isinstance(item.get("work_item"), dict) else {}
+        title = work.get("title") or item.get("deficit_id") or item.get("kind")
+        work_id = work.get("work_id")
+        lines.append(f"- {title}" + (f" `{work_id}`" if work_id else ""))
+    if created:
+        lines.append("승인 카드가 올라오면 작업 승인만 누르면 개발 워커가 다음 단계를 진행해.")
+    return "\n".join(lines)
 
 
 async def handle_auto(

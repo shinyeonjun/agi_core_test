@@ -75,6 +75,7 @@ bot_pid=""
 worker_pid=""
 improvement_pid=""
 model_watchdog_pid=""
+self_improvement_pid=""
 
 stop_children() {
   if [[ -n "$worker_pid" ]] && kill -0 "$worker_pid" 2>/dev/null; then
@@ -85,6 +86,9 @@ stop_children() {
   fi
   if [[ -n "$model_watchdog_pid" ]] && kill -0 "$model_watchdog_pid" 2>/dev/null; then
     kill "$model_watchdog_pid" 2>/dev/null || true
+  fi
+  if [[ -n "$self_improvement_pid" ]] && kill -0 "$self_improvement_pid" 2>/dev/null; then
+    kill "$self_improvement_pid" 2>/dev/null || true
   fi
   if [[ -n "$bot_pid" ]] && kill -0 "$bot_pid" 2>/dev/null; then
     kill "$bot_pid" 2>/dev/null || true
@@ -168,7 +172,22 @@ if [[ "${NEUROKERNEL_MODEL_WATCHDOG_ENABLED:-false}" =~ ^(1|true|yes|y)$ ]]; the
   model_watchdog_pid="$!"
 fi
 
-echo "[stack] running. core_pid=${core_pid} bot_pid=${bot_pid} worker_pid=${worker_pid:-disabled} improvement_pid=${improvement_pid:-disabled} model_watchdog_pid=${model_watchdog_pid:-disabled}"
+if [[ "${NEUROKERNEL_SELF_IMPROVEMENT_ENABLED:-false}" =~ ^(1|true|yes|y)$ ]]; then
+  echo "[stack] starting Self Improvement Watchdog"
+  python -m neurokernel_seed.cli serve-self-improvement-watchdog \
+    --db "$HARNESS_DB" \
+    --project-root "$PROJECT_ROOT" \
+    --interval-seconds "${NEUROKERNEL_SELF_IMPROVEMENT_INTERVAL_SECONDS:-180}" \
+    --min-gap-count "${NEUROKERNEL_SELF_IMPROVEMENT_MIN_GAP_COUNT:-2}" \
+    --lookback "${NEUROKERNEL_SELF_IMPROVEMENT_LOOKBACK:-200}" \
+    --max-code-candidates "${NEUROKERNEL_SELF_IMPROVEMENT_MAX_CODE_CANDIDATES:-5}" \
+    --min-code-score "${NEUROKERNEL_SELF_IMPROVEMENT_MIN_CODE_SCORE:-60}" \
+    --max-proposals-per-cycle "${NEUROKERNEL_SELF_IMPROVEMENT_MAX_PROPOSALS_PER_CYCLE:-3}" \
+    >> "$LOG_DIR/self_improvement_watchdog.log" 2>&1 &
+  self_improvement_pid="$!"
+fi
+
+echo "[stack] running. core_pid=${core_pid} bot_pid=${bot_pid} worker_pid=${worker_pid:-disabled} improvement_pid=${improvement_pid:-disabled} model_watchdog_pid=${model_watchdog_pid:-disabled} self_improvement_pid=${self_improvement_pid:-disabled}"
 set +e
 wait -n "$core_pid" "$bot_pid"
 exit_code="$?"

@@ -163,6 +163,70 @@ def test_empty_prefix_keeps_known_commands_available():
     config = _bot_config(prefix="", reply_without_prefix=True)
     assert _command_line_from_content("help", config) == "help"
     assert _command_line_from_content("memory recent", config) == "memory recent"
+    assert _command_line_from_content("improve", config) == "improve"
+
+
+def test_discord_improve_command_analyzes_self_improvement():
+    class FakeCore:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, path):
+            self.calls.append(("GET", path))
+            if path == "/self-improvement/analyze":
+                return {
+                    "summary": {"deficit_count": 1, "recommended_next": "승인 후보를 올리세요."},
+                    "deficits": [
+                        {
+                            "title": "코드 책임 분리: src/neurokernel_seed/nk_cli.py",
+                            "priority": "medium",
+                            "risk_level": "low",
+                        }
+                    ],
+                }
+            raise AssertionError(f"unexpected GET {path}")
+
+        def post(self, path, payload=None):
+            raise AssertionError(f"unexpected POST {path}")
+
+    response = asyncio.run(_handle_command("improve", FakeCore(), _bot_config(), user_id="u1", channel_id="c1"))
+
+    assert "자가개선 분석" in response
+    assert "코드 책임 분리" in response
+
+
+def test_discord_improve_propose_command_creates_approval_candidates():
+    class FakeCore:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, path):
+            raise AssertionError(f"unexpected GET {path}")
+
+        def post(self, path, payload=None):
+            self.calls.append(("POST", path, payload))
+            if path == "/self-improvement/propose":
+                assert payload["actor"] == "discord:self-improvement"
+                return {
+                    "created_count": 1,
+                    "skipped_count": 0,
+                    "created": [
+                        {
+                            "work_item": {
+                                "work_id": "work_self_improve_1",
+                                "title": "코드 책임 분리: src/neurokernel_seed/nk_cli.py",
+                            }
+                        }
+                    ],
+                }
+            raise AssertionError(f"unexpected POST {path}")
+
+    core = FakeCore()
+    response = asyncio.run(_handle_command("improve propose", core, _bot_config(), user_id="u1", channel_id="c1"))
+
+    assert "자가개선 제안 완료" in response
+    assert "work_self_improve_1" in response
+    assert core.calls[0][1] == "/self-improvement/propose"
 
 
 def test_nonempty_prefix_keeps_prefixed_command_mode():

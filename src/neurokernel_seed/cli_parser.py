@@ -433,6 +433,27 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--target-runtime-top1", type=float, default=0.65)
     p.add_argument("--once", action="store_true")
 
+    p = sub.add_parser("harness-self-improvement")
+    p.add_argument("--db", default="data/harness.db")
+    p.add_argument("--project-root", default=".")
+    p.add_argument("--min-gap-count", type=int, default=2)
+    p.add_argument("--lookback", type=int, default=200)
+    p.add_argument("--max-code-candidates", type=int, default=5)
+    p.add_argument("--min-code-score", type=int, default=60)
+    p.add_argument("--max-proposals-per-cycle", type=int, default=3)
+    p.add_argument("--propose", action="store_true")
+
+    p = sub.add_parser("serve-self-improvement-watchdog")
+    p.add_argument("--db", default="data/harness.db")
+    p.add_argument("--project-root", default=".")
+    p.add_argument("--interval-seconds", type=float, default=180.0)
+    p.add_argument("--min-gap-count", type=int, default=2)
+    p.add_argument("--lookback", type=int, default=200)
+    p.add_argument("--max-code-candidates", type=int, default=5)
+    p.add_argument("--min-code-score", type=int, default=60)
+    p.add_argument("--max-proposals-per-cycle", type=int, default=3)
+    p.add_argument("--once", action="store_true")
+
     p = sub.add_parser("language-to-core")
     p.add_argument("text")
 

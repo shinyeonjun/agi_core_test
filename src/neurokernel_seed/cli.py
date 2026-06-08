@@ -499,6 +499,46 @@ def main(argv: list[str] | None = None) -> int:
         )
         watcher.run_forever()
         return 0
+    if args.cmd == "harness-self-improvement":
+        service = _make_harness_service(args.db, args.project_root)
+        if args.propose:
+            result = service.propose_self_improvement(
+                min_gap_count=args.min_gap_count,
+                lookback=args.lookback,
+                max_code_candidates=args.max_code_candidates,
+                min_code_score=args.min_code_score,
+                max_proposals_per_cycle=args.max_proposals_per_cycle,
+                actor="cli",
+            )
+        else:
+            result = service.analyze_self_improvement(
+                min_gap_count=args.min_gap_count,
+                lookback=args.lookback,
+                max_code_candidates=args.max_code_candidates,
+                min_code_score=args.min_code_score,
+            )
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    if args.cmd == "serve-self-improvement-watchdog":
+        service = _make_harness_service(args.db, args.project_root)
+        from neurokernel_seed.harness.self_improvement import SelfImprovementWatchConfig, SelfImprovementWatchdog
+
+        watcher = SelfImprovementWatchdog(
+            config=SelfImprovementWatchConfig(
+                db_path=Path(args.db),
+                project_root=Path(args.project_root),
+                interval_seconds=args.interval_seconds,
+                min_gap_count=args.min_gap_count,
+                lookback=args.lookback,
+                max_code_candidates=args.max_code_candidates,
+                min_code_score=args.min_code_score,
+                max_proposals_per_cycle=args.max_proposals_per_cycle,
+                once=args.once,
+            ),
+            service=service.self_improvement_service,
+        )
+        watcher.run_forever()
+        return 0
     if args.cmd == "language-to-core":
         from neurokernel_seed.language.codex_harness import CodexLanguageHarness, config_from_env
         config = config_from_env()

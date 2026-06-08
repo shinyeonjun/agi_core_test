@@ -94,6 +94,7 @@ def help_text(prefix: str) -> str:
             f"`{command}actions` - 허용된 액션 목록",
             f"`{command}run uptime|disk|memory|temp|artifacts|trace` - 읽기 작업 실행",
             f"`{command}benchmark [episodes]` - 현재 모델 안전 벤치마크",
+            f"`{command}improve [propose]` - 자가개선 부족 분석 또는 승인 후보 제안",
             f"`{command}ask <말>` - 실행 없이 답변",
             f"`{command}plan <말>` - 작업 계획 생성",
             f"`{command}do <말>` - 낮은 위험 읽기 작업 실행",

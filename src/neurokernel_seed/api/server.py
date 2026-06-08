@@ -96,6 +96,32 @@ def create_app(*, db_path: str | Path = "data/harness.db", project_root: str | P
             actor=str(payload.get("actor") or "api"),
         )
 
+    @app.get("/self-improvement/analyze")
+    def self_improvement_analyze(
+        min_gap_count: int = 2,
+        lookback: int = 200,
+        max_code_candidates: int = 5,
+        min_code_score: int = 60,
+    ):
+        return service.analyze_self_improvement(
+            min_gap_count=min_gap_count,
+            lookback=lookback,
+            max_code_candidates=max_code_candidates,
+            min_code_score=min_code_score,
+        )
+
+    @app.post("/self-improvement/propose")
+    def self_improvement_propose(payload: dict[str, Any] | None = None):
+        payload = payload or {}
+        return service.propose_self_improvement(
+            min_gap_count=int(payload.get("min_gap_count") or 2),
+            lookback=int(payload.get("lookback") or 200),
+            max_code_candidates=int(payload.get("max_code_candidates") or 5),
+            min_code_score=int(payload.get("min_code_score") or 60),
+            max_proposals_per_cycle=int(payload.get("max_proposals_per_cycle") or 3),
+            actor=str(payload.get("actor") or "api"),
+        )
+
     @app.get("/queue/health")
     def queue_health():
         return service.queue_health()
