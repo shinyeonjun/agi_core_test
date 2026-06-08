@@ -46,7 +46,28 @@ def test_self_improvement_proposes_approval_gated_self_patch_and_deduplicates(tm
     created_work = [item["work_item"] for item in first["created"] if item.get("work_item")]
     assert any(item["type"] == "self_patch" for item in created_work)
     assert all(item["status"] == "proposed" for item in created_work)
-    assert any(item.get("kind") == "duplicate" for item in second["skipped"])
+    assert second["created_count"] == 0
+    assert second["mode"] == "waiting_for_user_decision"
+    assert second["proposal_slate"]["proposed_count"] == 2
+
+
+def test_accepting_self_improvement_work_resets_other_open_proposals(tmp_path):
+    from neurokernel_seed.harness.work_queue import InMemoryWorkQueue
+
+    project = _project_with_large_module(tmp_path)
+    queue = InMemoryWorkQueue()
+    service = HarnessService(db_path=tmp_path / "harness.db", project_root=project, work_queue=queue)
+    proposed = service.propose_self_improvement(max_code_candidates=3, min_code_score=60, max_proposals_per_cycle=3, actor="test")
+    work_ids = [item["work_item"]["work_id"] for item in proposed["created"] if item.get("work_item")]
+
+    accepted = service.transition_work_item(work_ids[0], "accepted", actor="discord:1")
+    items = service.work_items(limit=20)["work_items"]
+    status_by_id = {item["work_id"]: item["status"] for item in items}
+
+    assert accepted["proposal_slate_reset"]["deferred_count"] == len(work_ids) - 1
+    assert status_by_id[work_ids[0]] == "accepted"
+    assert all(status_by_id[work_id] == "deferred" for work_id in work_ids[1:])
+    assert service.propose_self_improvement(max_code_candidates=3, min_code_score=60, max_proposals_per_cycle=3, actor="test")["mode"] == "waiting_for_active_work"
 
 
 def test_self_improvement_readiness_flags_unavailable_queue(tmp_path):

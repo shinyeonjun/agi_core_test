@@ -5,6 +5,7 @@ from typing import Any
 
 from .ids import new_id
 from .memory import HarnessMemory
+from .self_improvement_slate import defer_sibling_self_improvement_proposals
 from .work_queue import WorkQueue, queue_name_for_work_type
 
 
@@ -88,7 +89,10 @@ class WorkItemService:
         with HarnessMemory(self.db_path) as memory:
             item = memory.transition_work_item(work_id, next_status, actor=actor, payload={"reason": reason})
             events = memory.work_events(work_id)
+            slate_reset = defer_sibling_self_improvement_proposals(memory, item, actor=actor) if next_status == "accepted" else []
         payload: dict[str, Any] = {"work_item": item, "events": events}
+        if slate_reset:
+            payload["proposal_slate_reset"] = {"deferred_count": len(slate_reset), "deferred_work": slate_reset}
         if next_status == "accepted":
             payload["queue"] = self.enqueue(work_id, actor=actor)
         return payload

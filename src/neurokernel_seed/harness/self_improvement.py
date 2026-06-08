@@ -11,6 +11,7 @@ from .ids import new_id
 from .improvement import ImprovementService
 from .memory import HarnessMemory
 from .model_improvement import ModelImprovementService
+from .self_improvement_slate import summarize_self_improvement_slate
 from .work_service import WorkItemService
 
 
@@ -132,6 +133,40 @@ class SelfImprovementService:
         )
         created: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
+        max_open_proposals = max(1, int(max_proposals_per_cycle))
+        slate = summarize_self_improvement_slate(self.db_path, max_size=max_open_proposals)
+        if slate["active_count"]:
+            return _proposal_result(
+                analysis=analysis,
+                created=created,
+                skipped=[
+                    {
+                        "created": False,
+                        "kind": "active_work_in_progress",
+                        "reason": "self_improvement_work_in_progress",
+                        "work_items": slate["active_work"],
+                    }
+                ],
+                actor=actor,
+                slate=slate,
+                mode="waiting_for_active_work",
+            )
+        if slate["proposed_count"] >= max_open_proposals:
+            return _proposal_result(
+                analysis=analysis,
+                created=created,
+                skipped=[
+                    {
+                        "created": False,
+                        "kind": "proposal_slate_full",
+                        "reason": "waiting_for_user_decision",
+                        "work_items": slate["proposed_work"],
+                    }
+                ],
+                actor=actor,
+                slate=slate,
+                mode="waiting_for_user_decision",
+            )
 
         # Reuse existing focused proposal services first. They already know how
         # to create capability proposals and training work without duplicates.
@@ -142,7 +177,7 @@ class SelfImprovementService:
         skipped.extend(_skipped_items(missing_result))
         skipped.extend(_skipped_items(model_result))
 
-        remaining = max(0, int(max_proposals_per_cycle) - len(created))
+        remaining = max(0, max_open_proposals - slate["proposed_count"] - len(created))
         if remaining:
             for deficit in analysis["deficits"]:
                 if deficit["kind"] not in {"code_structure", "world_training_connection", "work_pipeline_health"}:
@@ -156,16 +191,15 @@ class SelfImprovementService:
                 if remaining <= 0:
                     break
 
-        return {
-            "status": "completed",
-            "schema_version": "neurokernel-self-improvement-proposal-v1",
-            "analysis": analysis,
-            "created_count": len(created),
-            "skipped_count": len(skipped),
-            "created": created,
-            "skipped": skipped,
-            "actor": actor,
-        }
+        updated_slate = summarize_self_improvement_slate(self.db_path, max_size=max_open_proposals)
+        return _proposal_result(
+            analysis=analysis,
+            created=created,
+            skipped=skipped,
+            actor=actor,
+            slate=updated_slate,
+            mode="created" if created else "no_new_proposal",
+        )
 
     def _create_deficit_work_item(self, deficit: dict[str, Any], *, actor: str) -> dict[str, Any]:
         deficit_id = str(deficit["deficit_id"])
@@ -496,6 +530,29 @@ def _find_open_deficit_work(memory: HarnessMemory, deficit_id: str) -> dict[str,
         if str(row.get("linked_entity_type") or "") == "self_improvement_deficit" and str(row.get("linked_entity_id") or "") == deficit_id:
             return row
     return None
+
+
+def _proposal_result(
+    *,
+    analysis: dict[str, Any],
+    created: list[dict[str, Any]],
+    skipped: list[dict[str, Any]],
+    actor: str,
+    slate: dict[str, Any],
+    mode: str,
+) -> dict[str, Any]:
+    return {
+        "status": "completed",
+        "schema_version": "neurokernel-self-improvement-proposal-v1",
+        "mode": mode,
+        "analysis": analysis,
+        "proposal_slate": slate,
+        "created_count": len(created),
+        "skipped_count": len(skipped),
+        "created": created,
+        "skipped": skipped,
+        "actor": actor,
+    }
 
 
 def _created_items(result: dict[str, Any]) -> list[dict[str, Any]]:
