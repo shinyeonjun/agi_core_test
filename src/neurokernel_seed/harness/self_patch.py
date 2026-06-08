@@ -16,6 +16,7 @@ from neurokernel_seed.language.prompt_pipelines import worker_instruction_pipeli
 
 from .self_patch_retry import build_retry_plan, retry_plan_markdown
 from .trace import redact_text
+from .worker_harness import load_worker_harness_documents, render_worker_harness_prompt, worker_harness_manifest
 
 
 class SelfPatchError(RuntimeError):
@@ -103,8 +104,18 @@ class CodexSelfPatchWorker:
         retry_plan = build_retry_plan(payload)
         _write_text(run_dir / "retry_plan.md", retry_plan_markdown(retry_plan))
         _write_text(run_dir / "retry_plan.json", _json_dump(retry_plan or {}))
+        worker_harness_documents = load_worker_harness_documents(project_root)
+        worker_harness_prompt = render_worker_harness_prompt(worker_harness_documents)
+        worker_harness_summary = worker_harness_manifest(worker_harness_documents)
+        _write_text(run_dir / "worker_harness.md", worker_harness_prompt)
+        _write_text(run_dir / "worker_harness.json", _json_dump(worker_harness_summary))
 
-        prompt = _self_patch_prompt(work=work, payload=payload, retry_plan=retry_plan)
+        prompt = _self_patch_prompt(
+            work=work,
+            payload=payload,
+            retry_plan=retry_plan,
+            worker_harness_prompt=worker_harness_prompt,
+        )
         codex_cmd = _codex_command(self.config, workspace)
         codex_result = self.runner(
             codex_cmd,
@@ -190,6 +201,7 @@ class CodexSelfPatchWorker:
             "diff_check": _public_command_result(diff_check_result),
             "failure_analysis": failure_analysis,
             "retry_plan": retry_plan,
+            "worker_harness": worker_harness_summary,
             "commands": commands,
             "next_required_action": _next_required_action(status),
             "created_at_epoch": time.time(),
@@ -305,10 +317,18 @@ def _codex_command_prefix(codex_bin: str) -> list[str]:
     return [codex_bin]
 
 
-def _self_patch_prompt(*, work: dict[str, Any], payload: dict[str, Any], retry_plan: dict[str, Any] | None = None) -> str:
+def _self_patch_prompt(
+    *,
+    work: dict[str, Any],
+    payload: dict[str, Any],
+    retry_plan: dict[str, Any] | None = None,
+    worker_harness_prompt: str,
+) -> str:
     return "\n".join(
         [
             worker_instruction_pipeline_prompt(mode="self_patch"),
+            "",
+            worker_harness_prompt.strip(),
             "",
             "You are the development worker for NeuroKernel AGI Seed.",
             "Implement only the approved self-patch work item in this isolated workspace.",
@@ -476,6 +496,8 @@ def _write_contract(run_dir: Path, result: dict[str, Any]) -> None:
             "summary.json",
             "evidence.json",
             "summary.md",
+            "worker_harness.md",
+            "worker_harness.json",
             "contract.json",
             "codex_stdout.txt",
             "codex_stderr.txt",
@@ -488,6 +510,7 @@ def _write_contract(run_dir: Path, result: dict[str, Any]) -> None:
         "patch_path": result.get("patch_path"),
         "activation_ready": result.get("status") == "patch_ready",
         "failure_analysis": result.get("failure_analysis"),
+        "worker_harness": result.get("worker_harness"),
     }
     _write_text(run_dir / "contract.json", _json_dump(contract))
 
@@ -508,6 +531,7 @@ def _write_evidence(run_dir: Path, result: dict[str, Any], *, work: dict[str, An
         },
         "failure_analysis": result.get("failure_analysis"),
         "retry_plan": result.get("retry_plan"),
+        "worker_harness": result.get("worker_harness"),
         "work_title": work.get("title"),
         "work_goal": work.get("goal"),
         "queue_payload": payload,

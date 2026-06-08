@@ -3,6 +3,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 from neurokernel_seed.harness.self_patch import CodexSelfPatchWorker, SelfPatchConfig, _run_command
 
 
@@ -12,6 +14,7 @@ def test_self_patch_worker_creates_patch_artifact(tmp_path):
     (project / "pyproject.toml").write_text("[tool.pytest.ini_options]\npythonpath = ['src']\n", encoding="utf-8")
     (project / "src").mkdir()
     (project / "src" / "demo.py").write_text("VALUE = 1\n", encoding="utf-8")
+    _write_worker_harness_docs(project)
     runner = FakeSelfPatchRunner()
     worker = CodexSelfPatchWorker(
         SelfPatchConfig(
@@ -44,6 +47,9 @@ def test_self_patch_worker_creates_patch_artifact(tmp_path):
     assert Path(result["run_dir"], "evidence.json").exists()
     assert Path(result["run_dir"], "summary.md").exists()
     assert Path(result["run_dir"], "failure_analysis.json").exists()
+    assert Path(result["run_dir"], "worker_harness.md").exists()
+    assert Path(result["run_dir"], "worker_harness.json").exists()
+    assert result["worker_harness"]["document_count"] == 5
     assert result["failure_analysis"]["passed"] is True
     assert result["failure_analysis"]["primary_failure"] is None
 
@@ -206,6 +212,33 @@ def test_self_patch_worker_injects_structured_retry_plan(tmp_path):
     assert "tests/test_demo.py::test_demo" in runner.codex_prompts[-1]
     assert "Audience: worker_instruction" in runner.codex_prompts[-1]
     assert "Audience: human_current_state" not in runner.codex_prompts[-1]
+    assert "## AGENTS.md" in runner.codex_prompts[-1]
+    assert "## docs/worker_harness/implementation_worker.md" in runner.codex_prompts[-1]
+
+
+def test_self_patch_worker_requires_worker_harness_documents(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "pyproject.toml").write_text("[tool.pytest.ini_options]\npythonpath = ['src']\n", encoding="utf-8")
+    (project / "src").mkdir()
+    (project / "src" / "demo.py").write_text("VALUE = 1\n", encoding="utf-8")
+    runner = FakeSelfPatchRunner()
+    worker = CodexSelfPatchWorker(
+        SelfPatchConfig(
+            project_root=project,
+            run_root=tmp_path / "runs",
+            codex_bin="codex",
+            test_command=("python", "-m", "pytest", "-q"),
+        ),
+        runner=runner,
+    )
+
+    with pytest.raises(FileNotFoundError, match="required worker harness document is missing"):
+        worker.run(
+            job_id="job_missing_harness",
+            work={"work_id": "work_cpu_usage", "type": "self_patch", "title": "CPU usage", "goal": "Add CPU usage"},
+            payload={"job_id": "job_missing_harness", "work_id": "work_cpu_usage"},
+        )
 
 
 def test_run_command_returns_timeout_result(tmp_path):
@@ -303,6 +336,7 @@ def _make_git_project(tmp_path: Path) -> Path:
     (project / "pyproject.toml").write_text("[tool.pytest.ini_options]\npythonpath = ['src']\n", encoding="utf-8")
     (project / "src").mkdir()
     (project / "src" / "demo.py").write_text("VALUE = 1\n", encoding="utf-8")
+    _write_worker_harness_docs(project)
     _git(project, "init")
     _git(project, "config", "user.email", "test@example.com")
     _git(project, "config", "user.name", "Test User")
@@ -313,3 +347,16 @@ def _make_git_project(tmp_path: Path) -> Path:
 
 def _git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=cwd, text=True, encoding="utf-8", capture_output=True, check=True)
+
+
+def _write_worker_harness_docs(project: Path) -> None:
+    (project / "AGENTS.md").write_text("# Test Agent Harness\n", encoding="utf-8")
+    docs = project / "docs" / "worker_harness"
+    docs.mkdir(parents=True)
+    for name in (
+        "implementation_worker.md",
+        "self_patch_contract.md",
+        "world_runtime_usage.md",
+        "retry_and_failure.md",
+    ):
+        (docs / name).write_text(f"# {name}\n", encoding="utf-8")
